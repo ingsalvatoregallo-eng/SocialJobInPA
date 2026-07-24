@@ -27,6 +27,13 @@
   {% if approvazione %}
   <a class="btn secondario" href="/social/approvazioni">Richiesta di approvazione aperta →</a>
   {% endif %}
+  {% if 'social.admin' in permessi %}
+  <form method="post" action="/social/contenuti/{{ c.id }}/elimina" class="inline"
+        onsubmit="return confirm('Eliminare definitivamente questo contenuto e tutto ciò che ne dipende (varianti, immagini, approvazioni, pubblicazioni)? L\'azione non è reversibile.');">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn rosso" type="submit">Elimina definitivamente</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="grid">

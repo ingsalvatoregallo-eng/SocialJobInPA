@@ -257,6 +257,19 @@ def pubblica_ora(request: Request, content_id: str, csrf: str = Form(None),
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
+@router.post("/contenuti/{content_id}/elimina")
+def elimina_contenuto(request: Request, content_id: str, csrf: str = Form(None),
+                      sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Cancellazione permanente: richiede social.admin (soglia piu' alta di
+    social.edit, e' un'azione distruttiva) + conferma lato client (vedi
+    template, onsubmit con confirm())."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    if not db_social.elimina_content(conn, content_id, utente_id=sessione["utente"]["id"]):
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    return RedirectResponse("/social/contenuti", status_code=303)
+
+
 @router.get("/asset/{asset_id}")
 def anteprima_asset(asset_id: str, sessione=Depends(utente_web),
                     conn=Depends(ottieni_conn)):

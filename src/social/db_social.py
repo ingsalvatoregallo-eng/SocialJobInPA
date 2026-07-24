@@ -619,6 +619,49 @@ def aggiorna_content(conn, content_id, **campi):
     conn.commit()
 
 
+def elimina_content(conn, content_id, *, utente_id=None):
+    """Elimina un contenuto e tutto cio' che ne dipende. Ritorna False se il
+    contenuto non esiste (nessun errore, il chiamante decide se e' un 404).
+
+    Con FK ON, la CASCADE dello schema copre da sola varianti/asset(riga)/
+    approvazioni(+eventi)/pubblicazioni(+tentativi/metriche/commenti/
+    risposte). Vanno ripulite a mano SOLO le tabelle senza FK verso
+    social_content (fatti verificati, esecuzioni agente, il collegamento
+    dal calendario editoriale) e i job ancora in coda che referenziano
+    questo content_id nel payload JSON (non e' una vera FK, e' testo).
+    I file immagine generati su disco vengono cancellati anche loro
+    (best-effort: un file gia' mancante non blocca l'operazione)."""
+    content = get_content(conn, content_id)
+    if content is None:
+        return False
+
+    audit(conn, "content_eliminato", utente_id=utente_id, oggetto_tipo="content",
+          oggetto_id=content_id, stato_prima=content["stato"],
+          dettagli={"titolo": content["titolo"], "is_demo": bool(content["is_demo"])})
+
+    for asset in asset_di(conn, content_id):
+        try:
+            Path(asset["percorso"]).unlink(missing_ok=True)
+        except OSError:
+            pass  # percorso non valido/non raggiungibile: non blocca la cancellazione
+
+    for job in lista_jobs(conn, limit=1000):
+        try:
+            payload = json.loads(job["payload"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if payload.get("content_id") == content_id:
+            conn.execute("DELETE FROM social_scheduled_jobs WHERE id = ?", (job["id"],))
+
+    conn.execute("DELETE FROM social_verified_facts WHERE content_id = ?", (content_id,))
+    conn.execute("DELETE FROM social_agent_runs WHERE content_id = ?", (content_id,))
+    conn.execute("UPDATE social_editorial_plans SET content_id = NULL WHERE content_id = ?",
+                 (content_id,))
+    conn.execute("DELETE FROM social_content WHERE id = ?", (content_id,))
+    conn.commit()
+    return True
+
+
 def salva_variante(conn, content_id, piattaforma, testo, hashtags=None, call_to_action=None):
     conn.execute(
         "INSERT INTO social_post_variants (id, content_id, piattaforma, testo, hashtags, "

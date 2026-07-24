@@ -84,6 +84,16 @@ def dettaglio_contenuto(content_id: str, utente=Depends(richiede("social.view"))
     }
 
 
+@router.delete("/content/{content_id}", status_code=204)
+def elimina_contenuto(content_id: str, utente=Depends(richiede("social.admin")),
+                      conn=Depends(ottieni_conn)):
+    """Cancellazione permanente (contenuto + varianti/asset/approvazioni/
+    pubblicazioni/fatti/job in coda collegati). Richiede social.admin:
+    e' un'azione distruttiva, non la stessa soglia di social.edit."""
+    if not db_social.elimina_content(conn, content_id, utente_id=utente["id"]):
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+
+
 @router.post("/content/{content_id}/pipeline")
 def avvia_pipeline(content_id: str, utente=Depends(richiede("social.edit")),
                    conn=Depends(ottieni_conn)):

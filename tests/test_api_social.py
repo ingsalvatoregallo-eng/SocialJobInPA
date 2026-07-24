@@ -80,6 +80,28 @@ def test_canale_non_valido_422(client, utenti):
     assert r.status_code == 422
 
 
+def test_editor_non_puo_eliminare_contenuto(client, utenti, conn):
+    content_id = db_social.crea_content(conn, "Da non eliminare")
+    r = client.delete(f"/api/v1/social/content/{content_id}",
+                      headers=_bearer(utenti["editor"]))
+    assert r.status_code == 403
+    assert db_social.get_content(conn, content_id) is not None
+
+
+def test_admin_elimina_contenuto(client, utenti, conn):
+    content_id = db_social.crea_content(conn, "Da eliminare")
+    r = client.delete(f"/api/v1/social/content/{content_id}",
+                      headers=_bearer(utenti["admin"]))
+    assert r.status_code == 204
+    assert db_social.get_content(conn, content_id) is None
+
+
+def test_elimina_contenuto_inesistente_404(client, utenti):
+    r = client.delete("/api/v1/social/content/id-inesistente",
+                      headers=_bearer(utenti["admin"]))
+    assert r.status_code == 404
+
+
 def test_kill_switch_richiede_social_publish(client, utenti):
     negato = client.post("/api/v1/social/system/kill-switch",
                          headers=_bearer(utenti["editor"]), json={"attivo": True})

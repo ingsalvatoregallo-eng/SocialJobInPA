@@ -28,7 +28,7 @@
 {% endif %}
 
 <div class="card">
-  <table><tr><th>Titolo</th><th>Pillar</th><th>Stato</th><th>Rischio</th><th>Programmato</th><th>Creato</th></tr>
+  <table><tr><th>Titolo</th><th>Pillar</th><th>Stato</th><th>Rischio</th><th>Programmato</th><th>Creato</th><th></th></tr>
   {% for c in contenuti %}
     <tr>
       <td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a>{% if c.is_demo %} <span class="badge grigio">DEMO</span>{% endif %}</td>
@@ -37,9 +37,18 @@
       <td>{% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">{{ c.classe_rischio }}</span>{% endif %}</td>
       <td>{{ (c.programmato_at or '')[:16] }}</td>
       <td>{{ c.creato_at[:10] }}</td>
+      <td>
+        {% if 'social.admin' in permessi %}
+        <form method="post" action="/social/contenuti/{{ c.id }}/elimina" class="inline"
+              onsubmit="return confirm('Eliminare definitivamente «{{ c.titolo }}»? L\'azione non è reversibile.');">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="btn secondario" type="submit" style="color:var(--rosso);border-color:var(--rosso)">Elimina</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
   {% else %}
-    <tr><td colspan="6" style="color:var(--grigio)">Nessun contenuto in questo gruppo.</td></tr>
+    <tr><td colspan="7" style="color:var(--grigio)">Nessun contenuto in questo gruppo.</td></tr>
   {% endfor %}</table>
 </div>
 {% endblock %}
