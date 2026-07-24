@@ -1,10 +1,13 @@
 """
 jobinpa_client.py — client verso le API private di JobInPA (VM Aruba).
 
-E' l'UNICO canale con cui SocialJobInPA legge i dati del portale: bandi
-con classificazione AI (sintesi, requisiti, titoli di studio, competenze).
-Autenticazione con API key dedicata nell'header X-Internal-Api-Key — mai
-token utente. Configurazione:
+E' l'UNICO canale con cui SocialJobInPA legge i dati del portale: bandi con
+classificazione AI (sintesi, requisiti, titoli di studio, competenze),
+filtrabili con lo stesso vocabolario gia' usato da /api/tenders su JobInPA
+(regione/categoria/settore/ente/competenza/ambito/inquadramento/
+titolo_studio/tipo_contratto/posti_minimi/lavoro_agile, piu' una ricerca
+full-text libera). Autenticazione con API key dedicata nell'header
+X-Internal-Api-Key — mai token utente. Configurazione:
 
     JOBINPA_API_URL=https://jobinpa.it        (o http://localhost:8000 in dev)
     JOBINPA_API_KEY=...                        (stessa INTERNAL_API_KEY della VM)
@@ -16,6 +19,7 @@ nei blocchi <fonte> dei prompt come ogni altra fonte.
 """
 
 import logging
+import time
 
 import requests
 
@@ -24,12 +28,15 @@ from social import config
 log = logging.getLogger(__name__)
 
 _TIMEOUT = 30
+_FILTRI_CACHE_TTL_SECONDI = 3600  # 1 ora: i vocabolari chiusi cambiano raramente
 
 
 class JobInPAClient:
     def __init__(self, base_url=None, api_key=None):
         self.base_url = (base_url or config.jobinpa_api_url()).rstrip("/")
         self.api_key = api_key or config.jobinpa_api_key()
+        self._filtri_cache = None
+        self._filtri_cache_at = 0.0
 
     @property
     def configurato(self):
@@ -42,17 +49,26 @@ class JobInPAClient:
         risposta.raise_for_status()
         return risposta.json()
 
-    def bandi(self, *, stato="OPEN", limit=5, competenza=None, solo_classificati=True):
-        """Bandi con classificazione AI. Lista di dict; [] se non configurato
-        o in caso di errore di rete (loggato): la pipeline non deve mai
-        fallire perche' il portale e' irraggiungibile."""
+    def bandi(self, *, stato="OPEN", limit=5, solo_classificati=True, query=None,
+              regione=None, categoria=None, settore=None, ente=None, competenza=None,
+              ambito=None, inquadramento=None, titolo_studio=None, tipo_contratto=None,
+              posti_minimi=None, lavoro_agile=None):
+        """Bandi con classificazione AI, filtrati. Lista di dict; [] se non
+        configurato o in caso di errore di rete (loggato): la pipeline non
+        deve mai fallire perche' il portale e' irraggiungibile."""
         if not self.configurato:
             log.info("JobInPA API non configurata (JOBINPA_API_URL/KEY): nessun bando")
             return []
         params = {"stato": stato, "limit": limit,
                   "solo_classificati": "true" if solo_classificati else "false"}
-        if competenza:
-            params["competenza"] = competenza
+        opzionali = {
+            "query": query, "regione": regione, "categoria": categoria, "settore": settore,
+            "ente": ente, "competenza": competenza, "ambito": ambito,
+            "inquadramento": inquadramento, "titolo_studio": titolo_studio,
+            "tipo_contratto": tipo_contratto, "posti_minimi": posti_minimi,
+            "lavoro_agile": lavoro_agile,
+        }
+        params.update({k: v for k, v in opzionali.items() if v is not None})
         try:
             return self._get("/api/internal/bandi", params)["bandi"]
         except requests.RequestException as errore:
@@ -68,6 +84,27 @@ class JobInPAClient:
         except requests.RequestException as errore:
             log.warning("lettura bando %s da JobInPA fallita: %s", concorso_id, errore)
             return None
+
+    def filtri_disponibili(self):
+        """Vocabolari chiusi/valori realmente presenti per i filtri di
+        bandi() (regioni, categorie, competenze, ecc.) — serve all'interprete
+        del brief per non inventare valori che poi non esistono. Cache in
+        memoria di processo per un'ora: non e' un dato che cambia spesso, e
+        interrogarlo ad ogni pipeline sarebbe una chiamata di rete sprecata.
+        {} se non configurato o in caso di errore (l'interprete brief
+        degrada a nessun filtro strutturato, non blocca la pipeline)."""
+        if not self.configurato:
+            return {}
+        adesso = time.monotonic()
+        if self._filtri_cache is not None and (adesso - self._filtri_cache_at) < _FILTRI_CACHE_TTL_SECONDI:
+            return self._filtri_cache
+        try:
+            self._filtri_cache = self._get("/api/internal/bandi/filtri")
+            self._filtri_cache_at = adesso
+            return self._filtri_cache
+        except requests.RequestException as errore:
+            log.warning("lettura filtri da JobInPA fallita: %s", errore)
+            return self._filtri_cache or {}
 
 
 _client_default = None

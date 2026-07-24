@@ -38,6 +38,12 @@ from social import (  # noqa: E402
 log = logging.getLogger(__name__)
 
 
+class NessunBandoCorrispondente(Exception):
+    """Il brief chiedeva criteri specifici (vedi interpreta_brief) ma nessun
+    bando su JobInPA li soddisfa: la pipeline annulla il contenuto invece di
+    scrivere un post su un risultato vuoto (vedi esegui_pipeline)."""
+
+
 def _run_llm(conn, agente, prompt_nome, schema, user_prompt, *,
              content_id=None, provider=None):
     """Esegue una chiamata LLM tracciata in social_agent_runs."""
@@ -86,16 +92,23 @@ def _fetch_fonte(conn, url):
         return None, str(errore)
 
 
-def _contesto_jobinpa(concorso_id=None, limite=3, *, client=None):
+def _contesto_jobinpa(concorso_id=None, limite=3, *, client=None, filtri=None):
     """Fatti dal portale JobInPA (fonte primaria autorizzata), letti via API
     private: il bando indicato con la sua classificazione AI (sintesi,
-    requisiti, titolo di studio), oppure i bandi aperti piu' recenti.
-    Senza JOBINPA_API_URL/KEY configurate ritorna stringa vuota: la
-    pipeline prosegue comunque (solo con meno contesto)."""
+    requisiti, titolo di studio), oppure i bandi che soddisfano `filtri`
+    (derivati dal brief, vedi interpreta_brief), oppure — senza ne'
+    concorso_id ne' filtri — i bandi aperti piu' recenti.
+    Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
+    se la ricerca ha trovato qualcosa (vedi research(), annullamento su
+    criteri specifici senza risultati). Senza JOBINPA_API_URL/KEY
+    configurate ritorna ("", []): la pipeline prosegue comunque con meno
+    contesto (nessun criterio specifico -> non e' un annullamento)."""
     client = client or jobinpa_client.client()
     if concorso_id:
         bando = client.bando(concorso_id)
         righe = [bando] if bando else []
+    elif filtri:
+        righe = client.bandi(limit=limite, **filtri)
     else:
         righe = client.bandi(stato="OPEN", limit=limite)
     blocchi = []
@@ -109,14 +122,56 @@ def _contesto_jobinpa(concorso_id=None, limite=3, *, client=None):
             f"  Titolo di studio richiesto: {bando.get('titolo_studio_richiesto') or 'n/d'}\n"
             f"  Competenze: {bando.get('competenze') or []}\n"
             f"  Link ufficiale: {bando.get('url_dettaglio')}")
-    return "\n".join(blocchi)
+    return "\n".join(blocchi), righe
 
 
-def research(conn, content_id, *, provider=None, urls_extra=None):
+def interpreta_brief(conn, brief, *, provider=None, client=None):
+    """Traduce il brief in linguaggio naturale nei filtri reali di JobInPA
+    (modello CriteriRicerca). I vocabolari chiusi (regioni/categorie/
+    competenze/ambiti/...) vengono presi dal vero /api/internal/bandi/filtri
+    e inseriti nel prompt: il modello puo' scegliere SOLO fra quei valori,
+    mai inventarne — stesso principio dei vocabolari chiusi lato JobInPA."""
+    client = client or jobinpa_client.client()
+    vocabolari = client.filtri_disponibili()
+    user_prompt = (
+        f"Brief: {brief}\n\n"
+        "Vocabolari chiusi disponibili (usa SOLO questi valori):\n"
+        f"{json.dumps(vocabolari, ensure_ascii=False)}")
+    return _run_llm(conn, "research", "interpreta_brief", models.CriteriRicerca,
+                    user_prompt, provider=provider)
+
+
+def _filtri_da_criteri(criteri):
+    """CriteriRicerca -> dict di kwargs per jobinpa_client.bandi() (solo i
+    campi valorizzati, mai None: bandi() li tratta come "nessun filtro")."""
+    campi = ("query_testuale", "regione", "categoria", "settore", "ente", "competenza",
+             "ambito", "inquadramento", "titolo_studio", "tipo_contratto",
+             "posti_minimi", "lavoro_agile")
+    filtri = {campo: getattr(criteri, campo) for campo in campi if getattr(criteri, campo) is not None}
+    if "query_testuale" in filtri:
+        filtri["query"] = filtri.pop("query_testuale")
+    return filtri
+
+
+def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client_=None):
     """Produce fatti verificati per il contenuto. Le fonti esterne entrano nel
-    prompt SOLO dentro blocchi <fonte> (dati non fidati, sez. 10)."""
+    prompt SOLO dentro blocchi <fonte> (dati non fidati, sez. 10).
+
+    Se il contenuto ha un brief con criteri specifici (interpreta_brief) e
+    la ricerca su JobInPA con quei criteri non trova nulla, solleva
+    NessunBandoCorrispondente: meglio annullare il contenuto che scrivere
+    un post su un risultato vuoto (vedi esegui_pipeline)."""
     content = db_social.get_content(conn, content_id)
-    contesto = _contesto_jobinpa(content["concorso_id"])
+    client = jobinpa_client_ or jobinpa_client.client()
+    filtri = None
+    if not content["concorso_id"] and content["brief"]:
+        criteri = interpreta_brief(conn, content["brief"], provider=provider, client=client)
+        if not criteri.nessun_criterio_specifico:
+            filtri = _filtri_da_criteri(criteri)
+    contesto, righe_trovate = _contesto_jobinpa(content["concorso_id"], client=client, filtri=filtri)
+    if filtri and not righe_trovate:
+        raise NessunBandoCorrispondente(
+            f"Nessun bando su JobInPA soddisfa i criteri derivati dal brief: {filtri}")
     blocchi_fonte = [f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>"]
     if contesto:
         db_social.salva_source_item(conn, "jobinpa://bandi", "jobinpa.it",
@@ -230,7 +285,7 @@ def quality_risk(conn, content_id, risultato_ricerca, *, provider=None):
 def supervisor_pianifica_settimana(conn, settimana, *, provider=None):
     """Genera il piano dei 3 argomenti per la settimana (lunedi' ISO) e crea
     le idee di contenuto collegate."""
-    contesto = _contesto_jobinpa(None, limite=5)
+    contesto, _righe = _contesto_jobinpa(None, limite=5)
     piano = _run_llm(
         conn, "supervisor", "supervisor", models.PianoSettimanale,
         f"Settimana del {settimana}. Bandi aperti di riferimento:\n"
@@ -338,10 +393,30 @@ def prossima_finestra(conn, piattaforma, *, adesso=None):
     return adesso.astimezone(timezone.utc)  # non raggiungibile, difensivo
 
 
+# Stessi stati da cui la dashboard mostra il bottone "Avvia pipeline"
+# (vedi templates/contenuto.html): fuori da questi, la pipeline e' gia'
+# stata avviata con successo (o e' in corso) su questo contenuto.
+STATI_PIPELINE_AVVIABILE = {"IDEA", "RESEARCH_FAILED", "CHANGES_REQUESTED"}
+
+
 def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
                     urls_extra=None):
     """IDEA -> ... -> APPROVED/AWAITING_APPROVAL/BLOCKED. Ritorna lo stato
-    finale. Gli errori portano in RESEARCH_FAILED (recuperabile)."""
+    finale. Gli errori portano in RESEARCH_FAILED (recuperabile).
+
+    Idempotente rispetto a richieste duplicate: se il contenuto e' gia'
+    avanzato oltre gli stati di partenza (es. un doppio click su "Avvia
+    pipeline", o due job accodati per lo stesso contenuto) esce subito
+    senza toccare nulla, invece di sollevare TransizioneNonValida — un job
+    duplicato deve concludersi come no-op, non finire in dead-letter dopo
+    5 tentativi falliti."""
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise ValueError(f"contenuto inesistente: {content_id}")
+    if content["stato"] not in STATI_PIPELINE_AVVIABILE:
+        log.info("pipeline saltata per %s: stato gia' '%s' (probabile richiesta duplicata)",
+                 content_id, content["stato"])
+        return content["stato"]
     from social import approvals
     provider = provider or llm.provider_llm(conn)
     state_machine.transisci(conn, content_id, "RESEARCHING", agente="supervisor")
@@ -355,6 +430,15 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
                image_provider=image_provider)
         state_machine.transisci(conn, content_id, "QUALITY_CHECK", agente="supervisor")
         classe, decisione = quality_risk(conn, content_id, ricerca, provider=provider)
+    except NessunBandoCorrispondente as errore:
+        # Meglio annullare che pubblicare un post su un risultato vuoto: il
+        # brief chiedeva criteri specifici, JobInPA non ha nulla che li
+        # soddisfi. CANCELLED e' raggiungibile da RESEARCHING (stato in cui
+        # ci troviamo qui) senza bisogno di passare da RESEARCH_FAILED.
+        db_social.aggiorna_content(conn, content_id, errore=str(errore))
+        state_machine.transisci(conn, content_id, "CANCELLED", agente="supervisor",
+                                motivo=str(errore))
+        return "CANCELLED"
     except Exception as errore:
         # RESEARCH_FAILED e' lo stato di recupero della pipeline: raggiungibile
         # da RESEARCHING e DRAFTING; negli stati successivi il contenuto resta

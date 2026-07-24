@@ -18,7 +18,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
-      - ./data:/app/data
+      - social-data:/app/data
       - ./assets:/app/assets
 
   worker:
@@ -31,7 +31,7 @@ services:
       - LOG_LEVEL=DEBUG
     volumes:
       - ./src:/app/src
-      - ./data:/app/data
+      - social-data:/app/data
       - ./assets:/app/assets
 
   scheduler:
@@ -39,4 +39,4 @@ services:
       - LOG_LEVEL=DEBUG
     volumes:
       - ./src:/app/src
-      - ./data:/app/data
+      - social-data:/app/data

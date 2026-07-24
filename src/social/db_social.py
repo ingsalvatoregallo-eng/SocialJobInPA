@@ -45,16 +45,34 @@ def ha_permesso(conn, utente, permesso):
 
 
 def connect(db_path=None):
-    """Apre la connessione (creando data/ se manca). WAL + FK + timeout 30,
+    """Apre la connessione (creando data/ se manca). FK + timeout 30,
     check_same_thread=False: stesse ragioni documentate in JobInPA (FastAPI
     esegue le dependency su un pool di thread; la connessione resta comunque
     una per richiesta, mai condivisa fra richieste concorrenti).
-    SOCIAL_DB_PATH permette ai test di puntare a un DB temporaneo."""
-    db_path = Path(db_path or os.environ.get("SOCIAL_DB_PATH", DB_PATH))
+
+    SOCIAL_DB_PATH permette di puntare a un DB alternativo (es. nei test),
+    ma DEVE essere un percorso ASSOLUTO se impostata: app/worker/scheduler
+    girano in container separati con working_dir diversi (/app e /app/src),
+    quindi un percorso relativo si risolverebbe in posti diversi a seconda
+    del servizio — bug reale gia' incontrato (il worker apriva senza
+    accorgersene un DB vuoto in /app/src/data/, mentre app scriveva nel DB
+    vero in /app/data/: nessun errore, solo dati mai visti dal worker).
+    Una SOCIAL_DB_PATH vuota o assente usa sempre il default assoluto
+    (`or` invece di get(..., default): una stringa vuota nell'ambiente non
+    deve "vincere" sul default, altrimenti Path("") risolverebbe alla
+    working directory corrente, stesso bug in un'altra forma).
+
+    Journal DELETE (non WAL): scelta difensiva dato che il DB e' letto e
+    scritto da PIU' CONTAINER separati — DELETE non richiede coordinamento
+    fra processi via memoria condivisa (il file -shm di WAL), a fronte di
+    un costo in concorrenza trascurabile per il volume di scritture di
+    questa app (job e contenuti aggiornati occasionalmente, non un sistema
+    ad alto throughput); timeout=30 assorbe comunque le brevi contese."""
+    db_path = Path(db_path or os.environ.get("SOCIAL_DB_PATH") or DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA journal_mode = DELETE")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 

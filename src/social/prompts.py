@@ -29,6 +29,21 @@ _BRAND = (
 )
 
 PROMPTS = {
+    "interpreta_brief": {
+        "versione": "1.0.0",
+        "system": (
+            "Traduci una richiesta editoriale in linguaggio naturale nei "
+            "filtri REALI disponibili sull'API di JobInPA. Ti vengono forniti "
+            "i vocabolari chiusi (valori realmente presenti a sistema): usa "
+            "SOLO valori identici a quelli elencati, mai un valore inventato "
+            "o simile-ma-non-uguale — se il criterio del brief non ha un "
+            "corrispondente esatto nei vocabolari forniti, lascia il campo "
+            "vuoto invece di indovinare. Se il brief non chiede filtri "
+            "specifici (tema generico, nessun numero/luogo/profilo "
+            "esplicito), imposta nessun_criterio_specifico=true e lascia "
+            "tutti gli altri campi vuoti."
+        ),
+    },
     "supervisor": {
         "versione": "1.0.0",
         "system": (

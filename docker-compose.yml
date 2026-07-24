@@ -25,7 +25,7 @@ services:
     ports:
       - "127.0.0.1:8100:8000"
     volumes:
-      - ./data:/app/data
+      - social-data:/app/data
       - ./assets:/app/assets
     depends_on:
       - mailpit
@@ -37,7 +37,7 @@ services:
     working_dir: /app/src
     command: ["python", "-m", "social.worker_main"]
     volumes:
-      - ./data:/app/data
+      - social-data:/app/data
       - ./assets:/app/assets
     depends_on:
       - app
@@ -49,7 +49,7 @@ services:
     working_dir: /app/src
     command: ["python", "-m", "social.scheduler_main"]
     volumes:
-      - ./data:/app/data
+      - social-data:/app/data
     depends_on:
       - app
     restart: unless-stopped
@@ -60,3 +60,15 @@ services:
       - "127.0.0.1:8026:8025"   # UI web (8026: 8025 e' gia' di JobInPA se presente)
       - "127.0.0.1:1026:1025"   # SMTP
     restart: unless-stopped
+
+# Volume Docker nativo (non bind mount) per data/: i bind mount di Docker
+# Desktop su Windows (WSL2/9p) non garantiscono coerenza della cache fra
+# container diversi per l'I/O grezzo di SQLite (mmap/pread) — osservato in
+# pratica: il worker non vedeva mai le righe scritte dal container app,
+# pur essendo il file byte-identico via md5sum. Un volume nativo vive dentro
+# il filesystem Linux della VM WSL2 di Docker Desktop, senza passare dal
+# ponte col filesystem Windows: elimina il problema alla radice. Costo: il
+# file non e' piu' sfogliabile da Esplora File — per backup/ispezione vedi
+# scripts/backup.ps1 (passa da "docker compose exec").
+volumes:
+  social-data:

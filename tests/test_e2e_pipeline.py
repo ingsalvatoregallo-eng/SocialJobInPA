@@ -44,6 +44,30 @@ def test_e2e_percorso_verde_automatico(conn):
     assert {"transizione_stato", "pubblicazione"} <= azioni
 
 
+def test_pipeline_duplicata_e_no_op(conn):
+    """Un secondo job 'pipeline' sullo stesso contenuto (doppio click, o due
+    job accodati) non deve sollevare TransizioneNonValida: il contenuto e'
+    gia' avanzato oltre gli stati di partenza, quindi la seconda chiamata
+    esce subito senza toccare nulla (regressione: prima falliva con
+    "SCHEDULED -> RESEARCHING" e finiva in dead-letter dopo 5 tentativi)."""
+    content_id = db_social.crea_content(conn, "Contenuto con doppio avvio")
+    provider = llm.MockLLMProvider(conn)
+    image_provider = MockImageProvider()
+    primo = agents.esegui_pipeline(conn, content_id, provider=provider,
+                                   image_provider=image_provider)
+    assert primo == "APPROVED"
+    stato_dopo_primo = db_social.get_content(conn, content_id)["stato"]
+    assert stato_dopo_primo == "SCHEDULED"
+
+    secondo = agents.esegui_pipeline(conn, content_id, provider=provider,
+                                     image_provider=image_provider)
+    assert secondo == "SCHEDULED"  # ritorna lo stato attuale, nessuna eccezione
+    assert db_social.get_content(conn, content_id)["stato"] == "SCHEDULED"
+    # varianti/asset non duplicati: la seconda chiamata non ha rifatto nulla
+    assert len(db_social.varianti_di(conn, content_id)) == 2
+    assert len(db_social.asset_di(conn, content_id)) == 2
+
+
 def test_e2e_percorso_giallo_con_approvazione_umana(conn):
     provider = llm.MockLLMProvider(conn)
     provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(

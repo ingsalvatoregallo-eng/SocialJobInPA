@@ -1,13 +1,15 @@
-# backup.ps1 - backup coerente di DB SQLite, asset, template e configurazioni
-# non segrete, con checksum e retention.
+# backup.ps1 - backup coerente di DB SQLite, asset e configurazioni non
+# segrete, con checksum e retention.
 #
 #   .\scripts\backup.ps1
-#   .\scripts\backup.ps1 -Destinazione D:\backup\jobinpa -RetentionGiorni 60
+#   .\scripts\backup.ps1 -Destinazione D:\backup\socialjobinpa -RetentionGiorni 60
 #
-# Il DB viene copiato con l'API di backup di SQLite (coerente anche con
-# l'applicazione in esecuzione, grazie al WAL), MAI con una copia file nuda.
-# Il file .env NON viene incluso: contiene segreti (la ENCRYPTION_KEY va
-# custodita a parte, vedi docs/backup-restore.md).
+# Il DB vive in un volume Docker nativo (non una cartella host: vedi
+# docker-compose.yml, "social-data"), quindi il backup passa dal container
+# app in esecuzione: copia coerente via API di backup SQLite dentro il
+# container, poi "docker compose cp" la porta fuori sull'host. Il file .env
+# NON viene incluso: contiene segreti (la ENCRYPTION_KEY va custodita a
+# parte, vedi docs/backup-restore.md).
 
 param(
     [string]$Destinazione = "backups",
@@ -22,11 +24,14 @@ $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $cartella = Join-Path $Destinazione "social-backup-$timestamp"
 New-Item -ItemType Directory -Force $cartella | Out-Null
 
-# 1) Database (backup coerente via API SQLite).
-python -c "import sqlite3, sys; src = sqlite3.connect('data/inpa.db'); dst = sqlite3.connect(sys.argv[1]); src.backup(dst); dst.close(); src.close()" "$cartella/inpa.db"
-if (-not $?) { throw "backup del database fallito" }
+# 1) Database: backup coerente (API SQLite) eseguito DENTRO il container,
+# poi copiato fuori sull'host.
+docker compose exec -T app python -c "import sqlite3; src = sqlite3.connect('/app/data/social.db'); dst = sqlite3.connect('/tmp/social-backup.db'); src.backup(dst); dst.close(); src.close()"
+if (-not $?) { throw "backup del database fallito (il container 'app' e' in esecuzione?)" }
+docker compose cp app:/tmp/social-backup.db "$cartella/social.db"
+docker compose exec -T app rm -f /tmp/social-backup.db
 
-# 2) Asset generati e di brand, template email/prompt (nel codice), config non segrete.
+# 2) Asset generati e di brand, config non segrete.
 if (Test-Path "assets") { Copy-Item "assets" -Destination $cartella -Recurse }
 Copy-Item ".env.example" -Destination $cartella
 Copy-Item "docker-compose.yml" -Destination $cartella
@@ -44,7 +49,7 @@ Set-Content (Join-Path $cartella "CHECKSUMS.sha256") $righe -Encoding utf8
 if ($RetentionGiorni -le 0) {
     $RetentionGiorni = 30
     try {
-        $valore = python -c "import sys; sys.path.insert(0, 'src'); import db; from social import db_social; conn = db.connect('data/inpa.db'); print(db_social.get_setting(conn, 'retention_backup_giorni', 30))"
+        $valore = docker compose exec -T app python -c "import sys; sys.path.insert(0, 'src'); from social import db_social; conn = db_social.connect(); print(db_social.get_setting(conn, 'retention_backup_giorni', 30))"
         if ($valore) { $RetentionGiorni = [int]$valore }
     } catch {}
 }

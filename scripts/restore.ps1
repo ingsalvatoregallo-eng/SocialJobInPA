@@ -1,7 +1,11 @@
 # restore.ps1 - ripristina un backup creato da backup.ps1, dopo verifica
-# dei checksum. Il DB corrente viene messo da parte (mai cancellato).
+# dei checksum. Il DB corrente viene messo da parte su host (mai cancellato).
 #
 #   .\scripts\restore.ps1 -BackupPath backups\social-backup-20260724-120000
+#
+# Il DB vive in un volume Docker nativo (non una cartella host): il
+# ripristino passa da un container "app" avviato apposta, con "docker
+# compose cp" per portare i file dentro/fuori dal volume.
 
 param(
     [Parameter(Mandatory = $true)][string]$BackupPath
@@ -31,23 +35,28 @@ Get-Content $fileChecksum | ForEach-Object {
 if ($errori -gt 0) { throw "verifica integrita' fallita ($errori file): restore annullato" }
 Write-Host "Integrita' verificata." -ForegroundColor Green
 
-# 2) Ferma lo stack se attivo (ignora errori se Docker non gira).
-try { docker compose down 2>$null } catch {}
+# 2) Ferma lo stack, poi riavvia solo "app" (serve un container attaccato
+# al volume per le operazioni di copia).
+docker compose down
+docker compose up -d app
+Start-Sleep -Seconds 2
 
-# 3) Metti da parte il DB corrente, poi ripristina.
-if (Test-Path "data/inpa.db") {
-    $salvataggio = "data/inpa.db.pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    Move-Item "data/inpa.db" $salvataggio
-    Write-Host "DB corrente conservato in $salvataggio" -ForegroundColor Yellow
-}
+# 3) Metti da parte su host il DB corrente (dal volume), poi sovrascrivi.
 New-Item -ItemType Directory -Force "data" | Out-Null
-Copy-Item (Join-Path $BackupPath "inpa.db") "data/inpa.db"
+$salvataggio = "data/social.db.pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+docker compose cp app:/app/data/social.db $salvataggio
+Write-Host "DB corrente conservato in $salvataggio" -ForegroundColor Yellow
 
-# 4) Asset.
+docker compose cp (Join-Path $BackupPath "social.db") app:/app/data/social.db
+
+# 4) Asset (bind mount, copia diretta su host).
 $assetBackup = Join-Path $BackupPath "assets"
 if (Test-Path $assetBackup) {
     Copy-Item "$assetBackup\*" "assets\" -Recurse -Force
 }
 
+# 5) Riavvia tutto lo stack cosi' ogni container riapre una connessione
+# fresca sul file appena ripristinato.
+docker compose up -d
+
 Write-Host "Restore completato da $BackupPath" -ForegroundColor Green
-Write-Host "Riavvia con: .\scripts\start.ps1"

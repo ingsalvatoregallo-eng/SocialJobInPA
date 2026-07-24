@@ -154,25 +154,42 @@ class TemplateImageProvider:
 
         y = altezza_barra + int(70 * scala)
 
+        # Calcolato PRIMA di disegnare: senza un limite noto, con testi
+        # lunghi titolo/sottotitolo/dati_chiave finivano dietro il footer
+        # invece di fermarsi prima — bug reale osservato in produzione.
+        # Ogni blocco sotto controlla lo spazio residuo e si ferma (mai
+        # tronca a meta' riga: semplicemente non disegna la riga/il
+        # riquadro successivo se non ci sta).
+        altezza_footer = int(110 * scala)
+        y_limite = altezza - altezza_footer - int(20 * scala)
+
         # Titolo (a capo automatico dentro l'area sicura).
         font_titolo = _font(int(72 * scala), bold=True)
+        altezza_riga_titolo = int(86 * scala)
         for riga in _a_capo(draw, request.titolo, font_titolo, interno)[:4]:
+            if y + altezza_riga_titolo > y_limite:
+                break
             draw.text((margine, y), riga, font=font_titolo, fill=palette["testo"])
-            y += int(86 * scala)
+            y += altezza_riga_titolo
         y += int(20 * scala)
 
         if request.sottotitolo:
             font_sotto = _font(int(44 * scala))
+            altezza_riga_sotto = int(56 * scala)
             for riga in _a_capo(draw, request.sottotitolo, font_sotto, interno)[:3]:
+                if y + altezza_riga_sotto > y_limite:
+                    break
                 draw.text((margine, y), riga, font=font_sotto, fill=palette["primario"])
-                y += int(56 * scala)
+                y += altezza_riga_sotto
             y += int(24 * scala)
 
         # Dati chiave: riquadri con bordo accento — SEMPRE deterministici.
         font_dato = _font(int(40 * scala), bold=True)
+        altezza_box = int(76 * scala)
         for dato in request.dati_chiave[:5]:
+            if y + altezza_box > y_limite:
+                break
             testo_dato = str(dato)
-            altezza_box = int(76 * scala)
             draw.rounded_rectangle(
                 [margine, y, larghezza - margine, y + altezza_box],
                 radius=int(14 * scala), outline=palette["accento"], width=max(2, int(4 * scala)))
@@ -181,7 +198,6 @@ class TemplateImageProvider:
             y += altezza_box + int(22 * scala)
 
         # Footer di brand: logo se presente in assets/brand, altrimenti wordmark.
-        altezza_footer = int(110 * scala)
         draw.rectangle([0, altezza - altezza_footer, larghezza, altezza],
                        fill=palette["primario"])
         logo = self._logo(int(altezza_footer * 0.6))
