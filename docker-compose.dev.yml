@@ -1,0 +1,42 @@
+# Override di sviluppo: codice montato dal filesystem (hot reload), email
+# verso Mailpit, modalita' sandbox forzata, log verbosi.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   (scripts/start.ps1 -Dev fa esattamente questo)
+
+services:
+  app:
+    command: ["python", "-m", "uvicorn", "src.app:app", "--host", "0.0.0.0",
+              "--port", "8000", "--reload"]
+    environment:
+      - SOCIAL_MODE=sandbox
+      - GLOBAL_PUBLISHING_ENABLED=false
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USE_TLS=false
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./data:/app/data
+      - ./assets:/app/assets
+
+  worker:
+    environment:
+      - SOCIAL_MODE=sandbox
+      - GLOBAL_PUBLISHING_ENABLED=false
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USE_TLS=false
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./assets:/app/assets
+
+  scheduler:
+    environment:
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block titolo %}Log e audit — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Log agenti, audit, email e job</h2>
+
+<div class="card">
+  <h3>Esecuzioni agenti</h3>
+  <table><tr><th>Agente</th><th>Esito</th><th>Prompt (versione/hash)</th><th>Provider</th><th>Token</th><th>Costo</th><th>Inizio</th></tr>
+  {% for r in agent_runs %}
+    <tr><td>{{ r.agente }}</td>
+        <td><span class="badge {{ 'verde' if r.esito == 'ok' else ('rosso' if r.esito == 'errore' else 'grigio') }}">{{ r.esito }}</span></td>
+        <td>{{ r.prompt_nome or '' }} {{ r.prompt_versione or '' }} <small>{{ r.prompt_hash or '' }}</small></td>
+        <td>{{ r.provider or '' }}/{{ r.modello or '' }}</td>
+        <td>{{ r.token_input or 0 }}/{{ r.token_output or 0 }}</td>
+        <td>{% if r.costo_eur %}{{ "%.4f"|format(r.costo_eur) }} €{% endif %}</td>
+        <td>{{ r.iniziato_at[:16] }}</td></tr>
+  {% endfor %}</table>
+</div>
+
+<div class="card">
+  <h3>Job in coda / eseguiti</h3>
+  <table><tr><th>Tipo</th><th>Stato</th><th>Esecuzione</th><th>Tentativi</th><th>Ultimo errore</th></tr>
+  {% for j in jobs %}
+    <tr><td>{{ j.tipo }}</td>
+        <td><span class="badge {{ 'verde' if j.stato == 'done' else ('rosso' if j.stato in ('failed','dead') else 'grigio') }}">{{ j.stato }}</span></td>
+        <td>{{ j.esegui_at[:16] }}</td><td>{{ j.tentativi }}/{{ j.max_tentativi }}</td>
+        <td style="color:var(--rosso)">{{ j.ultimo_errore or '' }}</td></tr>
+  {% endfor %}</table>
+</div>
+
+<div class="card">
+  <h3>Audit log</h3>
+  <table><tr><th>Azione</th><th>Chi</th><th>Oggetto</th><th>Transizione</th><th>Motivo</th><th>Quando</th></tr>
+  {% for a in audit %}
+    <tr><td>{{ a.azione }}</td>
+        <td>{{ a.agente or ('utente #' ~ a.utente_id if a.utente_id else 'sistema') }}</td>
+        <td>{{ a.oggetto_tipo or '' }} {{ (a.oggetto_id or '')[:12] }}</td>
+        <td>{% if a.stato_prima %}{{ a.stato_prima }} → {{ a.stato_dopo }}{% endif %}</td>
+        <td>{{ a.motivo or '' }}</td><td>{{ a.creato_at[:16] }}</td></tr>
+  {% endfor %}</table>
+</div>
+
+<div class="card">
+  <h3>Email inviate</h3>
+  <table><tr><th>Oggetto</th><th>Destinatari</th><th>Esito</th><th>Quando</th></tr>
+  {% for e in email %}
+    <tr><td>{{ e.oggetto }}</td><td>{{ e.destinatari }}</td>
+        <td><span class="badge {{ 'verde' if e.esito == 'inviata' else 'giallo' }}">{{ e.esito }}</span></td>
+        <td>{{ e.creato_at[:16] }}</td></tr>
+  {% else %}<tr><td colspan="4" style="color:var(--grigio)">Nessuna email registrata.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

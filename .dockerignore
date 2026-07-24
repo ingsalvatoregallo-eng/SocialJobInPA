@@ -1,0 +1,18 @@
+# Mai nell'immagine Docker:
+.env
+.venv/
+.git/
+__pycache__/
+*.pyc
+data/
+logs/
+frontend/node_modules/
+frontend/dist/
+scratch_embedding_test/
+assets/generated/
+# CV reali per test manuali: dati personali, mai in un'immagine.
+tests/CV_test/
+privateKeyOracleInstance.ppk
+jobinpa-aruba
+jobinpa-aruba.pub
+tmp/

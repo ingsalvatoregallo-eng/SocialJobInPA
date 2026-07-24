@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block titolo %}Pubblicazioni — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Pubblicazioni</h2>
+
+<div class="card">
+  <h3>Programmati</h3>
+  <table><tr><th>Titolo</th><th>Stato</th><th>Programmato per</th></tr>
+  {% for c in programmati %}
+    <tr><td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a></td>
+        <td><span class="badge blu">{{ c.stato }}</span></td>
+        <td>{{ (c.programmato_at or 'prossima finestra')[:16] }}</td></tr>
+  {% else %}<tr><td colspan="3" style="color:var(--grigio)">Nessun contenuto programmato.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>Pubblicate</h3>
+  <table><tr><th>Titolo</th><th>Piattaforma</th><th>Modalità</th><th>Link</th><th>Quando</th></tr>
+  {% for p in pubblicate %}
+    <tr><td><a href="/social/contenuti/{{ p.content_id }}">{{ p.titolo }}</a></td>
+        <td>{{ p.piattaforma }}</td><td>{{ p.modalita }}</td>
+        <td>{% if p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener noreferrer">apri</a>{% endif %}</td>
+        <td>{{ (p.pubblicato_at or '')[:16] }}</td></tr>
+  {% else %}<tr><td colspan="5" style="color:var(--grigio)">Nessuna pubblicazione.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>Errori</h3>
+  <table><tr><th>Titolo</th><th>Piattaforma</th><th>Errore</th></tr>
+  {% for p in fallite %}
+    <tr><td><a href="/social/contenuti/{{ p.content_id }}">{{ p.titolo }}</a></td>
+        <td>{{ p.piattaforma }}</td><td style="color:var(--rosso)">{{ p.errore }}</td></tr>
+  {% else %}<tr><td colspan="3" style="color:var(--grigio)">Nessun errore. 🎉</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

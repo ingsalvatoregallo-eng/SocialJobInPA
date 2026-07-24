@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block titolo %}Impostazioni — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Impostazioni</h2>
+
+<div class="grid">
+  <div class="card">
+    <h3>Account social</h3>
+    <table><tr><th>Piattaforma</th><th>Stato</th><th>Publishing</th><th></th></tr>
+    {% for a in accounts %}
+      <tr><td>{{ a.piattaforma }}</td>
+          <td><span class="badge {{ 'verde' if a.stato == 'verificato' else 'giallo' }}">{{ a.stato }}</span></td>
+          <td>{{ 'abilitato' if a.publishing_enabled else 'disabilitato' }}</td>
+          <td>
+            <a class="btn secondario" href="/social/oauth/{{ a.piattaforma }}/start">Autorizza (OAuth)</a>
+            {% if 'social.publish' in permessi %}
+            <form method="post" action="/social/impostazioni/account/{{ a.id }}/publishing" class="inline">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="btn secondario" type="submit">{{ 'Disabilita' if a.publishing_enabled else 'Abilita' }}</button>
+            </form>{% endif %}</td></tr>
+    {% endfor %}</table>
+    <p style="font-size:12px;color:var(--grigio)">"Autorizza" avvia il consenso OAuth col
+      provider: richiede che App ID/Secret e (per Instagram) FACEBOOK_PAGE_ID siano gia'
+      configurati in .env. Il token ottenuto viene salvato cifrato.</p>
+    <p style="font-size:12px;color:var(--grigio)">La pubblicazione reale richiede anche:
+      modalità production, GLOBAL_PUBLISHING_ENABLED=true (attuale: {{ publishing_env }}),
+      kill switch spento, account verificato, contenuto approvato o verde.</p>
+  </div>
+
+  <div class="card">
+    <h3>Revisori (email approvazioni)</h3>
+    <form method="post" action="/social/impostazioni/revisori">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Indirizzi separati da virgola</label>
+      <input name="emails" value="{{ settings.get('revisori_email', '[]') | replace('[','') | replace(']','') | replace('\"','') }}">
+      <button class="btn" type="submit">Salva revisori</button>
+    </form>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Checklist Meta / Instagram</h3>
+    <table>{% for voce in instagram.checklist %}
+      <tr><td>{{ '✅' if voce.ok else '❌' }}</td><td>{{ voce.voce }}</td></tr>
+    {% endfor %}</table>
+    <p style="font-size:12px;color:var(--grigio)">Guida completa: docs/meta-instagram-setup.md</p>
+  </div>
+  <div class="card">
+    <h3>Checklist LinkedIn</h3>
+    <table>{% for voce in linkedin.checklist %}
+      <tr><td>{{ '✅' if voce.ok else '❌' }}</td><td>{{ voce.voce }}</td></tr>
+    {% endfor %}</table>
+    <p style="font-size:12px;color:var(--grigio)">Guida completa: docs/linkedin-setup.md</p>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Fonti autorizzate (whitelist)</h3>
+  <table><tr><th>Dominio</th><th>Nome</th><th>Attivo</th><th></th></tr>
+  {% for f in fonti %}
+    <tr><td>{{ f.dominio }}</td><td>{{ f.nome or '' }}</td>
+        <td>{{ '✅' if f.attivo else '—' }}</td>
+        <td><form method="post" action="/social/impostazioni/fonti/{{ f.dominio }}/toggle" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="btn secondario" type="submit">{{ 'Disattiva' if f.attivo else 'Attiva' }}</button>
+        </form></td></tr>
+  {% endfor %}</table>
+  <form method="post" action="/social/impostazioni/fonti">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Nuovo dominio</label><input name="dominio" placeholder="es. www.miur.gov.it" required>
+    <label>Nome</label><input name="nome" placeholder="Ministero dell'Istruzione">
+    <button class="btn" type="submit">Aggiungi alla whitelist</button>
+  </form>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Prompt versionati (sola lettura — si modificano nel repository)</h3>
+    <table><tr><th>Nome</th><th>Versione</th><th>Hash</th></tr>
+    {% for p in prompt_versioni %}
+      <tr><td>{{ p.nome }}</td><td>{{ p.versione }}</td><td><code>{{ p.hash }}</code></td></tr>
+    {% else %}<tr><td colspan="3" style="color:var(--grigio)">Registrati alla prima esecuzione degli agenti.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Utenti con ruoli social</h3>
+    <table><tr><th>Email</th><th>Ruolo</th><th>Stato</th></tr>
+    {% for u in utenti_social %}
+      <tr><td>{{ u.email }}</td><td><span class="badge blu">{{ u.ruolo }}</span></td><td>{{ u.stato }}</td></tr>
+    {% endfor %}</table>
+    <p style="font-size:12px;color:var(--grigio)">I ruoli si assegnano dal backoffice esistente
+      (permesso utenti.gestisci). Ruoli social: admin, editor, reviewer, viewer.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Impostazioni di sistema (JSON)</h3>
+  <table><tr><th>Chiave</th><th>Valore</th></tr>
+  {% for chiave, valore in settings.items() %}
+    <tr><td><code>{{ chiave }}</code></td><td><code>{{ valore }}</code></td></tr>
+  {% endfor %}</table>
+  <p style="font-size:12px;color:var(--grigio)">Modificabili via API POST /api/v1/social/settings (permesso social.admin).</p>
+</div>
+{% endblock %}

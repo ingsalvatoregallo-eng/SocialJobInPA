@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block titolo %}Analytics e costi — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Analytics e costi AI</h2>
+
+<div class="grid">
+  <div class="card"><div class="kpi">{{ pubblicate }}<small>Pubblicazioni riuscite</small></div></div>
+  <div class="card"><div class="kpi">{{ fallite }}<small>Pubblicazioni fallite</small></div></div>
+  <div class="card"><div class="kpi">{{ bloccati }}<small>Contenuti bloccati (rischio)</small></div></div>
+  <div class="card">
+    <div class="kpi">{{ "%.2f"|format(costo_anthropic) }} €<small>Anthropic (budget {{ "%.0f"|format(budget_anthropic) }} €/mese)</small></div>
+    <div class="kpi">{{ "%.2f"|format(costo_openai) }} €<small>OpenAI Images (budget {{ "%.0f"|format(budget_openai) }} €/mese)</small></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Metriche per pubblicazione (solo quelle realmente disponibili)</h3>
+  <table><tr><th>Piattaforma</th><th>Post</th><th>Metriche</th><th>Rilevate il</th></tr>
+  {% for m in metriche %}
+    <tr><td>{{ m.piattaforma }}</td><td>{{ m.titolo }}</td>
+        <td>{% for k, v in m.metriche.items() %}{% if k != 'demo' %}<span class="badge grigio">{{ k }}: {{ v }}</span> {% endif %}{% endfor %}
+            {% if m.metriche.get('demo') %}<span class="badge giallo">MOCK</span>{% endif %}</td>
+        <td>{{ m.rilevato_at[:16] }}</td></tr>
+  {% else %}<tr><td colspan="4" style="color:var(--grigio)">Nessuna metrica raccolta.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>Voci di costo recenti</h3>
+  <table><tr><th>Provider</th><th>Modello</th><th>Agente</th><th>Token (in/out)</th><th>Costo</th><th>Quando</th></tr>
+  {% for v in costi %}
+    <tr><td>{{ v.provider }}</td><td>{{ v.modello or '' }}</td><td>{{ v.agente or '' }}</td>
+        <td>{{ v.token_input or 0 }}/{{ v.token_output or 0 }}</td>
+        <td>{{ "%.4f"|format(v.costo_eur) }} €{% if v.stimato %} (stima){% endif %}</td>
+        <td>{{ v.creato_at[:16] }}</td></tr>
+  {% else %}<tr><td colspan="6" style="color:var(--grigio)">Nessun costo registrato.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

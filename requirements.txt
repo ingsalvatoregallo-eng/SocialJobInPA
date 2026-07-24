@@ -1,0 +1,22 @@
+# Dipendenze per l'immagine Docker del modulo social (vedi Dockerfile).
+# E' requirements.txt SENZA sentence-transformers/transformers (torch pesa
+# gigabyte e serve solo alla ricerca semantica premium, che nei container
+# social non viene usata: l'import e' lazy, l'endpoint risponde con un
+# errore chiaro se invocato) e CON numpy (import a livello di modulo in
+# semantic_search.py) e pytest per scripts/test.ps1.
+
+requests
+beautifulsoup4
+pdfplumber
+python-docx
+fastapi
+uvicorn[standard]
+python-multipart
+anthropic
+jinja2
+cryptography
+stripe
+numpy
+Pillow
+pytest
+httpx

@@ -1,0 +1,62 @@
+# SocialJobInPA — stack locale (Windows + Docker Desktop + WSL2), progetto
+# separato da JobInPA (che gira sulla VM Aruba): comunicano solo via API
+# HTTP private (JOBINPA_API_URL/KEY, vedi .env.example).
+#
+#   .\scripts\setup.ps1   prima configurazione (crea .env, build, seed demo)
+#   .\scripts\start.ps1   avvio
+#   .\scripts\stop.ps1    arresto
+#
+# Dashboard:  http://localhost:8100/social
+# Mailpit:    http://localhost:8026  (tutte le email di sviluppo finiscono qui)
+#
+# Porte diverse da JobInPA (8000/8025) apposta: le due macchine/stack devono
+# poter girare insieme sullo stesso PC senza conflitti.
+#
+# Nessuna esposizione pubblica: tutte le porte sono su localhost. Per la
+# futura esposizione dietro reverse proxy (social.jobinpa.it) vedi
+# docs/deployment-future.md — non servono modifiche all'applicazione.
+
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      - APP_BASE_URL=${APP_BASE_URL:-http://localhost:8100}
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+    depends_on:
+      - mailpit
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    working_dir: /app/src
+    command: ["python", "-m", "social.worker_main"]
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    env_file: .env
+    working_dir: /app/src
+    command: ["python", "-m", "social.scheduler_main"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:8026:8025"   # UI web (8026: 8025 e' gia' di JobInPA se presente)
+      - "127.0.0.1:1026:1025"   # SMTP
+    restart: unless-stopped

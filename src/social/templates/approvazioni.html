@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block titolo %}Approvazioni — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Richieste di approvazione</h2>
+{% for a in approvazioni %}
+<div class="card">
+  <h3><a href="/social/contenuti/{{ a.content_id }}">{{ a.titolo }}</a>
+      <span class="badge {{ a.classe_rischio or 'grigio' }}">{{ a.classe_rischio or 'n/d' }}</span></h3>
+  <p style="color:var(--grigio);font-size:13px">Richiesta il {{ a.richiesto_at[:16] }} — stato contenuto: {{ a.content_stato }}</p>
+  {% if 'social.approve' in permessi %}
+  <form method="post" action="/social/approvazioni/{{ a.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Motivazione (obbligatoria per la richiesta modifiche)</label>
+    <textarea name="motivo" rows="2"></textarea>
+    <button class="btn verde" name="azione" value="approva" type="submit">Approva e programma</button>
+    <button class="btn" name="azione" value="modifiche" type="submit">Richiedi modifiche</button>
+    <button class="btn rosso" name="azione" value="rifiuta" type="submit">Rifiuta</button>
+  </form>
+  {% else %}
+  <p style="color:var(--grigio)">Il tuo ruolo non può approvare (serve social.approve).</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="card"><p style="color:var(--grigio)">Nessuna richiesta in attesa. 🎉</p></div>
+{% endfor %}
+{% endblock %}

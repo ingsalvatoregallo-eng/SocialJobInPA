@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titolo %}JobInPA Social AI{% endblock %}</title>
+<style>
+:root { --blu:#0B3D91; --verde:#1FA774; --sfondo:#F5F7FB; --testo:#15213B;
+        --rosso:#C0392B; --giallo:#B7791F; --grigio:#6B7280; --bordo:#E2E8F0; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background:var(--sfondo);
+       color:var(--testo); display:flex; min-height:100vh; }
+nav.sidebar { width:230px; background:var(--blu); color:#fff; padding:16px 0; flex-shrink:0; }
+nav.sidebar h1 { font-size:17px; padding:0 18px 10px; margin:0; border-bottom:1px solid rgba(255,255,255,.2); }
+nav.sidebar h1 small { display:block; font-size:11px; font-weight:normal; opacity:.8; }
+nav.sidebar a { display:block; color:#fff; text-decoration:none; padding:9px 18px; font-size:14px; }
+nav.sidebar a:hover, nav.sidebar a.attivo { background:rgba(255,255,255,.14); }
+nav.sidebar .sep { margin:8px 18px; border-top:1px solid rgba(255,255,255,.2); }
+main { flex:1; padding:24px; max-width:1200px; }
+h2 { margin-top:0; }
+.card { background:#fff; border:1px solid var(--bordo); border-radius:10px; padding:16px; margin-bottom:16px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--bordo); vertical-align:top; }
+th { color:var(--grigio); font-weight:600; font-size:12px; text-transform:uppercase; }
+.badge { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
+.badge.verde { background:#DEF7EC; color:#046C4E; } .badge.giallo { background:#FDF6B2; color:#8E4B10; }
+.badge.rosso { background:#FDE8E8; color:#9B1C1C; } .badge.grigio { background:#E5E7EB; color:#374151; }
+.badge.blu { background:#E1EFFE; color:#1E429F; }
+.btn { display:inline-block; background:var(--blu); color:#fff; border:none; border-radius:7px;
+       padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
+.btn.verde { background:var(--verde); } .btn.rosso { background:var(--rosso); }
+.btn.secondario { background:#fff; color:var(--blu); border:1px solid var(--blu); }
+input, select, textarea { width:100%; padding:8px; border:1px solid var(--bordo); border-radius:7px;
+                          font:inherit; margin-bottom:10px; }
+label { font-size:13px; color:var(--grigio); display:block; margin-bottom:3px; }
+form.inline { display:inline; } form.inline input, form.inline select { width:auto; }
+.avviso { padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+.avviso.rosso { background:#FDE8E8; color:#9B1C1C; } .avviso.giallo { background:#FDF6B2; color:#8E4B10; }
+.avviso.verde { background:#DEF7EC; color:#046C4E; }
+.anteprima { border:1px solid var(--bordo); border-radius:10px; padding:12px; background:#fff; }
+.anteprima img { max-width:100%; border-radius:6px; }
+.kpi { font-size:26px; font-weight:700; } .kpi small { display:block; font-size:12px; color:var(--grigio); font-weight:400; }
+@media (max-width: 800px) {
+  body { flex-direction:column; }
+  nav.sidebar { width:100%; display:flex; flex-wrap:wrap; align-items:center; }
+  nav.sidebar h1 { border:none; width:100%; }
+  nav.sidebar a { padding:8px 10px; } nav.sidebar .sep { display:none; }
+  main { padding:14px; }
+}
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <h1>JobInPA Social AI <small>Your PA, powered by AI — modalità: {{ modalita }}</small></h1>
+  <a href="/social/">Dashboard</a>
+  <a href="/social/calendario">Calendario editoriale</a>
+  <a href="/social/contenuti">Contenuti</a>
+  <a href="/social/approvazioni">Approvazioni</a>
+  <a href="/social/pubblicazioni">Pubblicazioni</a>
+  <a href="/social/commenti">Commenti</a>
+  <a href="/social/analytics">Analytics e costi</a>
+  <a href="/social/log">Log e audit</a>
+  {% if 'social.admin' in permessi %}<a href="/social/impostazioni">Impostazioni</a>{% endif %}
+  <div class="sep"></div>
+  <a href="/social/logout">Esci ({{ utente.email }})</a>
+</nav>
+<main>
+{% if kill_switch %}<div class="avviso rosso"><strong>KILL SWITCH ATTIVO</strong> — ogni pubblicazione è bloccata.</div>{% endif %}
+{% block contenuto %}{% endblock %}
+</main>
+</body>
+</html>

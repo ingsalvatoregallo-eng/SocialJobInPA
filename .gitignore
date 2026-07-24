@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/
+logs/
+assets/generated/
+backups/
+node_modules/

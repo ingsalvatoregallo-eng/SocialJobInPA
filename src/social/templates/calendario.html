@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block titolo %}Calendario editoriale — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Calendario editoriale</h2>
+<p>
+  <a class="btn secondario" href="/social/calendario?settimana={{ precedente }}">&larr; Settimana precedente</a>
+  <a class="btn secondario" href="/social/calendario?settimana={{ successiva }}">Settimana successiva &rarr;</a>
+</p>
+{% for settimana in settimane %}
+<div class="card">
+  <h3>Settimana del {{ settimana }} {% if settimana == corrente %}<span class="badge blu">selezionata</span>{% endif %}</h3>
+  {% if voci[settimana] %}
+  <table><tr><th>Pillar</th><th>Tema</th><th>Obiettivo</th><th>Fascia oraria</th><th>Stato</th><th>Contenuto</th></tr>
+  {% for v in voci[settimana] %}
+    <tr>
+      <td><span class="badge grigio">{{ v.pillar_nome or 'n/d' }}</span></td>
+      <td>{{ v.tema }}</td><td>{{ v.obiettivo or '' }}</td><td>{{ v.fascia_oraria or 'auto' }}</td>
+      <td>{{ v.stato }}</td>
+      <td>{% if v.content_id %}<a href="/social/contenuti/{{ v.content_id }}">apri</a>{% endif %}</td>
+    </tr>
+  {% endfor %}</table>
+  {% else %}
+  <p style="color:var(--grigio)">Nessun argomento pianificato.</p>
+  {% if 'social.edit' in permessi %}
+  <form method="post" action="/social/calendario/genera" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="settimana" value="{{ settimana }}">
+    <button class="btn" type="submit">Genera 3 argomenti (Supervisor Agent)</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

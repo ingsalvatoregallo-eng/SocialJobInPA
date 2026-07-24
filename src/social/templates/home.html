@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block titolo %}Dashboard — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<h2>Stato del sistema</h2>
+
+<div class="grid">
+  <div class="card">
+    <div class="kpi">{{ 'ATTIVO' if kill_switch else 'spento' }}<small>Kill switch</small></div>
+    {% if 'social.publish' in permessi %}
+    <form method="post" action="/social/kill-switch">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="attivo" value="{{ '0' if kill_switch else '1' }}">
+      <button class="btn {{ 'verde' if kill_switch else 'rosso' }}" type="submit">
+        {{ 'Disattiva kill switch' if kill_switch else 'ATTIVA KILL SWITCH' }}</button>
+    </form>
+    {% endif %}
+    <p style="font-size:12px;color:var(--grigio)">
+      GLOBAL_PUBLISHING_ENABLED (env): <strong>{{ 'true' if publishing_env else 'false' }}</strong><br>
+      Modalità operativa: <strong>{{ modalita }}</strong></p>
+  </div>
+  <div class="card">
+    <div class="kpi">{{ "%.2f"|format(costo_anthropic) }} €<small>Anthropic — mese corrente (budget {{ "%.0f"|format(budget_anthropic) }} €)</small></div>
+    <div class="kpi">{{ "%.2f"|format(costo_openai) }} €<small>OpenAI Images — mese corrente (budget {{ "%.0f"|format(budget_openai) }} €)</small></div>
+  </div>
+  <div class="card">
+    <div class="kpi">{{ job_stati.pending }}<small>Job in coda</small></div>
+    <p style="font-size:13px">In esecuzione: {{ job_stati.running }} — Dead letter:
+      <span class="badge {{ 'rosso' if job_stati.dead else 'grigio' }}">{{ job_stati.dead }}</span></p>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Checklist Instagram</h3>
+    {% if not instagram.pronto %}<div class="avviso giallo">{{ instagram.messaggio }}</div>{% endif %}
+    <table>{% for voce in instagram.checklist %}
+      <tr><td>{{ '✅' if voce.ok else '❌' }}</td>
+          <td>{{ voce.voce }}<br><small style="color:var(--grigio)">{{ voce.dettaglio }}</small></td></tr>
+    {% endfor %}</table>
+  </div>
+  <div class="card">
+    <h3>Checklist LinkedIn</h3>
+    {% if not linkedin.pronto %}<div class="avviso giallo">{{ linkedin.messaggio }}</div>{% endif %}
+    <table>{% for voce in linkedin.checklist %}
+      <tr><td>{{ '✅' if voce.ok else '❌' }}</td>
+          <td>{{ voce.voce }}<br><small style="color:var(--grigio)">{{ voce.dettaglio }}</small></td></tr>
+    {% endfor %}</table>
+  </div>
+</div>
+
+{% if incidenti %}
+<div class="card">
+  <h3>Incidenti aperti</h3>
+  <table><tr><th>Tipo</th><th>Dettaglio</th><th>Quando</th></tr>
+  {% for i in incidenti %}
+    <tr><td><span class="badge rosso">{{ i.tipo }}</span></td><td>{{ i.dettaglio }}</td><td>{{ i.creato_at[:16] }}</td></tr>
+  {% endfor %}</table>
+</div>
+{% endif %}
+
+<div class="grid">
+  <div class="card">
+    <h3>In attesa di approvazione ({{ approvazioni|length }})</h3>
+    {% if approvazioni %}
+    <table>{% for a in approvazioni %}
+      <tr><td><a href="/social/contenuti/{{ a.content_id }}">{{ a.titolo }}</a></td>
+          <td><span class="badge {{ a.classe_rischio or 'grigio' }}">{{ a.classe_rischio or 'n/d' }}</span></td></tr>
+    {% endfor %}</table>
+    <a class="btn secondario" href="/social/approvazioni">Vai alle approvazioni</a>
+    {% else %}<p style="color:var(--grigio)">Nessuna richiesta in attesa.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Ultimi contenuti</h3>
+    <table>{% for c in contenuti %}
+      <tr><td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a></td>
+          <td><span class="badge blu">{{ c.stato }}</span></td></tr>
+    {% endfor %}</table>
+  </div>
+</div>
+{% endblock %}
