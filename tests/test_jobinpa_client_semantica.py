@@ -12,8 +12,18 @@ def _client_configurato():
     return JobInPAClient(base_url="https://jobinpa.it", api_key="chiave-di-test")
 
 
-def test_bandi_semantici_non_configurato_ritorna_lista_vuota():
+def test_bandi_semantici_non_configurato_ritorna_lista_vuota(monkeypatch):
+    """base_url="" da solo non basta a forzare 'non configurato': il
+    costruttore fa `base_url or config.jobinpa_api_url()`, quindi una
+    stringa vuota (falsy) ricade sul valore REALMENTE configurato in questo
+    ambiente (rischio concreto: una chiamata di rete vera contro
+    jobinpa.it durante i test, osservato qui). Va forzato anche il default
+    di config, stesso principio gia' applicato in
+    test_agents_contesto.py::test_contesto_jobinpa_client_non_configurato."""
+    monkeypatch.setattr("social.config.jobinpa_api_url", lambda: "")
+    monkeypatch.setattr("social.config.jobinpa_api_key", lambda: "")
     client = JobInPAClient(base_url="", api_key="")
+    assert not client.configurato
     assert client.bandi_semantici("concorsi informatici") == []
 
 

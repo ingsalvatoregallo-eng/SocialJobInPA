@@ -280,17 +280,47 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None):
 
 # --- Visual Agent ------------------------------------------------------------
 
+_MESI_ITALIANI = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+                 "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre")
+
+
+def _formatta_ente(enti):
+    """bando['enti'] arriva come lista dall'API JobInPA (anche con un solo
+    elemento): interpolata direttamente in un f-string mostrava la repr
+    Python grezza (es. "['Agenzia Italiana del Farmaco - AIFA']") invece
+    di un testo leggibile in un'immagine social."""
+    if isinstance(enti, (list, tuple)):
+        enti = [str(e) for e in enti if e]
+        return ", ".join(enti) if enti else "n/d"
+    return str(enti) if enti else "n/d"
+
+
+def _formatta_scadenza(scadenza):
+    """bando['scadenza'] arriva come ISO 8601 (es. '2026-07-25T21:59:00Z'):
+    mostrata cosi' com'e' e' illeggibile in un'immagine social. Se il
+    formato non e' quello atteso, torna il valore originale invece di
+    nascondere il dato."""
+    if not scadenza:
+        return None
+    try:
+        data = datetime.fromisoformat(str(scadenza).replace("Z", "+00:00"))
+        return f"{data.day} {_MESI_ITALIANI[data.month - 1]} {data.year}"
+    except ValueError:
+        return str(scadenza)
+
+
 def _richiesta_immagine_da_bando(bando, formato, content_id):
     """Immagine 'nuovo_concorso' per un singolo bando di un carosello, con
     dati SEMPRE presi dal record JobInPA (mai dal modello) — stesso
     principio dei dati_chiave del VisualBrief, qui applicato quando i
     bandi sono piu' di uno e ognuno ha diritto alla propria immagine
     invece che il modello ne scelga solo uno."""
-    dati_chiave = [f"Ente: {bando.get('enti') or 'n/d'}"]
+    dati_chiave = [f"Ente: {_formatta_ente(bando.get('enti'))}"]
     if bando.get("num_posti"):
         dati_chiave.append(f"Posti: {bando['num_posti']}")
-    if bando.get("scadenza"):
-        dati_chiave.append(f"Scadenza: {bando['scadenza']}")
+    scadenza_leggibile = _formatta_scadenza(bando.get("scadenza"))
+    if scadenza_leggibile:
+        dati_chiave.append(f"Scadenza: {scadenza_leggibile}")
     if bando.get("titolo_studio_richiesto"):
         dati_chiave.append(f"Titolo di studio: {bando['titolo_studio_richiesto']}")
     return images.ImageGenerationRequest(

@@ -30,6 +30,44 @@ def _risultato_con_bandi(n):
         sintesi="Sintesi di prova.", bandi_trovati=_BANDI_ESEMPIO[:n])
 
 
+@pytest.mark.parametrize("enti,atteso", [
+    (["Agenzia Italiana del Farmaco - AIFA"], "Agenzia Italiana del Farmaco - AIFA"),
+    (["Ente A", "Ente B"], "Ente A, Ente B"),
+    ([], "n/d"),
+    (None, "n/d"),
+    ("Ente singolo come stringa", "Ente singolo come stringa"),
+])
+def test_formatta_ente(enti, atteso):
+    assert agents._formatta_ente(enti) == atteso
+
+
+@pytest.mark.parametrize("scadenza,atteso", [
+    ("2026-07-25T21:59:00Z", "25 luglio 2026"),
+    ("2026-12-01", "1 dicembre 2026"),
+    (None, None),
+    ("", None),
+    ("testo non valido", "testo non valido"),  # non nasconde il dato se non riconosciuto
+])
+def test_formatta_scadenza(scadenza, atteso):
+    assert agents._formatta_scadenza(scadenza) == atteso
+
+
+def test_richiesta_immagine_da_bando_non_mostra_la_lista_python_grezza():
+    """Regressione: 'Ente: [...]' con parentesi quadre e apici era la repr
+    Python grezza della lista, mostrata cosi' com'e' in un'immagine social
+    reale (bando AIFA, segnalato dall'utente)."""
+    bando = {
+        "id": "CONC-AIFA", "titolo": "Concorso pubblico AIFA",
+        "enti": ["Agenzia Italiana del Farmaco - AIFA"], "num_posti": 5,
+        "scadenza": "2026-07-25T21:59:00Z", "sintesi": "Concorso AIFA.",
+        "titolo_studio_richiesto": None,
+    }
+    richiesta = agents._richiesta_immagine_da_bando(bando, "instagram_feed", "content-1")
+    assert "Ente: Agenzia Italiana del Farmaco - AIFA" in richiesta.dati_chiave
+    assert "Scadenza: 25 luglio 2026" in richiesta.dati_chiave
+    assert not any("[" in dato for dato in richiesta.dati_chiave)
+
+
 def test_visual_genera_un_immagine_per_bando_su_instagram(conn):
     content_id = db_social.crea_content(conn, "Tre concorsi amministrativi",
                                         canali=["instagram", "linkedin"])
