@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import auth  # noqa: E402
 from deps import ottieni_conn  # noqa: E402
 from social import (  # noqa: E402
-    agents, approvals, config, db_social, llm, publishing, security, state_machine,
+    agents, approvals, config, db_social, publishing, security, state_machine,
 )
 from social.integrations.instagram import InstagramAdapter  # noqa: E402
 from social.integrations.linkedin import LinkedInAdapter  # noqa: E402
@@ -432,43 +432,6 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
     _richiedi(conn, sessione, "social.edit")
     return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
         request, sessione, conn, pillars=db_social.pillars(conn)))
-
-
-@router.post("/contenuti/analizza-brief")
-def analizza_brief(request: Request, brief: str = Form(...), csrf: str = Form(None),
-                   sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
-    """Endpoint AJAX (JSON): interpreta il brief SUBITO, prima di creare il
-    contenuto — mostra all'utente i filtri che l'AI ha capito (regione,
-    competenze, posti minimi...) cosi' puo' correggere il testo se non
-    riflettono l'intenzione, invece di scoprirlo solo a fine pipeline.
-    Chiamata esplicita (bottone "Analizza brief"), non automatica ad ogni
-    tasto: ogni chiamata e' comunque una richiesta AI reale, con relativo
-    costo tracciato come le altre (vedi agents.interpreta_brief)."""
-    _richiedi(conn, sessione, "social.edit")
-    _verifica_csrf(sessione, csrf)
-    brief = (brief or "").strip()
-    if not brief:
-        return {"nessun_criterio_specifico": True, "filtri": {}}
-    try:
-        criteri = agents.interpreta_brief(conn, brief)
-    except llm.BudgetEsaurito as errore:
-        log.warning("analisi brief fallita: %s", errore)
-        periodo = "giornaliero" if "giornaliero" in str(errore) else "mensile"
-        return {"errore": f"Budget AI {periodo} esaurito: l'analisi automatica del brief non è "
-                           "disponibile fino al reset del budget. Puoi comunque salvare l'idea o "
-                           "avviare la pipeline (potrebbe incontrare lo stesso limite).",
-                "nessun_criterio_specifico": True, "filtri": {}}
-    except llm.CircuitAperto as errore:
-        log.warning("analisi brief fallita: %s", errore)
-        return {"errore": "Il provider AI ha risposto con troppi errori di fila ed è stato "
-                           "temporaneamente disattivato: riprova tra qualche minuto.",
-                "nessun_criterio_specifico": True, "filtri": {}}
-    except Exception as errore:
-        log.warning("analisi brief fallita: %s", errore)
-        return {"errore": "Analisi non disponibile al momento: riprova, o procedi comunque.",
-                "nessun_criterio_specifico": True, "filtri": {}}
-    return {"nessun_criterio_specifico": criteri.nessun_criterio_specifico,
-            "filtri": agents._filtri_da_criteri(criteri)}
 
 
 @router.post("/contenuti")

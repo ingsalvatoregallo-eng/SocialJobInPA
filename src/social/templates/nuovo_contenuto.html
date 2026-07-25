@@ -39,15 +39,7 @@
     <label>Brief</label>
     <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
               placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
-    <div class="hint" style="display:flex;justify-content:space-between">
-      <span>Più il brief è specifico (regione, competenza, posti minimi...), più la ricerca sui bandi sarà mirata.</span>
-      <button type="button" class="btn piccolo secondario" id="btn-analizza" style="white-space:nowrap;margin-left:8px">✨ Analizza brief</button>
-    </div>
-
-    <div id="box-comprensione" style="display:none;margin-top:14px">
-      <label style="margin-bottom:6px">Cosa ha capito l'AI</label>
-      <div id="chips-comprensione" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-    </div>
+    <p class="hint">Più il brief è specifico (regione, competenza, posti minimi...), più la ricerca sui bandi sarà mirata.</p>
     <div class="avviso giallo" style="margin-top:14px">
       ⚠️ Se non viene trovato nessun bando reale che corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
     </div>
@@ -70,56 +62,4 @@
     <p class="hint" style="margin-top:14px">Se scegli "Salva come idea" il contenuto resta in bozza: potrai avviare l'elaborazione AI più tardi dalla pagina Contenuti.</p>
   </div>
 </div>
-
-<script>
-(function () {
-  const btn = document.getElementById('btn-analizza');
-  const brief = document.getElementById('campo-brief');
-  const box = document.getElementById('box-comprensione');
-  const chips = document.getElementById('chips-comprensione');
-  const csrf = document.querySelector('input[name=csrf]').value;
-
-  const ETICHETTE = {
-    regione: 'Regione', categoria: 'Categoria', settore: 'Settore', ente: 'Ente',
-    competenza: 'Competenza', ambito: 'Ambito', inquadramento: 'Inquadramento',
-    titolo_studio: 'Titolo di studio', tipo_contratto: 'Contratto',
-    posti_minimi: 'Posti minimi', lavoro_agile: 'Lavoro agile', query: 'Ricerca testuale'
-  };
-
-  btn.addEventListener('click', async function () {
-    if (!brief.value.trim()) return;
-    btn.disabled = true;
-    btn.textContent = 'Analisi in corso...';
-    try {
-      const risposta = await fetch('/social/contenuti/analizza-brief', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ brief: brief.value, csrf: csrf })
-      });
-      const dati = await risposta.json();
-      chips.innerHTML = '';
-      box.style.display = 'block';
-      if (dati.errore) {
-        chips.innerHTML = '<span class="hint">' + dati.errore + '</span>';
-      } else if (dati.nessun_criterio_specifico || !Object.keys(dati.filtri || {}).length) {
-        chips.innerHTML = '<span class="hint">Nessun criterio specifico riconosciuto: la ricerca userà i bandi più recenti.</span>';
-      } else {
-        for (const [chiave, valore] of Object.entries(dati.filtri)) {
-          if (valore === null || valore === undefined || valore === '') continue;
-          const span = document.createElement('span');
-          span.className = 'badge blu';
-          span.textContent = (ETICHETTE[chiave] || chiave) + ': ' + valore;
-          chips.appendChild(span);
-        }
-      }
-    } catch (e) {
-      chips.innerHTML = '<span class="hint">Analisi non disponibile al momento.</span>';
-      box.style.display = 'block';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '✨ Analizza brief';
-    }
-  });
-})();
-</script>
 {% endblock %}
