@@ -9,8 +9,11 @@ from social.images import MockImageProvider
 
 
 class _ClientFinto:
-    """Espone bandi()/filtri_disponibili() come il vero JobInPAClient, ma
-    con risposte prefissate — mai una vera chiamata di rete nei test."""
+    """Espone bandi()/bandi_semantici()/filtri_disponibili() come il vero
+    JobInPAClient, ma con risposte prefissate — mai una vera chiamata di
+    rete nei test. bandi_semantici() e' il percorso usato SEMPRE quando
+    c'e' un brief (vedi agents.research): bandi() resta solo per il caso
+    senza brief (ricerca generica dei bandi aperti piu' recenti)."""
 
     def __init__(self, bandi=None, filtri=None):
         self._bandi = bandi if bandi is not None else []
@@ -26,6 +29,7 @@ class _ClientFinto:
             "ambiti": ["Informatica e tecnologia"],
         }
         self.chiamate_bandi = []
+        self.chiamate_bandi_semantici = []
 
     @property
     def configurato(self):
@@ -33,6 +37,10 @@ class _ClientFinto:
 
     def bandi(self, *, limit=5, **filtri):
         self.chiamate_bandi.append(dict(limit=limit, **filtri))
+        return self._bandi
+
+    def bandi_semantici(self, query, *, limit=5, **filtri):
+        self.chiamate_bandi_semantici.append(dict(query=query, limit=limit, **filtri))
         return self._bandi
 
     def bando(self, concorso_id):
@@ -76,6 +84,10 @@ def test_filtri_da_criteri_rinomina_query_testuale():
 
 
 def test_research_con_criteri_specifici_e_bandi_trovati(conn):
+    """Con un brief, la ricerca passa sempre dalla ricerca semantica (query =
+    il brief stesso): posti_minimi non viene passato alla chiamata (non
+    supportato lato server), ma resta applicato come post-filtro sui
+    risultati — qui il bando ha 15 posti >= 10 richiesti, quindi passa."""
     client = _ClientFinto(bandi=[_BANDO_INFORMATICO])
     provider = llm.MockLLMProvider(conn)
     provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
@@ -83,8 +95,11 @@ def test_research_con_criteri_specifici_e_bandi_trovati(conn):
     content_id = db_social.crea_content(
         conn, "Concorsi IT", brief="Concorsi informatici con più di 10 posti")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 10, "competenza": "informatica", "posti_minimi": 10}]
+    assert client.chiamate_bandi_semantici == [
+        {"query": "Concorsi informatici con più di 10 posti", "limit": 10, "competenza": "informatica"}]
+    assert client.chiamate_bandi == []  # mai il vecchio match esatto quando c'e' un brief
     assert risultato.fatti or risultato.sintesi is not None  # non solleva, prosegue normale
+    assert risultato.bandi_trovati == [_BANDO_INFORMATICO]
 
 
 def test_research_con_criteri_specifici_e_zero_bandi_annulla(conn):
@@ -98,11 +113,11 @@ def test_research_con_criteri_specifici_e_zero_bandi_annulla(conn):
         agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
 
 
-def test_research_senza_criteri_specifici_non_annulla_anche_se_vuoto(conn):
-    """Un brief generico (es. 'novita della settimana') non deve mai
-    annullare la pipeline anche se JobInPA non ha nulla da mostrare in quel
-    momento — e' il comportamento di sempre (ricerca generica), non un
-    criterio da soddisfare."""
+def test_research_senza_criteri_specifici_usa_comunque_la_ricerca_semantica(conn):
+    """Anche un brief senza criteri specifici estratti (nessun valore di
+    vocabolario riconosciuto) passa dalla ricerca semantica col testo del
+    brief: e' sempre meglio di 'bandi aperti piu' recenti a caso', a
+    differenza del vecchio comportamento sui filtri strutturati esatti."""
     client = _ClientFinto(bandi=[])
     provider = llm.MockLLMProvider(conn)
     provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
@@ -110,8 +125,24 @@ def test_research_senza_criteri_specifici_non_annulla_anche_se_vuoto(conn):
     content_id = db_social.crea_content(
         conn, "Novità della settimana", brief="Raccontiamo le novità di questa settimana")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 10, "stato": "OPEN"}]  # ricerca generica, non filtrata
+    assert client.chiamate_bandi_semantici == [
+        {"query": "Raccontiamo le novità di questa settimana", "limit": 10}]
+    assert client.chiamate_bandi == []
     assert risultato is not None
+
+
+def test_research_senza_criteri_specifici_non_annulla_anche_se_vuoto(conn):
+    """Un brief generico (es. 'novita della settimana') non deve mai
+    annullare la pipeline anche se la ricerca semantica non trova nulla di
+    pertinente — non c'era un criterio specifico da soddisfare."""
+    client = _ClientFinto(bandi=[])
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        nessun_criterio_specifico=True))
+    content_id = db_social.crea_content(
+        conn, "Novità della settimana", brief="Raccontiamo le novità di questa settimana")
+    risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
+    assert risultato is not None  # non solleva NessunBandoCorrispondente
 
 
 def test_research_senza_brief_non_interpreta_niente(conn):

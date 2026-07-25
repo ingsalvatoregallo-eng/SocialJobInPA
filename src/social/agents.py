@@ -93,24 +93,42 @@ def _fetch_fonte(conn, url):
 
 
 def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO, *,
-                      client=None, filtri=None):
+                      client=None, filtri=None, query_semantica=None):
     """Fatti dal portale JobInPA (fonte primaria autorizzata), letti via API
     private: il bando indicato con la sua classificazione AI (sintesi,
-    requisiti, titolo di studio), oppure i bandi che soddisfano `filtri`
-    (derivati dal brief, vedi interpreta_brief), oppure — senza ne'
-    concorso_id ne' filtri — i bandi aperti piu' recenti. Il limite di
-    default e' quello di un carosello Instagram (10): se ne trova piu' di
-    uno, il Visual Agent genera un'immagine per bando invece di sceglierne
-    uno solo (vedi visual()).
+    requisiti, titolo di studio), oppure — con `query_semantica` (il brief
+    in linguaggio naturale) — i bandi che la ricerca SEMANTICA di JobInPA
+    (embedding + reranking AI, vedi jobinpa_client.bandi_semantici) giudica
+    genuinamente pertinenti, oppure — senza ne' concorso_id ne' query
+    semantica — i bandi aperti piu' recenti. Il limite di default e' quello
+    di un carosello Instagram (10): se ne trova piu' di uno, il Visual
+    Agent genera un'immagine per bando invece di sceglierne uno solo (vedi
+    visual()).
+
+    `filtri` (derivati dal brief da interpreta_brief) restano vincoli duri
+    applicati PRIMA del confronto semantico (regione, titolo di studio,
+    ecc.), non un match esatto al posto della ricerca semantica: e' quella
+    a decidere la pertinenza, non un confronto letterale coi vocabolari.
+    posti_minimi non e' supportato lato server dalla ricerca semantica
+    (embedding_filtrati non lo prevede): applicato qui come post-filtro sui
+    risultati, cosi' il vincolo resta rispettato comunque.
+
     Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
-    se la ricerca ha trovato qualcosa (vedi research(), annullamento su
-    criteri specifici senza risultati). Senza JOBINPA_API_URL/KEY
-    configurate ritorna ("", []): la pipeline prosegue comunque con meno
-    contesto (nessun criterio specifico -> non e' un annullamento)."""
+    se la ricerca ha trovato qualcosa (vedi research(), annullamento se la
+    ricerca semantica non trova nulla di pertinente). Senza JOBINPA_API_URL/
+    KEY configurate ritorna ("", []): la pipeline prosegue comunque con meno
+    contesto (nessuna query semantica -> non e' un annullamento)."""
     client = client or jobinpa_client.client()
     if concorso_id:
         bando = client.bando(concorso_id)
         righe = [bando] if bando else []
+    elif query_semantica:
+        filtri_semantici = dict(filtri or {})
+        filtri_semantici.pop("query", None)  # la query e' query_semantica, non un sotto-filtro
+        posti_minimi = filtri_semantici.pop("posti_minimi", None)
+        righe = client.bandi_semantici(query_semantica, limit=limite, **filtri_semantici)
+        if posti_minimi:
+            righe = [r for r in righe if (r.get("num_posti") or 0) >= posti_minimi]
     elif filtri:
         righe = client.bandi(limit=limite, **filtri)
     else:
@@ -161,21 +179,37 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     """Produce fatti verificati per il contenuto. Le fonti esterne entrano nel
     prompt SOLO dentro blocchi <fonte> (dati non fidati, sez. 10).
 
-    Se il contenuto ha un brief con criteri specifici (interpreta_brief) e
-    la ricerca su JobInPA con quei criteri non trova nulla, solleva
-    NessunBandoCorrispondente: meglio annullare il contenuto che scrivere
-    un post su un risultato vuoto (vedi esegui_pipeline)."""
+    Con un brief, la ricerca su JobInPA passa SEMPRE dalla ricerca semantica
+    (embedding + reranking AI, vedi jobinpa_client.bandi_semantici) invece
+    del vecchio match esatto sui filtri strutturati: la query e' il brief
+    stesso, in linguaggio naturale. Gli eventuali criteri specifici estratti
+    da interpreta_brief (regione, titolo di studio, ecc.) restano vincoli
+    duri applicati prima del confronto semantico, non un filtro esatto al
+    posto suo.
+
+    Se il brief aveva criteri specifici e la ricerca semantica non trova
+    nulla di pertinente, solleva NessunBandoCorrispondente: meglio
+    annullare il contenuto che scrivere un post su un risultato vuoto
+    (vedi esegui_pipeline). Un brief generico (nessun criterio specifico)
+    non annulla mai, anche se la ricerca semantica non trova nulla: non
+    c'era una richiesta precisa da soddisfare."""
     content = db_social.get_content(conn, content_id)
     client = jobinpa_client_ or jobinpa_client.client()
     filtri = None
+    query_semantica = None
+    criteri_specifici = False
     if not content["concorso_id"] and content["brief"]:
         criteri = interpreta_brief(conn, content["brief"], provider=provider, client=client)
-        if not criteri.nessun_criterio_specifico:
+        criteri_specifici = not criteri.nessun_criterio_specifico
+        if criteri_specifici:
             filtri = _filtri_da_criteri(criteri)
-    contesto, righe_trovate = _contesto_jobinpa(content["concorso_id"], client=client, filtri=filtri)
-    if filtri and not righe_trovate:
+        query_semantica = content["brief"]
+    contesto, righe_trovate = _contesto_jobinpa(content["concorso_id"], client=client,
+                                                filtri=filtri, query_semantica=query_semantica)
+    if criteri_specifici and not righe_trovate:
         raise NessunBandoCorrispondente(
-            f"Nessun bando su JobInPA soddisfa i criteri derivati dal brief: {filtri}")
+            "Nessun bando su JobInPA pertinente al brief secondo la ricerca semantica: "
+            f"{content['brief']!r}")
     blocchi_fonte = [f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>"]
     if contesto:
         db_social.salva_source_item(conn, "jobinpa://bandi", "jobinpa.it",
