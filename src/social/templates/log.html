@@ -13,12 +13,12 @@
   <table><tr><th>Agente</th><th>Esito</th><th>Prompt (versione/hash)</th><th>Provider</th><th>Token</th><th>Costo</th><th>Inizio</th></tr>
   {% for r in agent_runs %}
     <tr><td>{{ r.agente }}</td>
-        <td><span class="badge {{ 'verde' if r.esito == 'ok' else ('rosso' if r.esito == 'errore' else 'grigio') }}">{{ r.esito }}</span></td>
+        <td><span class="badge {{ 'verde' if r.esito == 'ok' else ('rosso' if r.esito == 'errore' else 'grigio') }}">{{ r.esito }}{% if r._conteggio > 1 %} ×{{ r._conteggio }}{% endif %}</span></td>
         <td>{{ r.prompt_nome or '' }} {{ r.prompt_versione or '' }} <span class="hint">{{ r.prompt_hash or '' }}</span></td>
         <td>{{ r.provider or '' }}/{{ r.modello or '' }}</td>
         <td>{{ r.token_input or 0 }}/{{ r.token_output or 0 }}</td>
         <td>{% if r.costo_eur %}{{ "%.4f"|format(r.costo_eur) }} €{% endif %}</td>
-        <td>{{ r.iniziato_at|data_breve }}</td></tr>
+        <td>{% if r._conteggio > 1 %}{{ r._da|data_breve }} → {% endif %}{{ r.iniziato_at|data_breve }}</td></tr>
   {% else %}<tr><td colspan="7" class="hint">Nessuna esecuzione registrata.</td></tr>{% endfor %}
   </table>
 </div>

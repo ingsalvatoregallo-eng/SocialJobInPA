@@ -18,7 +18,7 @@
       {% for a in accounts %}
       <tr>
         <td>{{ '📷 Instagram' if a.piattaforma == 'instagram' else '💼 LinkedIn' if a.piattaforma == 'linkedin' else a.piattaforma }}</td>
-        <td><span class="badge {{ 'verde' if a.stato == 'verificato' else 'arancio' }}">{{ a.stato }}</span></td>
+        <td><span class="badge {{ a.stato|stato_account_colore }}">{{ a.stato|stato_account }}</span></td>
         <td><span class="badge {{ 'verde' if a.publishing_enabled else 'grigio' }}">{{ 'abilitato' if a.publishing_enabled else 'disabilitato' }}</span></td>
         <td style="white-space:nowrap">
           <a class="btn piccolo secondario" href="/social/oauth/{{ a.piattaforma }}/start">Autorizza</a>

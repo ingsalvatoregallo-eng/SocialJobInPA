@@ -33,7 +33,17 @@
 </div>
 
 <div class="card">
-  <h3>Voci di costo recenti</h3>
+  <h3>Riepilogo costi per agente (ultimi 30 giorni)</h3>
+  <table><tr><th>Provider</th><th>Agente</th><th>Chiamate</th><th>Costo totale</th></tr>
+  {% for r in riepilogo_costi %}
+    <tr><td>{{ r.provider }}</td><td>{{ r.agente }}</td><td>{{ r.chiamate }}</td>
+        <td>{{ "%.4f"|format(r.costo_totale) }} €</td></tr>
+  {% else %}<tr><td colspan="4" class="hint">Nessun costo negli ultimi 30 giorni.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>Voci di costo recenti <span class="hint">(log grezzo, una riga per chiamata)</span></h3>
   <table><tr><th>Provider</th><th>Modello</th><th>Agente</th><th>Token (in/out)</th><th>Costo</th><th>Quando</th></tr>
   {% for v in costi %}
     <tr><td>{{ v.provider }}</td><td>{{ v.modello or '' }}</td><td>{{ v.agente or '' }}</td>

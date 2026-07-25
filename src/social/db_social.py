@@ -995,6 +995,19 @@ def costo_periodo(conn, provider, *, giorni=None):
     return riga["totale"]
 
 
+def riepilogo_costi_per_agente(conn, giorni=30):
+    """Costi aggregati per provider+agente sugli ultimi N giorni: quante
+    chiamate e quanto costano in totale. Un job schedulato che gira ogni
+    pochi minuti puo' produrre decine di righe quasi identiche nel log
+    grezzo (report_costi): questo riepilogo da' il quadro d'insieme senza
+    doverle scorrere una per una."""
+    soglia = (datetime.now(timezone.utc) - timedelta(days=giorni)).isoformat()
+    return conn.execute(
+        "SELECT provider, COALESCE(agente, '(n/d)') AS agente, COUNT(*) AS chiamate, "
+        "SUM(costo_eur) AS costo_totale FROM social_cost_entries WHERE creato_at >= ? "
+        "GROUP BY provider, agente ORDER BY costo_totale DESC", (soglia,)).fetchall()
+
+
 def report_costi(conn, limit=500):
     return conn.execute(
         "SELECT provider, modello, agente, content_id, costo_eur, token_input, "
@@ -1143,6 +1156,18 @@ def plan_settimana(conn, settimana):
         "LEFT JOIN social_editorial_pillars p ON p.id = pl.pillar_id "
         "WHERE pl.settimana = ? ORDER BY pl.priorita DESC, pl.creato_at",
         (settimana,)).fetchall()
+
+
+def conteggio_suggerimenti_per_settimana(conn):
+    """Numero di suggerimenti in attesa ('suggerito') per ciascuna
+    settimana: usato in Calendario per segnalare quando la settimana
+    visualizzata e' vuota ma il Supervisor Agent ne ha proposti altrove
+    (es. la settimana successiva), altrimenti invisibili finche' non si
+    clicca avanti/indietro per caso."""
+    righe = conn.execute(
+        "SELECT settimana, COUNT(*) AS n FROM social_editorial_plans "
+        "WHERE stato = 'suggerito' GROUP BY settimana ORDER BY settimana").fetchall()
+    return {r["settimana"]: r["n"] for r in righe}
 
 
 def plan_mese(conn, prefisso_mese):

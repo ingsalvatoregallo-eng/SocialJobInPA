@@ -70,9 +70,24 @@ def fase_di(stato):
     return FASE_PER_STATO.get(stato, stato.lower())
 
 
+# Stato tecnico degli account social (social_accounts.stato): mostrato
+# finora come stringa grezza del DB ("non_configurato") invece di
+# un'etichetta leggibile, unico posto della dashboard rimasto cosi' dopo
+# il resto del restyling.
+STATO_ACCOUNT_LABEL = {
+    "non_configurato": "Da configurare", "in_configurazione": "In configurazione",
+    "verificato": "Verificato", "errore": "Errore",
+}
+STATO_ACCOUNT_COLORE = {
+    "non_configurato": "grigio", "in_configurazione": "arancio",
+    "verificato": "verde", "errore": "rosso",
+}
+
 templates.env.filters["fase"] = lambda stato: FASE_LABEL.get(fase_di(stato), stato)
 templates.env.filters["fase_colore"] = lambda stato: FASE_COLORE.get(fase_di(stato), "grigio")
 templates.env.filters["data_breve"] = lambda iso: (iso or "")[:16].replace("T", " ")
+templates.env.filters["stato_account"] = lambda stato: STATO_ACCOUNT_LABEL.get(stato, stato)
+templates.env.filters["stato_account_colore"] = lambda stato: STATO_ACCOUNT_COLORE.get(stato, "grigio")
 templates.env.globals["FASE_COLORE"] = FASE_COLORE
 
 _COOKIE = "social_session"
@@ -296,9 +311,14 @@ def calendario(request: Request, settimana: Optional[str] = None,
 
     suggerimenti = [v for v in voci if v["stato"] == "suggerito"]
 
+    conteggio_settimane = db_social.conteggio_suggerimenti_per_settimana(conn)
+    altre_settimane_suggerimenti = sorted(
+        (s, n) for s, n in conteggio_settimane.items() if s != settimana_iso)
+
     return templates.TemplateResponse(request, "calendario.html", _ctx(
         request, sessione, conn, giorni=giorni, suggerimenti=suggerimenti,
         pillars=db_social.pillars(conn),
+        altre_settimane_suggerimenti=altre_settimane_suggerimenti,
         corrente=settimana_iso,
         precedente=(inizio - timedelta(weeks=1)).isoformat(),
         successiva=(inizio + timedelta(weeks=1)).isoformat()))
@@ -667,7 +687,32 @@ def analytics(request: Request, sessione=Depends(utente_web),
         budget_anthropic=config.anthropic_monthly_budget_eur(),
         costo_openai=db_social.costo_periodo(conn, "openai_images"),
         budget_openai=config.openai_image_monthly_budget_eur(),
+        riepilogo_costi=db_social.riepilogo_costi_per_agente(conn),
         costi=db_social.report_costi(conn, limit=100)))
+
+
+def _raggruppa_esecuzioni_ripetute(righe):
+    """Raggruppa esecuzioni fallite consecutive e identiche (stesso agente e
+    prompt) in un'unica riga con un contatore: un job dello scheduler che
+    ritenta ogni pochi minuti puo' altrimenti riempire il log di decine di
+    righe indistinguibili, nascondendo le esecuzioni realmente diverse.
+    Le esecuzioni riuscite non vengono mai raggruppate: ognuna e' un evento
+    reale con il proprio costo e i propri token."""
+    raggruppate = []
+    for r in righe:
+        precedente = raggruppate[-1] if raggruppate else None
+        if (r["esito"] == "errore" and precedente is not None
+                and precedente["esito"] == "errore"
+                and precedente["agente"] == r["agente"]
+                and precedente["prompt_nome"] == r["prompt_nome"]):
+            precedente["_conteggio"] += 1
+            precedente["_da"] = r["iniziato_at"]
+        else:
+            riga = dict(r)
+            riga["_conteggio"] = 1
+            riga["_da"] = r["iniziato_at"]
+            raggruppate.append(riga)
+    return raggruppate
 
 
 @router.get("/log", response_class=HTMLResponse)
@@ -675,7 +720,7 @@ def log_pagina(request: Request, sessione=Depends(utente_web),
                conn=Depends(ottieni_conn)):
     return templates.TemplateResponse(request, "log.html", _ctx(
         request, sessione, conn,
-        agent_runs=db_social.agent_runs_recenti(conn, limit=50),
+        agent_runs=_raggruppa_esecuzioni_ripetute(db_social.agent_runs_recenti(conn, limit=50)),
         audit=db_social.audit_recenti(conn, limit=50),
         email=db_social.email_recenti(conn, limit=30),
         jobs=db_social.lista_jobs(conn, limit=50)))

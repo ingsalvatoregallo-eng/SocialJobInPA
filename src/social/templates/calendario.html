@@ -18,6 +18,13 @@
   {% endif %}
 </div>
 
+{% if altre_settimane_suggerimenti %}
+<div class="avviso giallo">
+  ⚠️ Ci sono temi suggeriti dall'AI in altre settimane:
+  {% for s, n in altre_settimane_suggerimenti %}<a href="/social/calendario?settimana={{ s }}"><strong>{{ n }}</strong> il {{ s }}</a>{{ ', ' if not loop.last }}{% endfor %}.
+</div>
+{% endif %}
+
 <div class="griglia" style="grid-template-columns:1fr 320px;align-items:start">
   <div>
     <div class="card" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
@@ -102,7 +109,13 @@
       {% endif %}
     </form>
     {% else %}
-    <p class="hint">Nessun tema suggerito per questa settimana.{% if 'social.edit' in permessi %} Genera 3 nuove idee con l'AI.{% endif %}</p>
+    <p class="hint">
+      Nessun tema suggerito per questa settimana.
+      {% if altre_settimane_suggerimenti %}
+        Guarda {% for s, n in altre_settimane_suggerimenti %}<a href="/social/calendario?settimana={{ s }}">{{ s }}</a>{{ ' o ' if not loop.last }}{% endfor %} qui sopra,
+      {% endif %}
+      {% if 'social.edit' in permessi %}o genera 3 nuove idee con l'AI.{% endif %}
+    </p>
     {% endfor %}
   </div>
 </div>
