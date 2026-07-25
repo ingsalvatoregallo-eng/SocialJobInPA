@@ -52,6 +52,33 @@ def test_titolo_lungo_non_sconfina_nel_footer(tmp_path):
         assert _hex_a_rgb(images.PALETTE_DEFAULT["accento"]) not in colori_nella_fascia
 
 
+def test_dato_chiave_lungo_non_sconfina_a_destra(tmp_path):
+    """Regressione: un dato_chiave lungo (es. 'Tipo contratto: tempo
+    indeterminato, tempo pieno') veniva disegnato su una riga sola senza
+    alcun limite di larghezza e finiva tagliato fuori dal riquadro e dal
+    bordo destro dell'immagine (osservato in produzione sulle card
+    'nuovo_concorso'). Verifica che nessun pixel di colore 'testo' compaia
+    nella fascia di margine destro riservata al bordo sicuro."""
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    asset = provider.genera_sync(images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed", titolo="AIFA: concorso per 5 posti",
+        sottotitolo="Area dei Funzionari - profilo amministrativo gestionale",
+        dati_chiave=[
+            "Ente: Agenzia Italiana del Farmaco (AIFA)", "Posti: 5",
+            "Tipo contratto: tempo indeterminato, tempo pieno",
+            "Area: Funzionari - Famiglia professionale amministrativo gestionale",
+            "Modalità selezione: concorso pubblico per esami"]))
+    with Image.open(asset.percorso) as img:
+        larghezza, altezza = img.size
+        scala = larghezza / 1080
+        margine = int(larghezza * images.MARGINE_SICURO)
+        altezza_barra = int(90 * scala)
+        altezza_footer = int(110 * scala)
+        fascia_destra = img.crop((larghezza - margine, altezza_barra, larghezza, altezza - altezza_footer))
+        colori_nella_fascia = set(fascia_destra.getdata())
+        assert _hex_a_rgb(images.PALETTE_DEFAULT["testo"]) not in colori_nella_fascia
+
+
 @pytest.mark.parametrize("formato,atteso", [
     ("instagram_feed", (1080, 1350)), ("instagram_square", (1080, 1080)),
     ("instagram_story", (1080, 1920)), ("linkedin", (1200, 627))])

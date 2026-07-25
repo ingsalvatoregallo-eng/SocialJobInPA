@@ -104,6 +104,22 @@ def _font(dimensione, bold=False):
     return ImageFont.load_default(size=dimensione)
 
 
+def _tronca_una_riga(draw, testo, font, larghezza_max):
+    """Accorcia il testo con '…' se non sta su una riga sola in larghezza_max
+    pixel: usato per i riquadri dati_chiave (pensati per una riga, a
+    differenza di titolo/sottotitolo che vanno a capo con _a_capo) — senza
+    questo, un dato lungo (es. "Tipo contratto: tempo indeterminato, tempo
+    pieno") veniva disegnato per intero e sconfinava fuori dal riquadro e
+    dal bordo destro dell'immagine."""
+    if draw.textlength(testo, font=font) <= larghezza_max:
+        return testo
+    ellissi = "…"
+    tronco = testo
+    while tronco and draw.textlength(tronco + ellissi, font=font) > larghezza_max:
+        tronco = tronco[:-1]
+    return (tronco.rstrip() + ellissi) if tronco else ellissi
+
+
 def _a_capo(draw, testo, font, larghezza_max):
     """Spezza il testo in righe che stanno in larghezza_max pixel."""
     parole, righe, riga = testo.split(), [], ""
@@ -186,14 +202,16 @@ class TemplateImageProvider:
         # Dati chiave: riquadri con bordo accento — SEMPRE deterministici.
         font_dato = _font(int(40 * scala), bold=True)
         altezza_box = int(76 * scala)
+        padding_box = int(28 * scala)
+        larghezza_testo_box = interno - 2 * padding_box
         for dato in request.dati_chiave[:5]:
             if y + altezza_box > y_limite:
                 break
-            testo_dato = str(dato)
+            testo_dato = _tronca_una_riga(draw, str(dato), font_dato, larghezza_testo_box)
             draw.rounded_rectangle(
                 [margine, y, larghezza - margine, y + altezza_box],
                 radius=int(14 * scala), outline=palette["accento"], width=max(2, int(4 * scala)))
-            draw.text((margine + int(28 * scala), y + altezza_box // 2), testo_dato,
+            draw.text((margine + padding_box, y + altezza_box // 2), testo_dato,
                       font=font_dato, fill=palette["testo"], anchor="lm")
             y += altezza_box + int(22 * scala)
 
