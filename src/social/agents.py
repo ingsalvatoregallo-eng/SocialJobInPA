@@ -200,6 +200,22 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     criteri_specifici = False
     if not content["concorso_id"] and content["brief"]:
         criteri = interpreta_brief(conn, content["brief"], provider=provider, client=client)
+        if criteri.annuncio_funzionalita:
+            # Il brief promuove una funzionalita'/iniziativa della piattaforma,
+            # non un bando: niente ricerca su JobInPA, il brief stesso e' il
+            # fatto da riportare. richiede_revisione=True qui e' solo
+            # informativo — la garanzia di revisione umana e' imposta a
+            # prescindere dalla classe di rischio in esegui_pipeline.
+            risultato = models.RisultatoRicerca(
+                fatti=[models.FattoVerificato(fatto=content["brief"], confidenza=1.0)],
+                sintesi=content["brief"], richiede_revisione=True,
+                annuncio_funzionalita=True)
+            for fatto in risultato.fatti:
+                db_social.salva_fatto(conn, fatto.fatto, content_id=content_id,
+                                      fonte_url=fatto.fonte_url, confidenza=fatto.confidenza,
+                                      conflitto=fatto.in_conflitto,
+                                      richiede_revisione=risultato.richiede_revisione)
+            return risultato
         criteri_specifici = not criteri.nessun_criterio_specifico
         if criteri_specifici:
             filtri = _filtri_da_criteri(criteri)
@@ -582,6 +598,12 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
             state_machine.transisci(conn, content_id, "RESEARCH_FAILED",
                                     agente="supervisor", motivo=str(errore))
         raise
+    if ricerca.annuncio_funzionalita and decisione == "auto_publish":
+        # Un annuncio su una funzionalita' della piattaforma non ha una fonte
+        # esterna verificabile come un bando: anche a classe verde, richiede
+        # sempre revisione umana prima della pubblicazione (mai un override
+        # di "blocked", che deve restare bloccante per contenuti a rischio).
+        decisione = "human_approval"
     if decisione == "blocked":
         state_machine.transisci(conn, content_id, "BLOCKED", agente="quality_risk",
                                 motivo=f"classe {classe}")

@@ -44,6 +44,14 @@ class CriteriRicerca(BaseModel):
                     "'novita della settimana'): in questo caso tutti gli altri campi "
                     "restano None e la ricerca NON viene considerata 'senza risultati' "
                     "se torna vuota — semplicemente non c'era un criterio da soddisfare.")
+    annuncio_funzionalita: bool = Field(
+        default=False,
+        description="True se il brief promuove una funzionalita'/iniziativa della "
+                    "piattaforma JobInPA stessa (es. 'il premium e' gratis fino al 31 "
+                    "agosto', 'c'e' la funzionalita' inviti amici', 'bandi consigliati "
+                    "dall'analisi del CV') invece di cercare bandi specifici da "
+                    "pubblicizzare. Quando True la ricerca su JobInPA viene saltata: il "
+                    "brief stesso e' trattato come la fonte, non un criterio di ricerca.")
 
 
 class RisultatoRicerca(BaseModel):
@@ -58,6 +66,13 @@ class RisultatoRicerca(BaseModel):
                     "popolato da research() dopo la chiamata al modello). Usato dal "
                     "Visual Agent per generare un'immagine per bando in un carosello "
                     "Instagram invece di farne scegliere uno solo al modello.")
+    annuncio_funzionalita: bool = Field(
+        default=False,
+        description="Copiato da CriteriRicerca.annuncio_funzionalita (non generato "
+                    "direttamente dal modello di questo schema): usato da "
+                    "esegui_pipeline per forzare SEMPRE una revisione umana prima della "
+                    "pubblicazione, anche a classe di rischio verde — un annuncio sulla "
+                    "piattaforma non e' verificato da una fonte esterna come un bando.")
 
 
 class VarianteCopy(BaseModel):

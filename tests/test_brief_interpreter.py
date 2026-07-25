@@ -158,6 +158,49 @@ def test_research_senza_brief_non_interpreta_niente(conn):
     assert not any(r["prompt_nome"] == "interpreta_brief" for r in esecuzioni)
 
 
+def test_research_annuncio_funzionalita_salta_la_ricerca_bandi(conn):
+    """Un brief che promuove una funzionalita' della piattaforma (premium,
+    inviti amici, bandi consigliati dal CV...) non e' una ricerca di bandi:
+    research() non deve chiamare ne' bandi() ne' bandi_semantici(), il brief
+    stesso diventa il fatto verificato."""
+    client = _ClientFinto(bandi=[_BANDO_INFORMATICO])
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        annuncio_funzionalita=True, nessun_criterio_specifico=True))
+    content_id = db_social.crea_content(
+        conn, "Premium gratis", brief="Il premium è gratis fino al 31 agosto")
+    risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
+    assert client.chiamate_bandi == []
+    assert client.chiamate_bandi_semantici == []
+    assert risultato.annuncio_funzionalita
+    assert risultato.bandi_trovati == []
+    assert risultato.richiede_revisione
+    assert risultato.fatti[0].fatto == "Il premium è gratis fino al 31 agosto"
+
+
+def test_pipeline_annuncio_funzionalita_forza_revisione_umana(conn, monkeypatch):
+    """Anche se il Quality & Risk Agent classifica il post come verde
+    (auto_publish), un annuncio di funzionalita' deve SEMPRE passare da
+    revisione umana: non ha una fonte esterna verificabile come un bando."""
+    client = _ClientFinto()
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        annuncio_funzionalita=True, nessun_criterio_specifico=True))
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="verde", punteggio_accuratezza=1.0, punteggio_brand=1.0,
+        punteggio_conformita=1.0))
+    content_id = db_social.crea_content(
+        conn, "Premium gratis", brief="Il premium è gratis fino al 31 agosto")
+
+    monkeypatch.setattr("social.jobinpa_client.client", lambda: client)
+    stato = agents.esegui_pipeline(conn, content_id, provider=provider,
+                                   image_provider=MockImageProvider())
+
+    assert stato == "AWAITING_APPROVAL"
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "AWAITING_APPROVAL"
+
+
 def test_pipeline_annullata_per_zero_corrispondenze(conn, monkeypatch):
     client = _ClientFinto(bandi=[])
     provider = llm.MockLLMProvider(conn)

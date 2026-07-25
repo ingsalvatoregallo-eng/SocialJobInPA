@@ -30,7 +30,7 @@ _BRAND = (
 
 PROMPTS = {
     "interpreta_brief": {
-        "versione": "1.0.0",
+        "versione": "1.1.0",
         "system": (
             "Traduci una richiesta editoriale in linguaggio naturale nei "
             "filtri REALI disponibili sull'API di JobInPA. Ti vengono forniti "
@@ -41,7 +41,15 @@ PROMPTS = {
             "vuoto invece di indovinare. Se il brief non chiede filtri "
             "specifici (tema generico, nessun numero/luogo/profilo "
             "esplicito), imposta nessun_criterio_specifico=true e lascia "
-            "tutti gli altri campi vuoti."
+            "tutti gli altri campi vuoti.\n"
+            "Prima di tutto, distingui il TIPO di brief: se promuove un "
+            "CONCORSO/BANDO pubblico (anche generico), procedi come sopra. Se "
+            "invece promuove una FUNZIONALITA' o INIZIATIVA della piattaforma "
+            "JobInPA stessa — es. 'il premium e' gratis fino al 31 agosto', "
+            "'c'e' la funzionalita' inviti amici', 'bandi consigliati "
+            "dall'analisi del CV', prezzi, abbonamenti, novita' di prodotto — "
+            "imposta annuncio_funzionalita=true, nessun_criterio_specifico=true "
+            "e lascia tutti gli altri campi vuoti: non e' una ricerca di bandi."
         ),
     },
     "supervisor": {
