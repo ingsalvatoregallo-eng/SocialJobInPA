@@ -1,34 +1,109 @@
 {% extends "base.html" %}
 {% block titolo %}Calendario editoriale — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Calendario editoriale</h2>
-<p>
-  <a class="btn secondario" href="/social/calendario?settimana={{ precedente }}">&larr; Settimana precedente</a>
-  <a class="btn secondario" href="/social/calendario?settimana={{ successiva }}">Settimana successiva &rarr;</a>
-</p>
-{% for settimana in settimane %}
-<div class="card">
-  <h3>Settimana del {{ settimana }} {% if settimana == corrente %}<span class="badge blu">selezionata</span>{% endif %}</h3>
-  {% if voci[settimana] %}
-  <table><tr><th>Pillar</th><th>Tema</th><th>Obiettivo</th><th>Fascia oraria</th><th>Stato</th><th>Contenuto</th></tr>
-  {% for v in voci[settimana] %}
-    <tr>
-      <td><span class="badge grigio">{{ v.pillar_nome or 'n/d' }}</span></td>
-      <td>{{ v.tema }}</td><td>{{ v.obiettivo or '' }}</td><td>{{ v.fascia_oraria or 'auto' }}</td>
-      <td>{{ v.stato }}</td>
-      <td>{% if v.content_id %}<a href="/social/contenuti/{{ v.content_id }}">apri</a>{% endif %}</td>
-    </tr>
-  {% endfor %}</table>
-  {% else %}
-  <p style="color:var(--grigio)">Nessun argomento pianificato.</p>
+<div class="header-pagina">
+  <div>
+    <h1>Calendario editoriale</h1>
+    <p class="sottotitolo">Temi suggeriti dall'AI e contenuti pianificati per la settimana.</p>
+  </div>
   {% if 'social.edit' in permessi %}
-  <form method="post" action="/social/calendario/genera" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="settimana" value="{{ settimana }}">
-    <button class="btn" type="submit">Genera 3 argomenti (Supervisor Agent)</button>
-  </form>
-  {% endif %}
+  <div style="display:flex;gap:8px">
+    <form method="post" action="/social/calendario/genera">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="settimana" value="{{ corrente }}">
+      <button class="btn secondario" type="submit">↻ Genera 3 temi</button>
+    </form>
+    <a class="btn" href="/social/contenuti/nuovo">+ Nuova idea</a>
+  </div>
   {% endif %}
 </div>
-{% endfor %}
+
+<div class="griglia" style="grid-template-columns:1fr 320px;align-items:start">
+  <div>
+    <div class="card" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
+      <strong style="font-size:13.5px">Settimana del {{ corrente }}</strong>
+      <div style="display:flex;gap:8px">
+        <a class="btn piccolo secondario" href="/social/calendario?settimana={{ precedente }}">&larr;</a>
+        <a class="btn piccolo secondario" href="/social/calendario?settimana={{ successiva }}">&rarr;</a>
+      </div>
+    </div>
+
+    <div class="griglia" style="grid-template-columns:repeat(7,1fr);gap:10px">
+      {% for g in giorni %}
+      <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:8px;min-height:120px">
+        <div style="font-size:11px;font-weight:700;color:var(--colore-testo-muto);text-transform:uppercase;letter-spacing:.04em;padding:2px 2px 8px">
+          {{ g.nome }} {{ g.data[-2:] }}
+        </div>
+        {% for c in g.contenuti %}
+        <a href="/social/contenuti/{{ c.id }}" style="display:block;background:#fff;border:1px solid var(--colore-bordo);border-radius:9px;padding:8px;margin-bottom:6px;color:var(--colore-testo)">
+          <div style="font-size:12px;font-weight:600">{{ c.titolo[:38] }}{% if c.titolo|length > 38 %}…{% endif %}</div>
+          <div class="badge {{ c.stato|fase_colore }}" style="margin-top:6px">{{ c.stato|fase }}</div>
+        </a>
+        {% endfor %}
+        {% if 'social.edit' in permessi %}
+        <details>
+          <summary class="hint" style="cursor:pointer;list-style:none;color:var(--colore-primario);font-weight:600">+ Aggiungi contenuto</summary>
+          <form method="post" action="/social/calendario/giorno/aggiungi" style="margin-top:6px">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="giorno" value="{{ g.data }}">
+            <input type="text" name="titolo" placeholder="Titolo idea" required style="font-size:12px;padding:6px 8px;margin-bottom:6px">
+            <select name="pillar" style="font-size:12px;padding:6px 8px;margin-bottom:6px">
+              <option value="">Pillar (auto)</option>
+              {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
+            </select>
+            <button class="btn piccolo" type="submit" style="width:100%;justify-content:center">Aggiungi</button>
+          </form>
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="card" style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">
+      <span class="hint"><span class="badge viola">idea</span> Nuova idea suggerita</span>
+      <span class="hint"><span class="badge blu">in elaborazione</span> In fase di creazione AI</span>
+      <span class="hint"><span class="badge arancio">revisione</span> In attesa di approvazione</span>
+      <span class="hint"><span class="badge blu">programmata</span> Pianificato per la pubblicazione</span>
+      <span class="hint"><span class="badge verde">pubblicata</span> Già pubblicato</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>✨ Temi suggeriti dall'AI</h3>
+    <p class="hint" style="margin-top:-8px">Proposte del Supervisor Agent per questa settimana.</p>
+    {% for s in suggerimenti %}
+    <form method="post" action="/social/calendario/{{ s.id }}/accetta?settimana={{ corrente }}"
+          style="border-top:1px solid var(--colore-bordo);padding:12px 0">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label style="margin-top:0">Tema</label>
+      <input type="text" name="tema" value="{{ s.tema }}" required>
+      <label>Obiettivo</label>
+      <input type="text" name="obiettivo" value="{{ s.obiettivo or '' }}">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label>Pillar</label>
+          <select name="pillar">
+            <option value="">Nessuno</option>
+            {% for p in pillars %}<option value="{{ p.chiave }}" {{ 'selected' if p.chiave == s.pillar_chiave else '' }}>{{ p.nome }}</option>{% endfor %}
+          </select>
+        </div>
+        <div style="flex:1">
+          <label>Giorno</label>
+          <select name="giorno">
+            {% for g in giorni %}<option value="{{ g.data }}" {{ 'selected' if g.data == s.giorno else '' }}>{{ g.nome }} {{ g.data[-2:] }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      {% if 'social.edit' in permessi %}
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn verde piccolo" type="submit" style="flex:1;justify-content:center">✓ Accetta</button>
+        <button class="btn testo-rosso piccolo" type="submit" formaction="/social/calendario/{{ s.id }}/scarta?settimana={{ corrente }}" formnovalidate>Scarta</button>
+      </div>
+      {% endif %}
+    </form>
+    {% else %}
+    <p class="hint">Nessun tema suggerito per questa settimana.{% if 'social.edit' in permessi %} Genera 3 nuove idee con l'AI.{% endif %}</p>
+    {% endfor %}
+  </div>
+</div>
 {% endblock %}

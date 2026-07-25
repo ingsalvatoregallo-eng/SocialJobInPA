@@ -1,54 +1,46 @@
 {% extends "base.html" %}
 {% block titolo %}Contenuti — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Contenuti</h2>
-<p>
-{% for g in gruppi %}
-  <a class="btn {{ 'secondario' if g != gruppo else '' }}" href="/social/contenuti?gruppo={{ g }}">{{ g|capitalize }}</a>
-{% endfor %}
-</p>
-
-{% if 'social.edit' in permessi %}
-<div class="card">
-  <h3>Nuova idea</h3>
-  <form method="post" action="/social/contenuti">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Titolo / tema</label>
-    <input name="titolo" required minlength="3" placeholder="Es. Concorso Ministero X: 100 posti">
-    <label>Pillar</label>
-    <select name="pillar">
-      <option value="">(nessuno)</option>
-      {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
-    </select>
-    <label>Brief (facoltativo)</label>
-    <textarea name="brief" rows="2" placeholder="Note per gli agenti"></textarea>
-    <button class="btn" type="submit">Crea idea</button>
-  </form>
+<div class="header-pagina">
+  <div>
+    <h1>Contenuti</h1>
+    <p class="sottotitolo">Tutti i contenuti, dall'idea alla pubblicazione.</p>
+  </div>
+  {% if 'social.edit' in permessi %}
+  <a class="btn" href="/social/contenuti/nuovo">+ Nuovo contenuto</a>
+  {% endif %}
 </div>
-{% endif %}
+
+<div class="card" style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap">
+  {% for g in gruppi %}
+  <a class="btn piccolo {{ 'secondario' if g != gruppo else '' }}" href="/social/contenuti?gruppo={{ g }}">{{ g|capitalize }}</a>
+  {% endfor %}
+</div>
 
 <div class="card">
-  <table><tr><th>Titolo</th><th>Pillar</th><th>Stato</th><th>Rischio</th><th>Programmato</th><th>Creato</th><th></th></tr>
-  {% for c in contenuti %}
+  <table>
+    <tr><th>Titolo</th><th>Pillar</th><th>Fase</th><th>Rischio</th><th>Programmato</th><th>Creato</th><th></th></tr>
+    {% for c in contenuti %}
     <tr>
       <td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a>{% if c.is_demo %} <span class="badge grigio">DEMO</span>{% endif %}</td>
-      <td>{{ c.pillar_nome or '' }}</td>
-      <td><span class="badge blu">{{ c.stato }}</span></td>
-      <td>{% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">{{ c.classe_rischio }}</span>{% endif %}</td>
-      <td>{{ (c.programmato_at or '')[:16] }}</td>
+      <td>{{ c.pillar_nome or '—' }}</td>
+      <td><span class="badge {{ c.stato|fase_colore }}">{{ c.stato|fase }}</span></td>
+      <td>{% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">{{ c.classe_rischio }}</span>{% else %}—{% endif %}</td>
+      <td>{{ (c.programmato_at or '—')[:16] }}</td>
       <td>{{ c.creato_at[:10] }}</td>
       <td>
         {% if 'social.admin' in permessi %}
         <form method="post" action="/social/contenuti/{{ c.id }}/elimina" class="inline"
               onsubmit="return confirm('Eliminare definitivamente «{{ c.titolo }}»? L\'azione non è reversibile.');">
           <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="btn secondario" type="submit" style="color:var(--rosso);border-color:var(--rosso)">Elimina</button>
+          <button class="btn piccolo testo-rosso" type="submit">Elimina</button>
         </form>
         {% endif %}
       </td>
     </tr>
-  {% else %}
-    <tr><td colspan="7" style="color:var(--grigio)">Nessun contenuto in questo gruppo.</td></tr>
-  {% endfor %}</table>
+    {% else %}
+    <tr><td colspan="7" class="hint">Nessun contenuto in questo gruppo.</td></tr>
+    {% endfor %}
+  </table>
 </div>
 {% endblock %}

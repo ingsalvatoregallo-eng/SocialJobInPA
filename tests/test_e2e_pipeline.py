@@ -134,12 +134,15 @@ def test_e2e_richiesta_modifiche_e_nuovo_giro(conn):
 
 
 def test_e2e_supervisor_genera_piano_settimanale(conn):
+    """Il Supervisor crea SUGGERIMENTI (non contenuti): serve un Accetta
+    esplicito prima che diventino contenuti veri (vedi test_calendario_giorno.py)."""
     creati = agents.supervisor_pianifica_settimana(
         conn, "2026-07-27", provider=llm.MockLLMProvider(conn))
     assert len(creati) == 3
     voci = db_social.plan_settimana(conn, "2026-07-27")
     assert {v["pillar_chiave"] for v in voci} == {"opportunita", "guida", "scadenza"}
-    assert all(v["content_id"] for v in voci)
+    assert all(v["stato"] == "suggerito" for v in voci)
+    assert all(v["content_id"] is None for v in voci)
 
 
 def test_seed_demo_idempotente(conn):

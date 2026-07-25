@@ -94,6 +94,9 @@ class VoceCalendario(BaseModel):
     pillar: str = Field(description="opportunita | guida | scadenza")
     obiettivo: str
     fascia_oraria: str
+    giorno_settimana: str = Field(
+        description="uno tra: lunedi, martedi, mercoledi, giovedi, venerdi, sabato, domenica — "
+                    "il giorno della settimana in cui proporre di pubblicare questo tema")
 
 
 class PianoSettimanale(BaseModel):

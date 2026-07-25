@@ -254,13 +254,13 @@ def _risposta_demo(schema):
         models.PianoSettimanale: models.PianoSettimanale(voci=[
             models.VoceCalendario(tema="[DEMO] Opportunita' della settimana",
                                   pillar="opportunita", obiettivo="traffico",
-                                  fascia_oraria="12:00-14:00"),
+                                  fascia_oraria="12:00-14:00", giorno_settimana="martedi"),
             models.VoceCalendario(tema="[DEMO] Guida: come leggere un bando",
                                   pillar="guida", obiettivo="notorieta",
-                                  fascia_oraria="08:00-10:00"),
+                                  fascia_oraria="08:00-10:00", giorno_settimana="giovedi"),
             models.VoceCalendario(tema="[DEMO] Concorsi in scadenza",
                                   pillar="scadenza", obiettivo="traffico",
-                                  fascia_oraria="17:00-19:00")]),
+                                  fascia_oraria="17:00-19:00", giorno_settimana="venerdi")]),
         models.SintesiAnalytics: models.SintesiAnalytics(
             sintesi="[DEMO] Engagement stabile.",
             raccomandazioni=["[DEMO] pubblicare in fascia 12-14"]),

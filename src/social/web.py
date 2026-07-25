@@ -9,10 +9,12 @@ social.* (db_social.ha_permesso) — admin/editor/reviewer/viewer.
 """
 
 import json
+import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -22,13 +24,56 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import auth  # noqa: E402
 from deps import ottieni_conn  # noqa: E402
 from social import (  # noqa: E402
-    agents, approvals, config, db_social, publishing, security, state_machine,
+    agents, approvals, config, db_social, llm, publishing, security, state_machine,
 )
 from social.integrations.instagram import InstagramAdapter  # noqa: E402
 from social.integrations.linkedin import LinkedInAdapter  # noqa: E402
 
 router = APIRouter(prefix="/social", tags=["social-dashboard"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+log = logging.getLogger(__name__)
+
+# --- Fasi semplificate -------------------------------------------------------
+# I 16 stati tecnici della state machine (vedi state_machine.py) si
+# raggruppano in poche fasi comprensibili per chi usa la dashboard (vedi
+# docs/ux-redesign-brief.md, sez. 3): la UI mostra sempre la fase, mai lo
+# stato tecnico grezzo come informazione primaria.
+FASE_PER_STATO = {
+    "IDEA": "idea",
+    "RESEARCHING": "elaborazione", "DRAFTING": "elaborazione",
+    "GENERATING_VISUAL": "elaborazione", "QUALITY_CHECK": "elaborazione",
+    "RESEARCH_FAILED": "non_riuscita",
+    "CANCELLED": "annullata",
+    "BLOCKED": "bloccata",
+    "AWAITING_APPROVAL": "revisione", "CHANGES_REQUESTED": "revisione",
+    "APPROVED": "programmata", "SCHEDULED": "programmata",
+    "PUBLISHING": "pubblicazione",
+    "PUBLISHED": "pubblicata", "PARTIALLY_PUBLISHED": "pubblicata",
+    "PUBLISH_FAILED": "fallita",
+    "ARCHIVED": "archiviata",
+}
+FASE_LABEL = {
+    "idea": "Idea", "elaborazione": "In elaborazione", "non_riuscita": "Non riuscita",
+    "annullata": "Annullata", "bloccata": "Bloccata", "revisione": "Da rivedere",
+    "programmata": "Programmata", "pubblicazione": "In pubblicazione",
+    "pubblicata": "Pubblicata", "fallita": "Fallita", "archiviata": "Archiviata",
+}
+FASE_COLORE = {
+    "idea": "grigio", "elaborazione": "viola", "non_riuscita": "arancio",
+    "annullata": "grigio", "bloccata": "rosso", "revisione": "arancio",
+    "programmata": "blu", "pubblicazione": "viola", "pubblicata": "verde",
+    "fallita": "rosso", "archiviata": "grigio",
+}
+
+
+def fase_di(stato):
+    return FASE_PER_STATO.get(stato, stato.lower())
+
+
+templates.env.filters["fase"] = lambda stato: FASE_LABEL.get(fase_di(stato), stato)
+templates.env.filters["fase_colore"] = lambda stato: FASE_COLORE.get(fase_di(stato), "grigio")
+templates.env.filters["data_breve"] = lambda iso: (iso or "")[:16].replace("T", " ")
+templates.env.globals["FASE_COLORE"] = FASE_COLORE
 
 _COOKIE = "social_session"
 
@@ -65,15 +110,23 @@ def _verifica_csrf(sessione, csrf):
         raise HTTPException(status_code=403, detail="Token CSRF non valido")
 
 
+_MESI = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+        "agosto", "settembre", "ottobre", "novembre", "dicembre")
+_GIORNI_NOME = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+
+
 def _ctx(request, sessione, conn, **extra):
     utente = sessione["utente"]
     permessi = db_social.permessi_di_ruolo(conn, utente["ruolo"])
+    oggi = datetime.now(ZoneInfo(config.default_timezone()))
+    ora_locale = f"{_GIORNI_NOME[oggi.weekday()].capitalize()} {oggi.day} {_MESI[oggi.month - 1]} {oggi.year}"
     return {
         "request": request, "utente": dict(utente),
         "permessi": permessi,
         "csrf": security.csrf_token(sessione["token"]),
         "kill_switch": db_social.kill_switch_attivo(conn),
         "modalita": publishing.modalita_effettiva(conn),
+        "ora_locale": ora_locale,
         **extra,
     }
 
@@ -117,19 +170,79 @@ def logout():
 
 # --- Dashboard (home / stato sistema / checklist) ----------------------------
 
+def _parse_iso(valore):
+    if not valore:
+        return None
+    try:
+        return datetime.fromisoformat(valore.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
-    contenuti = db_social.lista_content(conn, limit=8)
+    tutti = db_social.lista_content(conn, limit=500)
+    per_fase = {}
+    for c in tutti:
+        per_fase.setdefault(fase_di(c["stato"]), []).append(c)
+
+    adesso = datetime.now(timezone.utc)
+    programmati_7gg = [c for c in per_fase.get("programmata", [])
+                      if _parse_iso(c["programmato_at"]) and _parse_iso(c["programmato_at"]) <= adesso + timedelta(days=7)]
+    pubblicati_7gg = [c for c in per_fase.get("pubblicata", [])
+                     if _parse_iso(c["aggiornato_at"]) and _parse_iso(c["aggiornato_at"]) >= adesso - timedelta(days=7)]
+    problemi = per_fase.get("bloccata", []) + per_fase.get("fallita", [])
+
+    approvazioni = db_social.approvals_in_attesa(conn)
+    pubblicazioni_fallite = db_social.lista_publications(conn, stato="fallito")
+    instagram = InstagramAdapter(conn).health_check()
+    linkedin = LinkedInAdapter(conn).health_check()
+
+    azioni_richieste = []
+    if approvazioni:
+        azioni_richieste.append({
+            "testo": f"{len(approvazioni)} contenut{'o' if len(approvazioni) == 1 else 'i'} da approvare",
+            "dettaglio": "In attesa di revisione umana.", "link": "/social/approvazioni",
+            "cta": "Vai alla revisione", "colore": "arancio"})
+    if pubblicazioni_fallite:
+        prima = pubblicazioni_fallite[0]
+        azioni_richieste.append({
+            "testo": f"{len(pubblicazioni_fallite)} pubblicazion{'e' if len(pubblicazioni_fallite) == 1 else 'i'} fallit{'a' if len(pubblicazioni_fallite) == 1 else 'e'}",
+            "dettaglio": f"Errore su {prima['piattaforma']}: {prima['errore'] or 'non specificato'}.",
+            "link": f"/social/contenuti/{prima['content_id']}",
+            "cta": "Gestisci errore", "colore": "rosso"})
+    if not instagram["pronto"] or not linkedin["pronto"]:
+        mancante = "Instagram" if not instagram["pronto"] else "LinkedIn"
+        azioni_richieste.append({
+            "testo": f"Integrazione {mancante} da completare",
+            "dettaglio": "Serve per poter pubblicare davvero su questo canale.",
+            "link": "/social/impostazioni", "cta": "Completa integrazione", "colore": "blu"})
+
+    aggiornamenti = []
+    for pub in db_social.lista_publications(conn, limit=6):
+        if pub["stato"] == "pubblicato":
+            aggiornamenti.append({"colore": "verde", "testo": f"Pubblicato su {pub['piattaforma']}",
+                                  "dettaglio": pub["titolo"], "quando": pub["pubblicato_at"] or pub["creato_at"]})
+        elif pub["stato"] == "fallito":
+            aggiornamenti.append({"colore": "rosso", "testo": f"Fallita pubblicazione su {pub['piattaforma']}",
+                                  "dettaglio": pub["titolo"], "quando": pub["creato_at"]})
+    for app_ in approvazioni[:4]:
+        aggiornamenti.append({"colore": "arancio", "testo": "In attesa di approvazione",
+                              "dettaglio": app_["titolo"], "quando": app_["richiesto_at"]})
+    aggiornamenti.sort(key=lambda a: a["quando"] or "", reverse=True)
+
     return templates.TemplateResponse(request, "home.html", _ctx(
-        request, sessione, conn,
-        instagram=InstagramAdapter(conn).health_check(),
-        linkedin=LinkedInAdapter(conn).health_check(),
+        request, sessione, conn, pagina_attiva="panoramica",
+        per_fase=per_fase,
+        conteggio_elaborazione=len(per_fase.get("elaborazione", [])),
+        conteggio_revisione=len(per_fase.get("revisione", [])),
+        conteggio_programmati=len(programmati_7gg),
+        conteggio_pubblicati=len(pubblicati_7gg),
+        conteggio_problemi=len(problemi),
+        azioni_richieste=azioni_richieste,
+        ultimi_aggiornamenti=aggiornamenti[:6],
+        instagram=instagram, linkedin=linkedin,
         publishing_env=config.publishing_enabled_env(),
-        incidenti=db_social.incidenti_aperti(conn),
-        approvazioni=db_social.approvals_in_attesa(conn),
-        contenuti=contenuti,
-        job_stati={s: len(db_social.lista_jobs(conn, stati=[s]))
-                   for s in ("pending", "running", "dead")},
         costo_anthropic=db_social.costo_periodo(conn, "anthropic"),
         budget_anthropic=config.anthropic_monthly_budget_eur(),
         costo_openai=db_social.costo_periodo(conn, "openai_images"),
@@ -156,6 +269,9 @@ def _lunedi(data=None):
     return data - timedelta(days=data.weekday())
 
 
+_NOMI_GIORNI = ("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom")
+
+
 @router.get("/calendario", response_class=HTMLResponse)
 def calendario(request: Request, settimana: Optional[str] = None,
                sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
@@ -163,11 +279,27 @@ def calendario(request: Request, settimana: Optional[str] = None,
         inizio = datetime.strptime(settimana, "%Y-%m-%d").date()
     else:
         inizio = _lunedi()
-    settimane = [(inizio + timedelta(weeks=delta)).isoformat() for delta in range(-1, 4)]
-    voci = {s: db_social.plan_settimana(conn, s) for s in settimane}
+    settimana_iso = inizio.isoformat()
+    voci = db_social.plan_settimana(conn, settimana_iso)
+
+    giorni = []
+    for offset, nome in enumerate(_NOMI_GIORNI):
+        data = inizio + timedelta(days=offset)
+        contenuti_giorno = []
+        for v in voci:
+            if v["giorno"] != data.isoformat() or v["content_id"] is None:
+                continue
+            content = db_social.get_content(conn, v["content_id"])
+            if content:
+                contenuti_giorno.append(content)
+        giorni.append({"data": data.isoformat(), "nome": nome, "contenuti": contenuti_giorno})
+
+    suggerimenti = [v for v in voci if v["stato"] == "suggerito"]
+
     return templates.TemplateResponse(request, "calendario.html", _ctx(
-        request, sessione, conn, settimane=settimane, voci=voci,
-        corrente=inizio.isoformat(),
+        request, sessione, conn, giorni=giorni, suggerimenti=suggerimenti,
+        pillars=db_social.pillars(conn),
+        corrente=settimana_iso,
         precedente=(inizio - timedelta(weeks=1)).isoformat(),
         successiva=(inizio + timedelta(weeks=1)).isoformat()))
 
@@ -178,6 +310,58 @@ def genera_piano(request: Request, settimana: str = Form(...), csrf: str = Form(
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     db_social.crea_job(conn, "generate_week_plan", {"settimana": settimana})
+    return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
+
+
+@router.post("/calendario/{entry_id}/accetta")
+def accetta_suggerimento(request: Request, entry_id: str, tema: str = Form(...),
+                         pillar: str = Form(None), obiettivo: str = Form(None),
+                         giorno: str = Form(None), csrf: str = Form(None),
+                         sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Accetta (eventualmente modificato: i campi arrivano dal form della
+    card, editabile) un suggerimento: crea il contenuto vero e avvia subito
+    la pipeline — accettare un tema equivale a dire "procedi"."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    settimana = request.query_params.get("settimana") or _lunedi().isoformat()
+    content_id = db_social.accetta_plan_entry(
+        conn, entry_id, tema=tema.strip(), pillar_chiave=pillar or None,
+        obiettivo=obiettivo or None, giorno=giorno or None,
+        creato_da=sessione["utente"]["id"])
+    if content_id is None:
+        raise HTTPException(status_code=404, detail="Suggerimento non trovato o gia' accettato")
+    db_social.audit(conn, "suggerimento_accettato", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id)
+    return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
+
+
+@router.post("/calendario/{entry_id}/scarta")
+def scarta_suggerimento(request: Request, entry_id: str, csrf: str = Form(None),
+                        sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    settimana = request.query_params.get("settimana") or _lunedi().isoformat()
+    db_social.audit(conn, "suggerimento_scartato", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="plan_entry", oggetto_id=entry_id)
+    db_social.elimina_plan_entry(conn, entry_id)
+    return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
+
+
+@router.post("/calendario/giorno/aggiungi")
+def aggiungi_contenuto_giorno(request: Request, giorno: str = Form(...),
+                              titolo: str = Form(...), pillar: str = Form(None),
+                              csrf: str = Form(None),
+                              sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Idea creata a mano e assegnata subito a un giorno preciso (a
+    differenza dei suggerimenti del Supervisor, e' gia' una decisione
+    dell'utente: nessun passaggio Accetta/Scarta)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    settimana = _lunedi(datetime.strptime(giorno, "%Y-%m-%d").date()).isoformat()
+    content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
+                                        creato_da=sessione["utente"]["id"])
+    db_social.crea_plan_entry(conn, settimana, titolo.strip(), pillar_chiave=pillar or None,
+                             content_id=content_id, giorno=giorno)
     return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
 
 
@@ -205,18 +389,67 @@ def contenuti(request: Request, gruppo: str = "idee",
         pillars=db_social.pillars(conn)))
 
 
+@router.get("/contenuti/nuovo", response_class=HTMLResponse)
+def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
+                         conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.edit")
+    return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
+        request, sessione, conn, pillars=db_social.pillars(conn)))
+
+
+@router.post("/contenuti/analizza-brief")
+def analizza_brief(request: Request, brief: str = Form(...), csrf: str = Form(None),
+                   sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Endpoint AJAX (JSON): interpreta il brief SUBITO, prima di creare il
+    contenuto — mostra all'utente i filtri che l'AI ha capito (regione,
+    competenze, posti minimi...) cosi' puo' correggere il testo se non
+    riflettono l'intenzione, invece di scoprirlo solo a fine pipeline.
+    Chiamata esplicita (bottone "Analizza brief"), non automatica ad ogni
+    tasto: ogni chiamata e' comunque una richiesta AI reale, con relativo
+    costo tracciato come le altre (vedi agents.interpreta_brief)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    brief = (brief or "").strip()
+    if not brief:
+        return {"nessun_criterio_specifico": True, "filtri": {}}
+    try:
+        criteri = agents.interpreta_brief(conn, brief)
+    except llm.BudgetEsaurito as errore:
+        log.warning("analisi brief fallita: %s", errore)
+        periodo = "giornaliero" if "giornaliero" in str(errore) else "mensile"
+        return {"errore": f"Budget AI {periodo} esaurito: l'analisi automatica del brief non è "
+                           "disponibile fino al reset del budget. Puoi comunque salvare l'idea o "
+                           "avviare la pipeline (potrebbe incontrare lo stesso limite).",
+                "nessun_criterio_specifico": True, "filtri": {}}
+    except llm.CircuitAperto as errore:
+        log.warning("analisi brief fallita: %s", errore)
+        return {"errore": "Il provider AI ha risposto con troppi errori di fila ed è stato "
+                           "temporaneamente disattivato: riprova tra qualche minuto.",
+                "nessun_criterio_specifico": True, "filtri": {}}
+    except Exception as errore:
+        log.warning("analisi brief fallita: %s", errore)
+        return {"errore": "Analisi non disponibile al momento: riprova, o procedi comunque.",
+                "nessun_criterio_specifico": True, "filtri": {}}
+    return {"nessun_criterio_specifico": criteri.nessun_criterio_specifico,
+            "filtri": agents._filtri_da_criteri(criteri)}
+
+
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(...),
-                   pillar: str = Form(None), brief: str = Form(None),
+                   pillar: str = Form(None), obiettivo: str = Form(None),
+                   brief: str = Form(None), azione: str = Form("salva_idea"),
                    csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
+                                        obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
+    if azione == "avvia":
+        db_social.crea_job(conn, "pipeline", {"content_id": content_id})
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
@@ -289,10 +522,25 @@ def anteprima_asset(asset_id: str, sessione=Depends(utente_web),
 # --- Approvazioni ------------------------------------------------------------
 
 @router.get("/approvazioni", response_class=HTMLResponse)
-def approvazioni(request: Request, sessione=Depends(utente_web),
-                 conn=Depends(ottieni_conn)):
+def approvazioni(request: Request, content_id: str = None,
+                 sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    coda = db_social.approvals_in_attesa(conn)
+    selezionata = None
+    if coda:
+        selezionata = next((a for a in coda if a["content_id"] == content_id), None)
+        if selezionata is None:
+            selezionata = coda[0]
+    dettaglio = None
+    if selezionata:
+        content = db_social.get_content(conn, selezionata["content_id"])
+        dettaglio = {
+            "content": content,
+            "punteggi": json.loads(content["punteggi_rischio"]) if content["punteggi_rischio"] else None,
+            "varianti": {v["piattaforma"]: v for v in db_social.varianti_di(conn, selezionata["content_id"])},
+            "fatti": db_social.fatti_di(conn, selezionata["content_id"]),
+        }
     return templates.TemplateResponse(request, "approvazioni.html", _ctx(
-        request, sessione, conn, approvazioni=db_social.approvals_in_attesa(conn)))
+        request, sessione, conn, approvazioni=coda, selezionata=selezionata, dettaglio=dettaglio))
 
 
 @router.post("/approvazioni/{approval_id}")
@@ -493,7 +741,11 @@ def impostazioni(request: Request, sessione=Depends(utente_web),
         fonti=db_social.source_domains(conn, solo_attivi=False),
         settings=settings, prompt_versioni=prompt_versioni,
         utenti_social=utenti_social,
-        publishing_env=config.publishing_enabled_env()))
+        publishing_env=config.publishing_enabled_env(),
+        costo_anthropic=db_social.costo_periodo(conn, "anthropic"),
+        budget_anthropic=config.anthropic_monthly_budget_eur(),
+        costo_openai=db_social.costo_periodo(conn, "openai_images"),
+        budget_openai=config.openai_image_monthly_budget_eur()))
 
 
 @router.post("/impostazioni/fonti")

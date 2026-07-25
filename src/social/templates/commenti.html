@@ -1,27 +1,30 @@
 {% extends "base.html" %}
 {% block titolo %}Commenti — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Commenti e risposte proposte</h2>
-<div class="avviso giallo">Le risposte ai commenti non vengono MAI inviate in automatico:
-ogni proposta richiede approvazione umana.</div>
+<div class="header-pagina">
+  <div>
+    <h1>Commenti e risposte proposte</h1>
+    <p class="sottotitolo">Le risposte del Community Assistant richiedono sempre approvazione umana.</p>
+  </div>
+</div>
+<div class="avviso giallo">⚠️ Le risposte ai commenti non vengono MAI inviate in automatico: ogni proposta richiede approvazione umana.</div>
 
 <div class="card">
   <h3>Risposte proposte dal Community Assistant</h3>
   {% for r in risposte %}
-  <div style="border-bottom:1px solid var(--bordo); padding:10px 0">
-    <p style="color:var(--grigio);font-size:13px">Commento di <strong>{{ r.autore or 'anonimo' }}</strong>:
-      «{{ r.commento_testo }}»</p>
-    <p style="white-space:pre-wrap"><strong>Risposta proposta:</strong> {{ r.testo }}</p>
+  <div style="border-top:1px solid var(--colore-bordo); padding:10px 0">
+    <p class="hint">Commento di <strong>{{ r.autore or 'anonimo' }}</strong>: «{{ r.commento_testo }}»</p>
+    <p style="white-space:pre-wrap;font-size:13.5px"><strong>Risposta proposta:</strong> {{ r.testo }}</p>
     {% if 'social.approve' in permessi %}
     <form method="post" action="/social/commenti/risposte/{{ r.id }}" class="inline">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="btn verde" name="azione" value="approva" type="submit">Approva</button>
-      <button class="btn rosso" name="azione" value="rifiuta" type="submit">Rifiuta</button>
+      <button class="btn piccolo verde" name="azione" value="approva" type="submit">Approva</button>
+      <button class="btn piccolo testo-rosso" name="azione" value="rifiuta" type="submit">Rifiuta</button>
     </form>
     {% endif %}
   </div>
   {% else %}
-  <p style="color:var(--grigio)">Nessuna risposta in attesa.</p>
+  <p class="hint">Nessuna risposta in attesa.</p>
   {% endfor %}
 </div>
 
@@ -31,7 +34,7 @@ ogni proposta richiede approvazione umana.</div>
   {% for c in commenti %}
     <tr><td>{{ c.piattaforma }}</td><td>{{ c.titolo }}</td><td>{{ c.autore or '' }}</td>
         <td>{{ c.testo }}</td><td><span class="badge grigio">{{ c.stato }}</span></td></tr>
-  {% else %}<tr><td colspan="5" style="color:var(--grigio)">Nessun commento importato.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="5" class="hint">Nessun commento importato.</td></tr>{% endfor %}
   </table>
 </div>
 {% endblock %}

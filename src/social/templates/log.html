@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block titolo %}Log e audit — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Log agenti, audit, email e job</h2>
+<div class="header-pagina">
+  <div>
+    <h1>Log agenti, audit, email e job</h1>
+    <p class="sottotitolo">Tracciabilità completa di agenti AI, code di lavoro e attività amministrative.</p>
+  </div>
+</div>
 
 <div class="card">
   <h3>Esecuzioni agenti</h3>
@@ -9,12 +14,13 @@
   {% for r in agent_runs %}
     <tr><td>{{ r.agente }}</td>
         <td><span class="badge {{ 'verde' if r.esito == 'ok' else ('rosso' if r.esito == 'errore' else 'grigio') }}">{{ r.esito }}</span></td>
-        <td>{{ r.prompt_nome or '' }} {{ r.prompt_versione or '' }} <small>{{ r.prompt_hash or '' }}</small></td>
+        <td>{{ r.prompt_nome or '' }} {{ r.prompt_versione or '' }} <span class="hint">{{ r.prompt_hash or '' }}</span></td>
         <td>{{ r.provider or '' }}/{{ r.modello or '' }}</td>
         <td>{{ r.token_input or 0 }}/{{ r.token_output or 0 }}</td>
         <td>{% if r.costo_eur %}{{ "%.4f"|format(r.costo_eur) }} €{% endif %}</td>
-        <td>{{ r.iniziato_at[:16] }}</td></tr>
-  {% endfor %}</table>
+        <td>{{ r.iniziato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="7" class="hint">Nessuna esecuzione registrata.</td></tr>{% endfor %}
+  </table>
 </div>
 
 <div class="card">
@@ -23,9 +29,10 @@
   {% for j in jobs %}
     <tr><td>{{ j.tipo }}</td>
         <td><span class="badge {{ 'verde' if j.stato == 'done' else ('rosso' if j.stato in ('failed','dead') else 'grigio') }}">{{ j.stato }}</span></td>
-        <td>{{ j.esegui_at[:16] }}</td><td>{{ j.tentativi }}/{{ j.max_tentativi }}</td>
-        <td style="color:var(--rosso)">{{ j.ultimo_errore or '' }}</td></tr>
-  {% endfor %}</table>
+        <td>{{ j.esegui_at|data_breve }}</td><td>{{ j.tentativi }}/{{ j.max_tentativi }}</td>
+        <td style="color:var(--colore-rosso)">{{ j.ultimo_errore or '' }}</td></tr>
+  {% else %}<tr><td colspan="5" class="hint">Nessun job registrato.</td></tr>{% endfor %}
+  </table>
 </div>
 
 <div class="card">
@@ -36,8 +43,9 @@
         <td>{{ a.agente or ('utente #' ~ a.utente_id if a.utente_id else 'sistema') }}</td>
         <td>{{ a.oggetto_tipo or '' }} {{ (a.oggetto_id or '')[:12] }}</td>
         <td>{% if a.stato_prima %}{{ a.stato_prima }} → {{ a.stato_dopo }}{% endif %}</td>
-        <td>{{ a.motivo or '' }}</td><td>{{ a.creato_at[:16] }}</td></tr>
-  {% endfor %}</table>
+        <td>{{ a.motivo or '' }}</td><td>{{ a.creato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="6" class="hint">Nessuna voce di audit.</td></tr>{% endfor %}
+  </table>
 </div>
 
 <div class="card">
@@ -46,8 +54,8 @@
   {% for e in email %}
     <tr><td>{{ e.oggetto }}</td><td>{{ e.destinatari }}</td>
         <td><span class="badge {{ 'verde' if e.esito == 'inviata' else 'giallo' }}">{{ e.esito }}</span></td>
-        <td>{{ e.creato_at[:16] }}</td></tr>
-  {% else %}<tr><td colspan="4" style="color:var(--grigio)">Nessuna email registrata.</td></tr>{% endfor %}
+        <td>{{ e.creato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="4" class="hint">Nessuna email registrata.</td></tr>{% endfor %}
   </table>
 </div>
 {% endblock %}

@@ -1,15 +1,22 @@
 {% extends "base.html" %}
 {% block titolo %}Analytics e costi — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Analytics e costi AI</h2>
+<div class="header-pagina">
+  <div>
+    <h1>Analytics e costi AI</h1>
+    <p class="sottotitolo">Pubblicazioni, metriche e consumo budget AI.</p>
+  </div>
+</div>
 
-<div class="grid">
-  <div class="card"><div class="kpi">{{ pubblicate }}<small>Pubblicazioni riuscite</small></div></div>
-  <div class="card"><div class="kpi">{{ fallite }}<small>Pubblicazioni fallite</small></div></div>
-  <div class="card"><div class="kpi">{{ bloccati }}<small>Contenuti bloccati (rischio)</small></div></div>
+<div class="griglia griglia-auto">
+  <div class="card"><div style="font-size:26px;font-weight:700">{{ pubblicate }}</div><div class="hint">Pubblicazioni riuscite</div></div>
+  <div class="card"><div style="font-size:26px;font-weight:700">{{ fallite }}</div><div class="hint">Pubblicazioni fallite</div></div>
+  <div class="card"><div style="font-size:26px;font-weight:700">{{ bloccati }}</div><div class="hint">Contenuti bloccati (rischio)</div></div>
   <div class="card">
-    <div class="kpi">{{ "%.2f"|format(costo_anthropic) }} €<small>Anthropic (budget {{ "%.0f"|format(budget_anthropic) }} €/mese)</small></div>
-    <div class="kpi">{{ "%.2f"|format(costo_openai) }} €<small>OpenAI Images (budget {{ "%.0f"|format(budget_openai) }} €/mese)</small></div>
+    <div style="font-size:20px;font-weight:700">{{ "%.2f"|format(costo_anthropic) }} €</div>
+    <div class="hint">Anthropic (budget {{ "%.0f"|format(budget_anthropic) }} €/mese)</div>
+    <div style="font-size:20px;font-weight:700;margin-top:8px">{{ "%.2f"|format(costo_openai) }} €</div>
+    <div class="hint">OpenAI Images (budget {{ "%.0f"|format(budget_openai) }} €/mese)</div>
   </div>
 </div>
 
@@ -20,8 +27,8 @@
     <tr><td>{{ m.piattaforma }}</td><td>{{ m.titolo }}</td>
         <td>{% for k, v in m.metriche.items() %}{% if k != 'demo' %}<span class="badge grigio">{{ k }}: {{ v }}</span> {% endif %}{% endfor %}
             {% if m.metriche.get('demo') %}<span class="badge giallo">MOCK</span>{% endif %}</td>
-        <td>{{ m.rilevato_at[:16] }}</td></tr>
-  {% else %}<tr><td colspan="4" style="color:var(--grigio)">Nessuna metrica raccolta.</td></tr>{% endfor %}
+        <td>{{ m.rilevato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="4" class="hint">Nessuna metrica raccolta.</td></tr>{% endfor %}
   </table>
 </div>
 
@@ -32,8 +39,8 @@
     <tr><td>{{ v.provider }}</td><td>{{ v.modello or '' }}</td><td>{{ v.agente or '' }}</td>
         <td>{{ v.token_input or 0 }}/{{ v.token_output or 0 }}</td>
         <td>{{ "%.4f"|format(v.costo_eur) }} €{% if v.stimato %} (stima){% endif %}</td>
-        <td>{{ v.creato_at[:16] }}</td></tr>
-  {% else %}<tr><td colspan="6" style="color:var(--grigio)">Nessun costo registrato.</td></tr>{% endfor %}
+        <td>{{ v.creato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="6" class="hint">Nessun costo registrato.</td></tr>{% endfor %}
   </table>
 </div>
 {% endblock %}

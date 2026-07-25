@@ -1,30 +1,96 @@
 {% extends "base.html" %}
-{% block titolo %}Impostazioni — JobInPA Social AI{% endblock %}
+{% block titolo %}Integrazioni e impostazioni — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Impostazioni</h2>
+<div class="header-pagina">
+  <div>
+    <h1>Integrazioni e impostazioni</h1>
+    <p class="sottotitolo">Configurazione tecnica e gestione amministratore.</p>
+  </div>
+</div>
 
-<div class="grid">
+<div class="avviso info">ℹ️ Queste impostazioni sono occasionali e riservate agli amministratori. Non è necessario modificarle per l'attività quotidiana.</div>
+
+<div class="griglia" style="grid-template-columns:1.3fr 1fr;align-items:start">
   <div class="card">
-    <h3>Account social</h3>
-    <table><tr><th>Piattaforma</th><th>Stato</th><th>Publishing</th><th></th></tr>
-    {% for a in accounts %}
-      <tr><td>{{ a.piattaforma }}</td>
-          <td><span class="badge {{ 'verde' if a.stato == 'verificato' else 'giallo' }}">{{ a.stato }}</span></td>
-          <td>{{ 'abilitato' if a.publishing_enabled else 'disabilitato' }}</td>
-          <td>
-            <a class="btn secondario" href="/social/oauth/{{ a.piattaforma }}/start">Autorizza (OAuth)</a>
-            {% if 'social.publish' in permessi %}
-            <form method="post" action="/social/impostazioni/account/{{ a.id }}/publishing" class="inline">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="btn secondario" type="submit">{{ 'Disabilita' if a.publishing_enabled else 'Abilita' }}</button>
-            </form>{% endif %}</td></tr>
+    <h3>1. Canali social collegati</h3>
+    <table>
+      <tr><th>Piattaforma</th><th>Stato</th><th>Publishing</th><th></th></tr>
+      {% for a in accounts %}
+      <tr>
+        <td>{{ '📷 Instagram' if a.piattaforma == 'instagram' else '💼 LinkedIn' if a.piattaforma == 'linkedin' else a.piattaforma }}</td>
+        <td><span class="badge {{ 'verde' if a.stato == 'verificato' else 'arancio' }}">{{ a.stato }}</span></td>
+        <td><span class="badge {{ 'verde' if a.publishing_enabled else 'grigio' }}">{{ 'abilitato' if a.publishing_enabled else 'disabilitato' }}</span></td>
+        <td style="white-space:nowrap">
+          <a class="btn piccolo secondario" href="/social/oauth/{{ a.piattaforma }}/start">Autorizza</a>
+          {% if 'social.publish' in permessi %}
+          <form method="post" action="/social/impostazioni/account/{{ a.id }}/publishing" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn piccolo secondario" type="submit">{{ 'Disabilita' if a.publishing_enabled else 'Abilita' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="hint">Nessun canale collegato.</td></tr>
+      {% endfor %}
+    </table>
+    <p class="hint">"Autorizza" avvia il consenso OAuth col provider (richiede App ID/Secret già configurati in .env). Il token viene salvato cifrato.</p>
+  </div>
+
+  <div class="card">
+    <h3>2. Regole di pubblicazione e sicurezza</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span style="font-size:13px">Modalità operativa</span>
+      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}">{{ modalita }}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span style="font-size:13px">Pubblicazione globale (env)</span>
+      <span class="badge {{ 'verde' if publishing_env else 'grigio' }}">{{ 'abilitata' if publishing_env else 'disabilitata' }}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span style="font-size:13px">Kill switch</span>
+      <span class="badge {{ 'rosso' if kill_switch else 'verde' }}">{{ 'Attivo' if kill_switch else 'Spento' }}</span>
+    </div>
+    {% if 'social.publish' in permessi %}
+    <form method="post" action="/social/kill-switch" style="margin-top:6px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="attivo" value="{{ '0' if kill_switch else '1' }}">
+      <button class="btn piccolo {{ 'verde' if kill_switch else 'rosso' }}" type="submit" style="width:100%;justify-content:center">
+        {{ 'Disattiva kill switch' if kill_switch else 'Attiva kill switch' }}</button>
+    </form>
+    {% endif %}
+    <p class="hint" style="margin-top:12px">Regole fisse di rischio: <strong>verde</strong> pubblica in automatico ·
+      <strong>giallo</strong> richiede revisione umana · <strong>rosso</strong> resta bloccato.</p>
+  </div>
+</div>
+
+<div class="griglia" style="grid-template-columns:1fr 1fr 1fr;align-items:start">
+  <div class="card">
+    <h3>3. Team e ruoli</h3>
+    <table><tr><th>Email</th><th>Ruolo</th><th>Stato</th></tr>
+    {% for u in utenti_social %}
+      <tr><td style="font-size:12.5px">{{ u.email }}</td><td><span class="badge blu">{{ u.ruolo }}</span></td><td>{{ u.stato }}</td></tr>
+    {% else %}
+      <tr><td colspan="3" class="hint">Nessun utente con ruolo social.</td></tr>
     {% endfor %}</table>
-    <p style="font-size:12px;color:var(--grigio)">"Autorizza" avvia il consenso OAuth col
-      provider: richiede che App ID/Secret e (per Instagram) FACEBOOK_PAGE_ID siano gia'
-      configurati in .env. Il token ottenuto viene salvato cifrato.</p>
-    <p style="font-size:12px;color:var(--grigio)">La pubblicazione reale richiede anche:
-      modalità production, GLOBAL_PUBLISHING_ENABLED=true (attuale: {{ publishing_env }}),
-      kill switch spento, account verificato, contenuto approvato o verde.</p>
+    <p class="hint">I ruoli si assegnano dal backoffice esistente. Ruoli social: admin, editor, reviewer, viewer.</p>
+  </div>
+
+  <div class="card">
+    <h3>4. Budget AI del mese</h3>
+    <div style="padding:6px 0">
+      <div style="display:flex;justify-content:space-between"><strong style="font-size:12.5px">Anthropic (testi)</strong>
+        <span class="hint">{{ "%.2f"|format(costo_anthropic) }} € / {{ "%.0f"|format(budget_anthropic) }} €</span></div>
+      <div style="background:var(--colore-sfondo);border-radius:99px;height:6px;margin:6px 0 14px;overflow:hidden">
+        <div style="background:var(--colore-primario);height:100%;width:{{ [100, (costo_anthropic/budget_anthropic*100 if budget_anthropic else 0)]|min }}%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between"><strong style="font-size:12.5px">OpenAI (immagini)</strong>
+        <span class="hint">{{ "%.2f"|format(costo_openai) }} € / {{ "%.0f"|format(budget_openai) }} €</span></div>
+      <div style="background:var(--colore-sfondo);border-radius:99px;height:6px;margin-top:6px;overflow:hidden">
+        <div style="background:var(--colore-viola);height:100%;width:{{ [100, (costo_openai/budget_openai*100 if budget_openai else 0)]|min }}%"></div>
+      </div>
+    </div>
+    <p class="hint"><a href="/social/analytics">Vedi dettaglio costi →</a></p>
   </div>
 
   <div class="card">
@@ -33,65 +99,41 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Indirizzi separati da virgola</label>
       <input name="emails" value="{{ settings.get('revisori_email', '[]') | replace('[','') | replace(']','') | replace('\"','') }}">
-      <button class="btn" type="submit">Salva revisori</button>
+      <button class="btn piccolo" type="submit" style="margin-top:8px">Salva revisori</button>
     </form>
   </div>
 </div>
 
-<div class="grid">
-  <div class="card">
-    <h3>Checklist Meta / Instagram</h3>
-    <table>{% for voce in instagram.checklist %}
-      <tr><td>{{ '✅' if voce.ok else '❌' }}</td><td>{{ voce.voce }}</td></tr>
-    {% endfor %}</table>
-    <p style="font-size:12px;color:var(--grigio)">Guida completa: docs/meta-instagram-setup.md</p>
-  </div>
-  <div class="card">
-    <h3>Checklist LinkedIn</h3>
-    <table>{% for voce in linkedin.checklist %}
-      <tr><td>{{ '✅' if voce.ok else '❌' }}</td><td>{{ voce.voce }}</td></tr>
-    {% endfor %}</table>
-    <p style="font-size:12px;color:var(--grigio)">Guida completa: docs/linkedin-setup.md</p>
-  </div>
-</div>
-
 <div class="card">
-  <h3>Fonti autorizzate (whitelist)</h3>
+  <h3>5. Fonti autorizzate (whitelist)</h3>
   <table><tr><th>Dominio</th><th>Nome</th><th>Attivo</th><th></th></tr>
   {% for f in fonti %}
     <tr><td>{{ f.dominio }}</td><td>{{ f.nome or '' }}</td>
         <td>{{ '✅' if f.attivo else '—' }}</td>
         <td><form method="post" action="/social/impostazioni/fonti/{{ f.dominio }}/toggle" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button class="btn secondario" type="submit">{{ 'Disattiva' if f.attivo else 'Attiva' }}</button>
+          <button class="btn piccolo secondario" type="submit">{{ 'Disattiva' if f.attivo else 'Attiva' }}</button>
         </form></td></tr>
+  {% else %}
+    <tr><td colspan="4" class="hint">Nessuna fonte configurata.</td></tr>
   {% endfor %}</table>
-  <form method="post" action="/social/impostazioni/fonti">
+  <form method="post" action="/social/impostazioni/fonti" style="margin-top:10px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Nuovo dominio</label><input name="dominio" placeholder="es. www.miur.gov.it" required>
-    <label>Nome</label><input name="nome" placeholder="Ministero dell'Istruzione">
-    <button class="btn" type="submit">Aggiungi alla whitelist</button>
+    <div style="display:flex;gap:10px;align-items:end">
+      <div style="flex:1"><label style="margin-top:0">Nuovo dominio</label><input name="dominio" placeholder="es. www.miur.gov.it" required></div>
+      <div style="flex:1"><label style="margin-top:0">Nome</label><input name="nome" placeholder="Ministero dell'Istruzione"></div>
+      <button class="btn piccolo" type="submit" style="margin-bottom:1px">Aggiungi</button>
+    </div>
   </form>
 </div>
 
-<div class="grid">
-  <div class="card">
-    <h3>Prompt versionati (sola lettura — si modificano nel repository)</h3>
-    <table><tr><th>Nome</th><th>Versione</th><th>Hash</th></tr>
-    {% for p in prompt_versioni %}
-      <tr><td>{{ p.nome }}</td><td>{{ p.versione }}</td><td><code>{{ p.hash }}</code></td></tr>
-    {% else %}<tr><td colspan="3" style="color:var(--grigio)">Registrati alla prima esecuzione degli agenti.</td></tr>{% endfor %}
-    </table>
-  </div>
-  <div class="card">
-    <h3>Utenti con ruoli social</h3>
-    <table><tr><th>Email</th><th>Ruolo</th><th>Stato</th></tr>
-    {% for u in utenti_social %}
-      <tr><td>{{ u.email }}</td><td><span class="badge blu">{{ u.ruolo }}</span></td><td>{{ u.stato }}</td></tr>
-    {% endfor %}</table>
-    <p style="font-size:12px;color:var(--grigio)">I ruoli si assegnano dal backoffice esistente
-      (permesso utenti.gestisci). Ruoli social: admin, editor, reviewer, viewer.</p>
-  </div>
+<div class="card">
+  <h3>Prompt versionati <span class="hint">(sola lettura — si modificano nel repository)</span></h3>
+  <table><tr><th>Nome</th><th>Versione</th><th>Hash</th></tr>
+  {% for p in prompt_versioni %}
+    <tr><td>{{ p.nome }}</td><td>{{ p.versione }}</td><td><code>{{ p.hash }}</code></td></tr>
+  {% else %}<tr><td colspan="3" class="hint">Registrati alla prima esecuzione degli agenti.</td></tr>{% endfor %}
+  </table>
 </div>
 
 <div class="card">
@@ -100,6 +142,6 @@
   {% for chiave, valore in settings.items() %}
     <tr><td><code>{{ chiave }}</code></td><td><code>{{ valore }}</code></td></tr>
   {% endfor %}</table>
-  <p style="font-size:12px;color:var(--grigio)">Modificabili via API POST /api/v1/social/settings (permesso social.admin).</p>
+  <p class="hint">Modificabili via API POST /api/v1/social/settings (permesso social.admin).</p>
 </div>
 {% endblock %}

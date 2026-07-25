@@ -184,13 +184,17 @@ CREATE TABLE IF NOT EXISTS social_editorial_pillars (
 CREATE TABLE IF NOT EXISTS social_editorial_plans (
     id          TEXT PRIMARY KEY,
     settimana   TEXT NOT NULL,        -- lunedi' ISO della settimana (YYYY-MM-DD)
+    giorno      TEXT,                 -- giorno specifico ISO (YYYY-MM-DD), dentro la settimana
     pillar_id   TEXT REFERENCES social_editorial_pillars(id),
     tema        TEXT NOT NULL,
     obiettivo   TEXT,
     canali      TEXT,                 -- JSON ["instagram","linkedin"]
     fascia_oraria TEXT,               -- es. "12:00-14:00"
     priorita    INTEGER NOT NULL DEFAULT 0,
-    stato       TEXT NOT NULL DEFAULT 'pianificato',  -- pianificato | in_lavorazione | completato | annullato
+    stato       TEXT NOT NULL DEFAULT 'pianificato',
+                                      -- suggerito (proposta AI, content_id NULL) | pianificato
+                                      -- (accettata/creata a mano, content_id valorizzato) |
+                                      -- in_lavorazione | completato | annullato
     content_id  TEXT,
     is_demo     INTEGER NOT NULL DEFAULT 0,
     creato_at   TEXT NOT NULL
@@ -200,6 +204,7 @@ CREATE TABLE IF NOT EXISTS social_content (
     id            TEXT PRIMARY KEY,
     titolo        TEXT NOT NULL,
     pillar_id     TEXT REFERENCES social_editorial_pillars(id),
+    obiettivo     TEXT,               -- es. "traffico" | "notorieta" | "conversione"
     brief         TEXT,               -- richiesta iniziale / idea
     stato         TEXT NOT NULL DEFAULT 'IDEA',
     classe_rischio TEXT,              -- verde | giallo | rosso
@@ -456,6 +461,17 @@ def init_social_db(conn):
 
 def _migra(conn):
     adesso = _adesso()
+    # Colonna aggiunta dopo il primo rilascio: DB creati prima non ce l'hanno,
+    # CREATE TABLE IF NOT EXISTS non la aggiunge da sola a una tabella gia'
+    # esistente (stesso pattern di JobInPA/db.py, PRAGMA table_info).
+    colonne_plans = {r["name"] for r in conn.execute("PRAGMA table_info(social_editorial_plans)")}
+    if "giorno" not in colonne_plans:
+        conn.execute("ALTER TABLE social_editorial_plans ADD COLUMN giorno TEXT")
+        conn.commit()
+    colonne_content = {r["name"] for r in conn.execute("PRAGMA table_info(social_content)")}
+    if "obiettivo" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN obiettivo TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -570,7 +586,7 @@ def audit_recenti(conn, limit=100):
 
 # --- Contenuti ---------------------------------------------------------------
 
-def crea_content(conn, titolo, *, pillar_chiave=None, brief=None, canali=None,
+def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None, canali=None,
                  concorso_id=None, creato_da=None, is_demo=False):
     pillar_id = None
     if pillar_chiave:
@@ -579,8 +595,8 @@ def crea_content(conn, titolo, *, pillar_chiave=None, brief=None, canali=None,
         pillar_id = riga["id"] if riga else None
     content_id = _nuovo_id()
     _insert(conn, "social_content", {
-        "id": content_id, "titolo": titolo, "pillar_id": pillar_id, "brief": brief,
-        "stato": "IDEA", "canali": json.dumps(canali or list(PIATTAFORME)),
+        "id": content_id, "titolo": titolo, "pillar_id": pillar_id, "obiettivo": obiettivo,
+        "brief": brief, "stato": "IDEA", "canali": json.dumps(canali or list(PIATTAFORME)),
         "concorso_id": concorso_id, "creato_da": creato_da,
         "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()
@@ -607,7 +623,7 @@ def lista_content(conn, stati=None, limit=200):
 
 
 def aggiorna_content(conn, content_id, **campi):
-    consentiti = {"titolo", "brief", "stato", "classe_rischio", "decisione_rischio",
+    consentiti = {"titolo", "obiettivo", "brief", "stato", "classe_rischio", "decisione_rischio",
                   "punteggi_rischio", "canali", "programmato_at", "errore"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
@@ -1053,20 +1069,71 @@ def revoca_oauth_tokens(conn, account_id):
 
 def crea_plan_entry(conn, settimana, tema, *, pillar_chiave=None, obiettivo=None,
                     canali=None, fascia_oraria=None, priorita=0, content_id=None,
-                    is_demo=False):
+                    giorno=None, stato=None, is_demo=False):
+    """stato di default: 'suggerito' se non c'e' ancora un content_id (proposta
+    del Supervisor, in attesa di Accetta/Modifica/Scarta), 'pianificato' se
+    content_id e' gia' presente (aggiunta manuale diretta a un giorno)."""
     pillar_id = None
     if pillar_chiave:
         riga = conn.execute("SELECT id FROM social_editorial_pillars WHERE chiave = ?",
                             (pillar_chiave,)).fetchone()
         pillar_id = riga["id"] if riga else None
+    if stato is None:
+        stato = "pianificato" if content_id else "suggerito"
     entry_id = _nuovo_id()
     _insert(conn, "social_editorial_plans", {
-        "id": entry_id, "settimana": settimana, "pillar_id": pillar_id, "tema": tema,
-        "obiettivo": obiettivo, "canali": json.dumps(canali or list(PIATTAFORME)),
+        "id": entry_id, "settimana": settimana, "giorno": giorno, "pillar_id": pillar_id,
+        "tema": tema, "obiettivo": obiettivo, "canali": json.dumps(canali or list(PIATTAFORME)),
         "fascia_oraria": fascia_oraria, "priorita": priorita, "content_id": content_id,
-        "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
+        "stato": stato, "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()
     return entry_id
+
+
+def plan_entry(conn, entry_id):
+    return conn.execute(
+        "SELECT pl.*, p.nome AS pillar_nome, p.chiave AS pillar_chiave "
+        "FROM social_editorial_plans pl "
+        "LEFT JOIN social_editorial_pillars p ON p.id = pl.pillar_id "
+        "WHERE pl.id = ?", (entry_id,)).fetchone()
+
+
+def accetta_plan_entry(conn, entry_id, *, tema=None, obiettivo=None, brief=None,
+                       pillar_chiave=None, giorno=None, creato_da=None, avvia_pipeline=True):
+    """Trasforma un suggerimento ('suggerito', content_id NULL) in un
+    contenuto vero: crea social_content e collega la voce di calendario, con
+    eventuali modifiche (tema/obiettivo/brief/pillar/giorno, tipicamente da
+    "Modifica" in dashboard) applicate prima di creare il contenuto. Il
+    brief e' facoltativo: il Supervisor propone solo tema+obiettivo, non un
+    brief in linguaggio naturale — senza, la ricerca lavora sui bandi piu'
+    recenti invece che su criteri specifici (comportamento invariato,
+    nessun annullamento automatico). Ritorna il content_id creato, o None se
+    la voce non esiste o non e' piu' un suggerimento in attesa."""
+    voce = plan_entry(conn, entry_id)
+    if voce is None or voce["content_id"] is not None:
+        return None
+    tema = tema or voce["tema"]
+    obiettivo = obiettivo or voce["obiettivo"]
+    pillar_chiave = pillar_chiave or voce["pillar_chiave"]
+    content_id = crea_content(conn, tema, pillar_chiave=pillar_chiave, obiettivo=obiettivo,
+                              brief=brief, creato_da=creato_da)
+    aggiorna_plan_entry(conn, entry_id, tema=tema, obiettivo=obiettivo, content_id=content_id,
+                       stato="pianificato", giorno=giorno or voce["giorno"],
+                       pillar_chiave=pillar_chiave)
+    if avvia_pipeline:
+        crea_job(conn, "pipeline", {"content_id": content_id})
+    return content_id
+
+
+def elimina_plan_entry(conn, entry_id):
+    """Scarta una voce di calendario (suggerimento AI non voluto, o voce
+    manuale). Se era gia' collegata a un contenuto vero, il contenuto NON
+    viene toccato: solo scollegato dal calendario (usa elimina_content per
+    cancellare anche il contenuto)."""
+    righe = conn.execute("DELETE FROM social_editorial_plans WHERE id = ?",
+                         (entry_id,)).rowcount
+    conn.commit()
+    return righe > 0
 
 
 def plan_settimana(conn, settimana):
@@ -1087,9 +1154,13 @@ def plan_mese(conn, prefisso_mese):
         (prefisso_mese + "%",)).fetchall()
 
 
-def aggiorna_plan_entry(conn, entry_id, **campi):
-    consentiti = {"tema", "obiettivo", "fascia_oraria", "priorita", "stato", "content_id"}
+def aggiorna_plan_entry(conn, entry_id, *, pillar_chiave=None, **campi):
+    consentiti = {"tema", "obiettivo", "fascia_oraria", "priorita", "stato", "content_id", "giorno"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
+    if pillar_chiave is not None:
+        riga = conn.execute("SELECT id FROM social_editorial_pillars WHERE chiave = ?",
+                            (pillar_chiave,)).fetchone()
+        campi["pillar_id"] = riga["id"] if riga else None
     if not campi:
         return
     assegnazioni = ", ".join(f"{k} = ?" for k in campi)

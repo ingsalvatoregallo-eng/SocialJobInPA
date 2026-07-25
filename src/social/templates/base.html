@@ -4,69 +4,199 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block titolo %}JobInPA Social AI{% endblock %}</title>
+<link rel="icon" href="/social/static/brand/icon-social.png">
 <style>
-:root { --blu:#0B3D91; --verde:#1FA774; --sfondo:#F5F7FB; --testo:#15213B;
-        --rosso:#C0392B; --giallo:#B7791F; --grigio:#6B7280; --bordo:#E2E8F0; }
+/* Design token IDENTICI a quelli del portale JobInPA (frontend/src/styles/
+   index.css): stessa palette, stessi raggi, stesse ombre — non un'estetica
+   "simile", lo stesso sistema. */
+:root {
+  --colore-primario: #0b5ed7;
+  --colore-primario-scuro: #0a4bb0;
+  --colore-navy: #0a2a66;
+  --colore-testo: #0f172a;
+  --colore-testo-muto: #64748b;
+  --colore-sfondo: #f1f5f9;
+  --colore-card: #ffffff;
+  --colore-bordo: #e2e8f0;
+  --colore-verde: #059669;
+  --colore-verde-sfondo: #ecfdf5;
+  --colore-rosso: #dc2626;
+  --colore-rosso-sfondo: #fef2f2;
+  --colore-arancio: #d97706;
+  --colore-arancio-sfondo: #fef3e2;
+  --colore-viola: #7c3aed;
+  --colore-viola-sfondo: #f3e8ff;
+  --colore-badge-ai-sfondo: #e8f0ff;
+  --colore-badge-ai-testo: #0b5ed7;
+  --raggio: 12px;
+  --raggio-grande: 20px;
+  --ombra: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --ombra-grande: 0 20px 40px -12px rgba(11, 40, 102, 0.18);
+}
+
 * { box-sizing: border-box; }
-body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background:var(--sfondo);
-       color:var(--testo); display:flex; min-height:100vh; }
-nav.sidebar { width:230px; background:var(--blu); color:#fff; padding:16px 0; flex-shrink:0; }
-nav.sidebar h1 { font-size:17px; padding:0 18px 10px; margin:0; border-bottom:1px solid rgba(255,255,255,.2); }
-nav.sidebar h1 small { display:block; font-size:11px; font-weight:normal; opacity:.8; }
-nav.sidebar a { display:block; color:#fff; text-decoration:none; padding:9px 18px; font-size:14px; }
-nav.sidebar a:hover, nav.sidebar a.attivo { background:rgba(255,255,255,.14); }
-nav.sidebar .sep { margin:8px 18px; border-top:1px solid rgba(255,255,255,.2); }
-main { flex:1; padding:24px; max-width:1200px; }
-h2 { margin-top:0; }
-.card { background:#fff; border:1px solid var(--bordo); border-radius:10px; padding:16px; margin-bottom:16px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
-table { width:100%; border-collapse:collapse; font-size:14px; }
-th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--bordo); vertical-align:top; }
-th { color:var(--grigio); font-weight:600; font-size:12px; text-transform:uppercase; }
-.badge { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
-.badge.verde { background:#DEF7EC; color:#046C4E; } .badge.giallo { background:#FDF6B2; color:#8E4B10; }
-.badge.rosso { background:#FDE8E8; color:#9B1C1C; } .badge.grigio { background:#E5E7EB; color:#374151; }
-.badge.blu { background:#E1EFFE; color:#1E429F; }
-.btn { display:inline-block; background:var(--blu); color:#fff; border:none; border-radius:7px;
-       padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
-.btn.verde { background:var(--verde); } .btn.rosso { background:var(--rosso); }
-.btn.secondario { background:#fff; color:var(--blu); border:1px solid var(--blu); }
-input, select, textarea { width:100%; padding:8px; border:1px solid var(--bordo); border-radius:7px;
-                          font:inherit; margin-bottom:10px; }
-label { font-size:13px; color:var(--grigio); display:block; margin-bottom:3px; }
-form.inline { display:inline; } form.inline input, form.inline select { width:auto; }
-.avviso { padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:14px; }
-.avviso.rosso { background:#FDE8E8; color:#9B1C1C; } .avviso.giallo { background:#FDF6B2; color:#8E4B10; }
-.avviso.verde { background:#DEF7EC; color:#046C4E; }
-.anteprima { border:1px solid var(--bordo); border-radius:10px; padding:12px; background:#fff; }
-.anteprima img { max-width:100%; border-radius:6px; }
-.kpi { font-size:26px; font-weight:700; } .kpi small { display:block; font-size:12px; color:var(--grigio); font-weight:400; }
-@media (max-width: 800px) {
-  body { flex-direction:column; }
-  nav.sidebar { width:100%; display:flex; flex-wrap:wrap; align-items:center; }
-  nav.sidebar h1 { border:none; width:100%; }
-  nav.sidebar a { padding:8px 10px; } nav.sidebar .sep { display:none; }
-  main { padding:14px; }
+body {
+  margin: 0; display: flex; min-height: 100vh;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--colore-testo); background: var(--colore-sfondo);
+  font-size: 14px; line-height: 1.5;
+}
+a { color: var(--colore-primario); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  width: 232px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--colore-bordo);
+  display: flex; flex-direction: column; height: 100vh; position: sticky; top: 0;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 20px 18px 16px; }
+.sidebar-brand img { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; }
+.sidebar-brand .nome { font-weight: 700; font-size: 15px; color: var(--colore-navy); line-height: 1.2; }
+.sidebar-brand .payoff { font-size: 11px; color: var(--colore-testo-muto); }
+.sidebar-nav { flex: 1; overflow-y: auto; padding: 4px 10px; }
+.sidebar-sezione {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em; color: var(--colore-testo-muto);
+  text-transform: uppercase; padding: 14px 10px 6px;
+}
+.sidebar-nav a {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px;
+  color: var(--colore-testo); font-size: 13.5px; font-weight: 500; text-decoration: none;
+}
+.sidebar-nav a:hover { background: var(--colore-sfondo); }
+.sidebar-nav a.attivo { background: var(--colore-badge-ai-sfondo); color: var(--colore-primario); }
+.sidebar-footer {
+  border-top: 1px solid var(--colore-bordo); padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+}
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; background: var(--colore-primario);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700;
+  font-size: 13px; flex-shrink: 0;
+}
+.sidebar-footer .chi { line-height: 1.3; overflow: hidden; }
+.sidebar-footer .chi strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-footer .chi span { font-size: 11.5px; color: var(--colore-testo-muto); }
+
+/* ---------- Main ---------- */
+main.contenuto-pagina { flex: 1; min-width: 0; padding: 26px 32px 60px; }
+.header-pagina {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+  margin-bottom: 22px; flex-wrap: wrap;
+}
+.header-pagina h1 { font-size: 22px; margin: 0 0 4px; color: var(--colore-navy); }
+.header-pagina .sottotitolo { color: var(--colore-testo-muto); margin: 0; font-size: 13.5px; }
+.header-pagina .data { font-size: 12.5px; color: var(--colore-testo-muto); white-space: nowrap; }
+
+/* ---------- Card / superfici ---------- */
+.card {
+  background: var(--colore-card); border: 1px solid var(--colore-bordo); border-radius: var(--raggio);
+  box-shadow: var(--ombra); padding: 18px 20px; margin-bottom: 18px;
+}
+.card h2, .card h3 { margin-top: 0; }
+.griglia { display: grid; gap: 16px; }
+.griglia-auto { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+/* ---------- Badge di stato (base .badge + modificatore separato da spazio,
+   stessi nomi gia' usati nel codice: verde/giallo/rosso/viola/blu/grigio) --------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.badge.verde   { background: var(--colore-verde-sfondo); color: var(--colore-verde); }
+.badge.rosso   { background: var(--colore-rosso-sfondo); color: var(--colore-rosso); }
+.badge.giallo,
+.badge.arancio { background: var(--colore-arancio-sfondo); color: var(--colore-arancio); }
+.badge.viola   { background: var(--colore-viola-sfondo); color: var(--colore-viola); }
+.badge.blu     { background: var(--colore-badge-ai-sfondo); color: var(--colore-badge-ai-testo); }
+.badge.grigio  { background: var(--colore-sfondo); color: var(--colore-testo-muto); }
+
+/* ---------- Bottoni ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent;
+  border-radius: 9px; padding: 8px 15px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  background: var(--colore-primario); color: #fff; font-family: inherit;
+}
+.btn:hover { background: var(--colore-primario-scuro); text-decoration: none; }
+.btn.secondario { background: #fff; color: var(--colore-primario); border-color: var(--colore-primario); }
+.btn.secondario:hover { background: var(--colore-badge-ai-sfondo); }
+.btn.verde { background: var(--colore-verde); } .btn.verde:hover { background: #047857; }
+.btn.rosso { background: var(--colore-rosso); } .btn.rosso:hover { background: #b91c1c; }
+.btn.testo-rosso { background: #fff; color: var(--colore-rosso); border-color: var(--colore-rosso); }
+.btn.piccolo { padding: 5px 11px; font-size: 12.5px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------- Form ---------- */
+label { display: block; font-size: 12.5px; font-weight: 600; color: var(--colore-testo); margin: 12px 0 4px; }
+label:first-child { margin-top: 0; }
+input[type=text], input[type=email], input[type=password], input[type=date],
+input[type=number], select, textarea {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--colore-bordo); border-radius: 9px;
+  font: inherit; color: var(--colore-testo); background: #fff;
+}
+textarea { resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--colore-primario); outline-offset: 1px; }
+.hint { font-size: 12px; color: var(--colore-testo-muto); margin-top: 4px; }
+form.inline { display: inline-block; }
+
+/* ---------- Tabelle (dove servono ancora) ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--colore-bordo); vertical-align: top; }
+th { color: var(--colore-testo-muto); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+
+/* ---------- Avviso ---------- */
+.avviso {
+  padding: 11px 15px; border-radius: var(--raggio); margin-bottom: 16px; font-size: 13.5px;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.avviso.info   { background: var(--colore-badge-ai-sfondo); color: #1e3a8a; }
+.avviso.giallo { background: var(--colore-arancio-sfondo); color: #7c2d12; }
+.avviso.rosso  { background: var(--colore-rosso-sfondo); color: #7f1d1d; }
+.avviso.verde  { background: var(--colore-verde-sfondo); color: #064e3b; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--colore-bordo); border-radius: 4px; }
+
+@media (max-width: 860px) {
+  body { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; }
+  .sidebar-nav { display: flex; flex-wrap: wrap; }
+  main.contenuto-pagina { padding: 16px; }
 }
 </style>
 </head>
 <body>
 <nav class="sidebar">
-  <h1>JobInPA Social AI <small>Your PA, powered by AI — modalità: {{ modalita }}</small></h1>
-  <a href="/social/">Dashboard</a>
-  <a href="/social/calendario">Calendario editoriale</a>
-  <a href="/social/contenuti">Contenuti</a>
-  <a href="/social/approvazioni">Approvazioni</a>
-  <a href="/social/pubblicazioni">Pubblicazioni</a>
-  <a href="/social/commenti">Commenti</a>
-  <a href="/social/analytics">Analytics e costi</a>
-  <a href="/social/log">Log e audit</a>
-  {% if 'social.admin' in permessi %}<a href="/social/impostazioni">Impostazioni</a>{% endif %}
-  <div class="sep"></div>
-  <a href="/social/logout">Esci ({{ utente.email }})</a>
+  <div class="sidebar-brand">
+    <img src="/social/static/brand/icon-social.png" alt="JobInPA Social AI">
+    <div>
+      <div class="nome">JobInPA Social AI</div>
+      <div class="payoff">Your PA, powered by AI</div>
+    </div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="sidebar-sezione">Workspace</div>
+    <a href="/social/" class="{{ 'attivo' if pagina_attiva == 'panoramica' else '' }}">🏠 Panoramica</a>
+    <a href="/social/calendario" class="{{ 'attivo' if pagina_attiva == 'calendario' else '' }}">🗓️ Calendario</a>
+    <a href="/social/contenuti" class="{{ 'attivo' if pagina_attiva == 'contenuti' else '' }}">📝 Contenuti</a>
+    <a href="/social/approvazioni" class="{{ 'attivo' if pagina_attiva == 'revisione' else '' }}">✅ Revisione</a>
+    <a href="/social/pubblicazioni" class="{{ 'attivo' if pagina_attiva == 'pubblicazioni' else '' }}">📣 Pubblicazioni</a>
+    <a href="/social/commenti" class="{{ 'attivo' if pagina_attiva == 'commenti' else '' }}">💬 Commenti</a>
+    <a href="/social/analytics" class="{{ 'attivo' if pagina_attiva == 'analytics' else '' }}">📊 Analytics</a>
+    {% if 'social.admin' in permessi %}
+    <div class="sidebar-sezione">Amministrazione</div>
+    <a href="/social/impostazioni" class="{{ 'attivo' if pagina_attiva == 'impostazioni' else '' }}">🔌 Integrazioni e impostazioni</a>
+    <a href="/social/log" class="{{ 'attivo' if pagina_attiva == 'log' else '' }}">📜 Log attività</a>
+    {% endif %}
+  </div>
+  <div class="sidebar-footer">
+    <div class="avatar">{{ (utente.nome or utente.email)[0]|upper }}</div>
+    <div class="chi">
+      <strong>{{ utente.nome }} {{ utente.cognome or '' }}</strong>
+      <span>{{ utente.ruolo|capitalize }} · <a href="/social/logout">Esci</a></span>
+    </div>
+  </div>
 </nav>
-<main>
-{% if kill_switch %}<div class="avviso rosso"><strong>KILL SWITCH ATTIVO</strong> — ogni pubblicazione è bloccata.</div>{% endif %}
+<main class="contenuto-pagina">
+{% if kill_switch %}<div class="avviso rosso"><strong>⛔ Kill switch attivo</strong>&nbsp;— ogni pubblicazione è bloccata.</div>{% endif %}
 {% block contenuto %}{% endblock %}
 </main>
 </body>

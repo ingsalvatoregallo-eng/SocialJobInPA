@@ -3,19 +3,26 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Accesso — JobInPA Social AI</title>
+<link rel="icon" href="/social/static/brand/icon-social.png">
 <style>
-body { font-family:"Segoe UI",system-ui,sans-serif; background:#0B3D91; display:flex;
-       align-items:center; justify-content:center; min-height:100vh; margin:0; }
-.box { background:#fff; border-radius:12px; padding:32px; width:340px; }
-h1 { font-size:19px; margin:0 0 4px; } p.payoff { color:#6B7280; font-size:13px; margin:0 0 18px; }
-input { width:100%; padding:9px; margin-bottom:12px; border:1px solid #E2E8F0; border-radius:7px; font:inherit; box-sizing:border-box; }
-button { width:100%; padding:10px; background:#0B3D91; color:#fff; border:none; border-radius:7px; font-size:15px; cursor:pointer; }
-.errore { background:#FDE8E8; color:#9B1C1C; padding:9px; border-radius:7px; font-size:13px; margin-bottom:12px; }
+body { font-family:"Segoe UI",system-ui,sans-serif; background:linear-gradient(160deg,#0a2a66,#0b5ed7);
+       display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+.box { background:#fff; border-radius:20px; padding:32px; width:340px; box-shadow:0 20px 40px -12px rgba(11,40,102,.35); }
+.marchio { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.marchio img { width:36px; height:36px; border-radius:50%; }
+h1 { font-size:19px; margin:0; color:#0a2a66; } p.payoff { color:#64748b; font-size:13px; margin:0 0 18px; }
+input { width:100%; padding:9px; margin-bottom:12px; border:1px solid #e2e8f0; border-radius:7px; font:inherit; box-sizing:border-box; }
+button { width:100%; padding:10px; background:#0b5ed7; color:#fff; border:none; border-radius:7px; font-size:15px; font-weight:600; cursor:pointer; }
+button:hover { background:#0a4bb0; }
+.errore { background:#fef2f2; color:#dc2626; padding:9px; border-radius:7px; font-size:13px; margin-bottom:12px; }
 </style>
 </head>
 <body>
 <div class="box">
-  <h1>JobInPA Social AI</h1>
+  <div class="marchio">
+    <img src="/social/static/brand/icon-social.png" alt="JobInPA Social AI">
+    <h1>JobInPA Social AI</h1>
+  </div>
   <p class="payoff">Your PA, powered by AI</p>
   {% if errore %}<div class="errore">{{ errore }}</div>{% endif %}
   <form method="post" action="/social/login">

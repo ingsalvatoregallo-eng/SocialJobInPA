@@ -1,21 +1,26 @@
 {% extends "base.html" %}
 {% block titolo %}{{ c.titolo }} — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>{{ c.titolo }} {% if c.is_demo %}<span class="badge grigio">DEMO</span>{% endif %}</h2>
-<p>
-  <span class="badge blu">{{ c.stato }}</span>
-  {% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">rischio: {{ c.classe_rischio }} → {{ c.decisione_rischio }}</span>{% endif %}
-  {% if c.pillar_nome %}<span class="badge grigio">{{ c.pillar_nome }}</span>{% endif %}
-  {% if c.programmato_at %}<span class="badge grigio">programmato: {{ c.programmato_at[:16] }}</span>{% endif %}
-</p>
-{% if c.errore %}<div class="avviso rosso">Ultimo errore: {{ c.errore }}</div>{% endif %}
-{% if c.brief %}<div class="card"><strong>Brief:</strong> {{ c.brief }}</div>{% endif %}
+<div class="header-pagina">
+  <div>
+    <h1>{{ c.titolo }} {% if c.is_demo %}<span class="badge grigio">DEMO</span>{% endif %}</h1>
+    <p class="sottotitolo" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <span class="badge {{ c.stato|fase_colore }}">{{ c.stato|fase }}</span>
+      {% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">rischio: {{ c.classe_rischio }} → {{ c.decisione_rischio }}</span>{% endif %}
+      {% if c.pillar_nome %}<span class="badge grigio">{{ c.pillar_nome }}</span>{% endif %}
+      {% if c.programmato_at %}<span class="badge grigio">programmato: {{ c.programmato_at|data_breve }}</span>{% endif %}
+    </p>
+  </div>
+</div>
 
-<div class="card">
+{% if c.errore %}<div class="avviso rosso">⚠️ Ultimo errore: {{ c.errore }}</div>{% endif %}
+{% if c.brief %}<div class="card"><strong>Brief</strong><p style="white-space:pre-wrap;margin:6px 0 0">{{ c.brief }}</p></div>{% endif %}
+
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap">
   {% if 'social.edit' in permessi and c.stato in ('IDEA', 'RESEARCH_FAILED', 'CHANGES_REQUESTED') %}
   <form method="post" action="/social/contenuti/{{ c.id }}/pipeline" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn" type="submit">Avvia pipeline agenti (ricerca → copy → visual → rischio)</button>
+    <button class="btn" type="submit">✨ Avvia pipeline agenti (ricerca → copy → visual → rischio)</button>
   </form>
   {% endif %}
   {% if 'social.publish' in permessi and c.stato in ('APPROVED', 'SCHEDULED', 'PUBLISH_FAILED') %}
@@ -25,33 +30,33 @@
   </form>
   {% endif %}
   {% if approvazione %}
-  <a class="btn secondario" href="/social/approvazioni">Richiesta di approvazione aperta →</a>
+  <a class="btn secondario" href="/social/approvazioni?content_id={{ c.id }}">🔎 Richiesta di approvazione aperta →</a>
   {% endif %}
   {% if 'social.admin' in permessi %}
-  <form method="post" action="/social/contenuti/{{ c.id }}/elimina" class="inline"
+  <form method="post" action="/social/contenuti/{{ c.id }}/elimina" class="inline" style="margin-left:auto"
         onsubmit="return confirm('Eliminare definitivamente questo contenuto e tutto ciò che ne dipende (varianti, immagini, approvazioni, pubblicazioni)? L\'azione non è reversibile.');">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn rosso" type="submit">Elimina definitivamente</button>
+    <button class="btn testo-rosso" type="submit">Elimina definitivamente</button>
   </form>
   {% endif %}
 </div>
 
-<div class="grid">
+<div class="griglia griglia-auto">
   {% for piattaforma in ('instagram', 'linkedin') %}
-  <div class="anteprima">
-    <h3>Anteprima {{ piattaforma|capitalize }}</h3>
+  <div class="card">
+    <div class="badge blu" style="margin-bottom:10px">{{ '📷 Instagram' if piattaforma == 'instagram' else '💼 LinkedIn' }}</div>
     {% for a in assets if a.piattaforma == piattaforma %}
-      <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}">
-      <p style="font-size:12px;color:var(--grigio)">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
+      <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo)">
+      <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
     {% endfor %}
     {% if varianti.get(piattaforma) %}
-      <p style="white-space:pre-wrap">{{ varianti[piattaforma].testo }}</p>
+      <p style="white-space:pre-wrap;font-size:13.5px">{{ varianti[piattaforma].testo }}</p>
       {% set tags = varianti[piattaforma].hashtags %}
-      {% if tags %}<p style="color:var(--blu);font-size:13px">{{ tags }}</p>{% endif %}
+      {% if tags %}<p style="color:var(--colore-primario);font-size:13px">{{ tags }}</p>{% endif %}
       {% if varianti[piattaforma].call_to_action %}
       <p><em>{{ varianti[piattaforma].call_to_action }}</em></p>{% endif %}
     {% else %}
-      <p style="color:var(--grigio)">Nessuna variante ancora generata.</p>
+      <p class="hint">Nessuna variante ancora generata.</p>
     {% endif %}
   </div>
   {% endfor %}
@@ -75,10 +80,10 @@
   <h3>Valutazione Quality &amp; Risk</h3>
   <p>Regole deterministiche: <span class="badge {{ punteggi.classe_regole }}">{{ punteggi.classe_regole }}</span>
      — Giudizio AI: <span class="badge {{ punteggi.classe_ai }}">{{ punteggi.classe_ai }}</span></p>
-  <p>Accuratezza {{ "%.0f"|format(punteggi.accuratezza * 100) }}% ·
+  <p class="hint">Accuratezza {{ "%.0f"|format(punteggi.accuratezza * 100) }}% ·
      Brand {{ "%.0f"|format(punteggi.brand * 100) }}% ·
      Conformità {{ "%.0f"|format(punteggi.conformita * 100) }}%</p>
-  <ul>{% for m in punteggi.motivi_regole %}<li>{{ m }}</li>{% endfor %}
+  <ul style="padding-left:18px;font-size:13px">{% for m in punteggi.motivi_regole %}<li>{{ m }}</li>{% endfor %}
       {% for m in punteggi.motivi_ai %}<li>{{ m }}</li>{% endfor %}</ul>
 </div>
 {% endif %}
@@ -90,7 +95,7 @@
   {% for p in pubblicazioni %}
     <tr><td>{{ p.piattaforma }}</td>
         <td><span class="badge {{ 'verde' if p.stato == 'pubblicato' else ('rosso' if p.stato == 'fallito' else 'grigio') }}">{{ p.stato }}</span></td>
-        <td>{{ p.modalita }}</td><td>{{ p.remote_id or '' }}</td><td>{{ (p.pubblicato_at or '')[:16] }}</td></tr>
+        <td>{{ p.modalita }}</td><td>{{ p.remote_id or '' }}</td><td>{{ p.pubblicato_at|data_breve }}</td></tr>
   {% endfor %}</table>
 </div>
 {% endif %}

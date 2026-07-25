@@ -1,16 +1,21 @@
 {% extends "base.html" %}
 {% block titolo %}Pubblicazioni — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Pubblicazioni</h2>
+<div class="header-pagina">
+  <div>
+    <h1>Pubblicazioni</h1>
+    <p class="sottotitolo">Contenuti programmati, pubblicati e in errore.</p>
+  </div>
+</div>
 
 <div class="card">
   <h3>Programmati</h3>
-  <table><tr><th>Titolo</th><th>Stato</th><th>Programmato per</th></tr>
+  <table><tr><th>Titolo</th><th>Fase</th><th>Programmato per</th></tr>
   {% for c in programmati %}
     <tr><td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a></td>
-        <td><span class="badge blu">{{ c.stato }}</span></td>
-        <td>{{ (c.programmato_at or 'prossima finestra')[:16] }}</td></tr>
-  {% else %}<tr><td colspan="3" style="color:var(--grigio)">Nessun contenuto programmato.</td></tr>{% endfor %}
+        <td><span class="badge {{ c.stato|fase_colore }}">{{ c.stato|fase }}</span></td>
+        <td>{{ c.programmato_at|data_breve if c.programmato_at else 'prossima finestra' }}</td></tr>
+  {% else %}<tr><td colspan="3" class="hint">Nessun contenuto programmato.</td></tr>{% endfor %}
   </table>
 </div>
 
@@ -21,8 +26,8 @@
     <tr><td><a href="/social/contenuti/{{ p.content_id }}">{{ p.titolo }}</a></td>
         <td>{{ p.piattaforma }}</td><td>{{ p.modalita }}</td>
         <td>{% if p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener noreferrer">apri</a>{% endif %}</td>
-        <td>{{ (p.pubblicato_at or '')[:16] }}</td></tr>
-  {% else %}<tr><td colspan="5" style="color:var(--grigio)">Nessuna pubblicazione.</td></tr>{% endfor %}
+        <td>{{ p.pubblicato_at|data_breve }}</td></tr>
+  {% else %}<tr><td colspan="5" class="hint">Nessuna pubblicazione.</td></tr>{% endfor %}
   </table>
 </div>
 
@@ -31,8 +36,8 @@
   <table><tr><th>Titolo</th><th>Piattaforma</th><th>Errore</th></tr>
   {% for p in fallite %}
     <tr><td><a href="/social/contenuti/{{ p.content_id }}">{{ p.titolo }}</a></td>
-        <td>{{ p.piattaforma }}</td><td style="color:var(--rosso)">{{ p.errore }}</td></tr>
-  {% else %}<tr><td colspan="3" style="color:var(--grigio)">Nessun errore. 🎉</td></tr>{% endfor %}
+        <td>{{ p.piattaforma }}</td><td style="color:var(--colore-rosso)">{{ p.errore }}</td></tr>
+  {% else %}<tr><td colspan="3" class="hint">Nessun errore. 🎉</td></tr>{% endfor %}
   </table>
 </div>
 {% endblock %}

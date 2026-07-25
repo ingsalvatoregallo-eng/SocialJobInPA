@@ -282,29 +282,48 @@ def quality_risk(conn, content_id, risultato_ricerca, *, provider=None):
 
 # --- Supervisor Agent --------------------------------------------------------
 
+_GIORNI_SETTIMANA = ("lunedi", "martedi", "mercoledi", "giovedi", "venerdi", "sabato", "domenica")
+
+
+def _giorno_da_settimana(settimana, giorno_settimana):
+    """settimana: lunedi' ISO (YYYY-MM-DD). giorno_settimana: nome italiano
+    (vedi _GIORNI_SETTIMANA). Ritorna la data ISO di quel giorno nella
+    settimana, o None se il nome non e' riconosciuto (l'AI ha risposto con
+    qualcosa fuori dal vocabolario atteso: meglio nessun giorno che uno
+    sbagliato)."""
+    try:
+        indice = _GIORNI_SETTIMANA.index(giorno_settimana.strip().lower())
+    except (ValueError, AttributeError):
+        return None
+    lunedi = datetime.strptime(settimana, "%Y-%m-%d").date()
+    return (lunedi + timedelta(days=indice)).isoformat()
+
+
 def supervisor_pianifica_settimana(conn, settimana, *, provider=None):
-    """Genera il piano dei 3 argomenti per la settimana (lunedi' ISO) e crea
-    le idee di contenuto collegate."""
+    """Genera il piano dei 3 argomenti per la settimana (lunedi' ISO) come
+    SUGGERIMENTI (stato 'suggerito', nessun contenuto creato ancora): un
+    umano li accetta, modifica o scarta dal Calendario (vedi
+    db_social.accetta_plan_entry/elimina_plan_entry) prima che diventino
+    contenuti veri e venga speso budget AI sulla pipeline completa."""
     contesto, _righe = _contesto_jobinpa(None, limite=5)
     piano = _run_llm(
         conn, "supervisor", "supervisor", models.PianoSettimanale,
         f"Settimana del {settimana}. Bandi aperti di riferimento:\n"
         f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>\n"
-        "Proponi 3 argomenti, uno per pillar (opportunita, guida, scadenza).",
+        "Proponi 3 argomenti, uno per pillar (opportunita, guida, scadenza), "
+        "ciascuno con il giorno della settimana piu' adatto.",
         provider=provider)
     creati = []
     for voce in piano.voci[:db_social.get_setting(conn, "argomenti_settimanali", 3)]:
         pillar = voce.pillar if voce.pillar in {"opportunita", "guida", "scadenza"} else "guida"
-        content_id = db_social.crea_content(conn, voce.tema, pillar_chiave=pillar,
-                                            brief=voce.obiettivo)
-        db_social.crea_plan_entry(conn, settimana, voce.tema, pillar_chiave=pillar,
-                                  obiettivo=voce.obiettivo,
-                                  fascia_oraria=voce.fascia_oraria,
-                                  content_id=content_id)
-        creati.append(content_id)
+        giorno = _giorno_da_settimana(settimana, voce.giorno_settimana)
+        entry_id = db_social.crea_plan_entry(conn, settimana, voce.tema, pillar_chiave=pillar,
+                                             obiettivo=voce.obiettivo,
+                                             fascia_oraria=voce.fascia_oraria, giorno=giorno)
+        creati.append(entry_id)
     db_social.audit(conn, "piano_settimanale", agente="supervisor",
                     oggetto_tipo="plan", oggetto_id=settimana,
-                    dettagli={"contenuti": creati})
+                    dettagli={"suggerimenti": creati})
     return creati
 
 

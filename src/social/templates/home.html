@@ -1,80 +1,141 @@
 {% extends "base.html" %}
-{% block titolo %}Dashboard — JobInPA Social AI{% endblock %}
+{% block titolo %}Panoramica — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Stato del sistema</h2>
+<div class="header-pagina">
+  <div>
+    <h1>Cosa richiede la tua attenzione oggi 👋</h1>
+    <p class="sottotitolo">Panoramica del tuo workspace e stato dei contenuti.</p>
+  </div>
+  <div class="data">{{ ora_locale }}</div>
+</div>
 
-<div class="grid">
+<div class="griglia griglia-auto" style="grid-template-columns:repeat(5,1fr)">
+  <a class="card" href="/social/contenuti?gruppo=bozze" style="color:inherit">
+    <div class="badge viola" style="margin-bottom:8px">✨ In elaborazione</div>
+    <div style="font-size:26px;font-weight:700">{{ conteggio_elaborazione }}</div>
+    <div class="hint">Contenuti generati dall'AI in attesa di revisione.</div>
+  </a>
+  <a class="card" href="/social/approvazioni" style="color:inherit">
+    <div class="badge arancio" style="margin-bottom:8px">🔎 Da rivedere</div>
+    <div style="font-size:26px;font-weight:700">{{ conteggio_revisione }}</div>
+    <div class="hint">Contenuti che richiedono la tua approvazione.</div>
+  </a>
+  <a class="card" href="/social/contenuti?gruppo=programmati" style="color:inherit">
+    <div class="badge blu" style="margin-bottom:8px">🗓️ Programmati</div>
+    <div style="font-size:26px;font-weight:700">{{ conteggio_programmati }}</div>
+    <div class="hint">Contenuti programmati nei prossimi 7 giorni.</div>
+  </a>
+  <a class="card" href="/social/contenuti?gruppo=pubblicati" style="color:inherit">
+    <div class="badge verde" style="margin-bottom:8px">✅ Pubblicati</div>
+    <div style="font-size:26px;font-weight:700">{{ conteggio_pubblicati }}</div>
+    <div class="hint">Contenuti pubblicati negli ultimi 7 giorni.</div>
+  </a>
+  <a class="card" href="/social/contenuti?gruppo=errori" style="color:inherit">
+    <div class="badge rosso" style="margin-bottom:8px">⚠️ Problemi</div>
+    <div style="font-size:26px;font-weight:700">{{ conteggio_problemi }}</div>
+    <div class="hint">Elementi bloccati che richiedono attenzione.</div>
+  </a>
+</div>
+
+<div class="griglia" style="grid-template-columns:340px 1fr;align-items:start">
   <div class="card">
-    <div class="kpi">{{ 'ATTIVO' if kill_switch else 'spento' }}<small>Kill switch</small></div>
+    <h3>Azioni richieste {% if azioni_richieste %}<span class="badge rosso">{{ azioni_richieste|length }}</span>{% endif %}</h3>
+    <p class="hint" style="margin-top:-8px">Le attività che richiedono il tuo intervento.</p>
+    {% for a in azioni_richieste %}
+    <div style="border-top:1px solid var(--colore-bordo);padding:12px 0">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <div>
+          <strong style="font-size:13.5px">{{ a.testo }}</strong>
+          <p class="hint" style="margin:2px 0 8px">{{ a.dettaglio }}</p>
+        </div>
+        <span class="badge {{ a.colore }}">!</span>
+      </div>
+      <a class="btn piccolo secondario" href="{{ a.link }}">{{ a.cta }} →</a>
+    </div>
+    {% else %}
+    <p class="hint">Nessuna azione richiesta al momento. 🎉</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Pipeline dei contenuti</h3>
+    <p class="hint" style="margin-top:-8px">Dal primo spunto alla pubblicazione.</p>
+    <div class="griglia" style="grid-template-columns:repeat(5,1fr);gap:12px">
+      {% for fase, gruppo in [('idea','Idea'), ('elaborazione','In elaborazione'), ('revisione','Da rivedere'), ('programmata','Programmata'), ('pubblicata','Pubblicata')] %}
+      <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:10px">
+        <div class="badge {{ FASE_COLORE[fase] }}" style="margin-bottom:8px">{{ gruppo }} {{ per_fase.get(fase, [])|length }}</div>
+        {% for c in per_fase.get(fase, [])[:2] %}
+        <a href="/social/contenuti/{{ c.id }}" style="display:block;background:#fff;border:1px solid var(--colore-bordo);border-radius:9px;padding:8px;margin-bottom:6px;font-size:12.5px;color:var(--colore-testo)">
+          {{ c.titolo[:40] }}{% if c.titolo|length > 40 %}…{% endif %}
+        </a>
+        {% endfor %}
+        {% if fase == 'idea' %}
+        <a class="btn piccolo secondario" href="/social/contenuti/nuovo" style="width:100%;justify-content:center">+ Nuova idea</a>
+        {% elif per_fase.get(fase, [])|length > 2 %}
+        <a class="hint" href="/social/contenuti">Vedi tutti →</a>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="griglia" style="grid-template-columns:repeat(3,1fr);align-items:start">
+  <div class="card">
+    <h3>Ultimi aggiornamenti</h3>
+    {% for u in ultimi_aggiornamenti %}
+    <div style="display:flex;gap:8px;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span class="badge {{ u.colore }}">●</span>
+      <div>
+        <div style="font-size:13px">{{ u.testo }}</div>
+        <div class="hint">{{ u.dettaglio }} · {{ u.quando|data_breve }}</div>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">Nessun aggiornamento recente.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Controlli sistema</h3>
+    <div style="padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <div style="display:flex;justify-content:space-between"><strong style="font-size:13px">Budget AI del mese</strong>
+        <span class="hint">{{ "%.2f"|format(costo_anthropic) }} € / {{ "%.0f"|format(budget_anthropic) }} €</span></div>
+      <div style="background:var(--colore-sfondo);border-radius:99px;height:6px;margin-top:6px;overflow:hidden">
+        <div style="background:var(--colore-primario);height:100%;width:{{ [100, (costo_anthropic/budget_anthropic*100 if budget_anthropic else 0)]|min }}%"></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <strong style="font-size:13px">Kill switch</strong>
+      <span class="badge {{ 'rosso' if kill_switch else 'verde' }}">{{ 'Attivo' if kill_switch else 'Spento' }}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <strong style="font-size:13px">Modalità</strong>
+      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}">{{ modalita }}</span>
+    </div>
     {% if 'social.publish' in permessi %}
-    <form method="post" action="/social/kill-switch">
+    <form method="post" action="/social/kill-switch" style="margin-top:10px">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="attivo" value="{{ '0' if kill_switch else '1' }}">
-      <button class="btn {{ 'verde' if kill_switch else 'rosso' }}" type="submit">
-        {{ 'Disattiva kill switch' if kill_switch else 'ATTIVA KILL SWITCH' }}</button>
+      <button class="btn piccolo {{ 'verde' if kill_switch else 'rosso' }}" type="submit" style="width:100%;justify-content:center">
+        {{ 'Disattiva kill switch' if kill_switch else 'Attiva kill switch' }}</button>
     </form>
     {% endif %}
-    <p style="font-size:12px;color:var(--grigio)">
-      GLOBAL_PUBLISHING_ENABLED (env): <strong>{{ 'true' if publishing_env else 'false' }}</strong><br>
-      Modalità operativa: <strong>{{ modalita }}</strong></p>
   </div>
-  <div class="card">
-    <div class="kpi">{{ "%.2f"|format(costo_anthropic) }} €<small>Anthropic — mese corrente (budget {{ "%.0f"|format(budget_anthropic) }} €)</small></div>
-    <div class="kpi">{{ "%.2f"|format(costo_openai) }} €<small>OpenAI Images — mese corrente (budget {{ "%.0f"|format(budget_openai) }} €)</small></div>
-  </div>
-  <div class="card">
-    <div class="kpi">{{ job_stati.pending }}<small>Job in coda</small></div>
-    <p style="font-size:13px">In esecuzione: {{ job_stati.running }} — Dead letter:
-      <span class="badge {{ 'rosso' if job_stati.dead else 'grigio' }}">{{ job_stati.dead }}</span></p>
-  </div>
-</div>
 
-<div class="grid">
   <div class="card">
-    <h3>Checklist Instagram</h3>
-    {% if not instagram.pronto %}<div class="avviso giallo">{{ instagram.messaggio }}</div>{% endif %}
-    <table>{% for voce in instagram.checklist %}
-      <tr><td>{{ '✅' if voce.ok else '❌' }}</td>
-          <td>{{ voce.voce }}<br><small style="color:var(--grigio)">{{ voce.dettaglio }}</small></td></tr>
-    {% endfor %}</table>
-  </div>
-  <div class="card">
-    <h3>Checklist LinkedIn</h3>
-    {% if not linkedin.pronto %}<div class="avviso giallo">{{ linkedin.messaggio }}</div>{% endif %}
-    <table>{% for voce in linkedin.checklist %}
-      <tr><td>{{ '✅' if voce.ok else '❌' }}</td>
-          <td>{{ voce.voce }}<br><small style="color:var(--grigio)">{{ voce.dettaglio }}</small></td></tr>
-    {% endfor %}</table>
-  </div>
-</div>
-
-{% if incidenti %}
-<div class="card">
-  <h3>Incidenti aperti</h3>
-  <table><tr><th>Tipo</th><th>Dettaglio</th><th>Quando</th></tr>
-  {% for i in incidenti %}
-    <tr><td><span class="badge rosso">{{ i.tipo }}</span></td><td>{{ i.dettaglio }}</td><td>{{ i.creato_at[:16] }}</td></tr>
-  {% endfor %}</table>
-</div>
-{% endif %}
-
-<div class="grid">
-  <div class="card">
-    <h3>In attesa di approvazione ({{ approvazioni|length }})</h3>
-    {% if approvazioni %}
-    <table>{% for a in approvazioni %}
-      <tr><td><a href="/social/contenuti/{{ a.content_id }}">{{ a.titolo }}</a></td>
-          <td><span class="badge {{ a.classe_rischio or 'grigio' }}">{{ a.classe_rischio or 'n/d' }}</span></td></tr>
-    {% endfor %}</table>
-    <a class="btn secondario" href="/social/approvazioni">Vai alle approvazioni</a>
-    {% else %}<p style="color:var(--grigio)">Nessuna richiesta in attesa.</p>{% endif %}
-  </div>
-  <div class="card">
-    <h3>Ultimi contenuti</h3>
-    <table>{% for c in contenuti %}
-      <tr><td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a></td>
-          <td><span class="badge blu">{{ c.stato }}</span></td></tr>
-    {% endfor %}</table>
+    <h3>Integrazioni social</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span style="font-size:13px">📷 Instagram (Business)</span>
+      <span class="badge {{ 'verde' if instagram.pronto else 'arancio' }}">{{ 'Pronto' if instagram.pronto else 'Da completare' }}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+      <span style="font-size:13px">💼 LinkedIn (Pagina)</span>
+      <span class="badge {{ 'verde' if linkedin.pronto else 'arancio' }}">{{ 'Pronto' if linkedin.pronto else 'Da completare' }}</span>
+    </div>
+    {% if 'social.admin' in permessi %}
+    <a class="btn piccolo secondario" href="/social/impostazioni" style="margin-top:10px">Gestisci integrazioni →</a>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

@@ -1,26 +1,96 @@
 {% extends "base.html" %}
-{% block titolo %}Approvazioni — JobInPA Social AI{% endblock %}
+{% block titolo %}Revisione e approvazioni — JobInPA Social AI{% endblock %}
 {% block contenuto %}
-<h2>Richieste di approvazione</h2>
-{% for a in approvazioni %}
-<div class="card">
-  <h3><a href="/social/contenuti/{{ a.content_id }}">{{ a.titolo }}</a>
-      <span class="badge {{ a.classe_rischio or 'grigio' }}">{{ a.classe_rischio or 'n/d' }}</span></h3>
-  <p style="color:var(--grigio);font-size:13px">Richiesta il {{ a.richiesto_at[:16] }} — stato contenuto: {{ a.content_stato }}</p>
-  {% if 'social.approve' in permessi %}
-  <form method="post" action="/social/approvazioni/{{ a.id }}">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Motivazione (obbligatoria per la richiesta modifiche)</label>
-    <textarea name="motivo" rows="2"></textarea>
-    <button class="btn verde" name="azione" value="approva" type="submit">Approva e programma</button>
-    <button class="btn" name="azione" value="modifiche" type="submit">Richiedi modifiche</button>
-    <button class="btn rosso" name="azione" value="rifiuta" type="submit">Rifiuta</button>
-  </form>
-  {% else %}
-  <p style="color:var(--grigio)">Il tuo ruolo non può approvare (serve social.approve).</p>
+<div class="header-pagina">
+  <div>
+    <h1>Revisione e approvazioni</h1>
+    <p class="sottotitolo">Contenuti che richiedono una decisione umana.</p>
+  </div>
+</div>
+
+{% if not approvazioni %}
+<div class="card"><p class="hint">Nessuna richiesta in attesa. 🎉</p></div>
+{% else %}
+<div class="griglia" style="grid-template-columns:360px 1fr;align-items:start">
+  <div class="card" style="padding:12px">
+    <h3 style="margin:0 0 4px">Coda di revisione <span class="badge rosso">{{ approvazioni|length }}</span></h3>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      {% for a in approvazioni %}
+      <a href="/social/approvazioni?content_id={{ a.content_id }}"
+         style="display:block;border:1px solid {{ 'var(--colore-primario)' if selezionata and selezionata.id == a.id else 'var(--colore-bordo)' }};background:{{ 'var(--colore-badge-ai-sfondo)' if selezionata and selezionata.id == a.id else '#fff' }};border-radius:9px;padding:10px 12px;color:var(--colore-testo)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+          <strong style="font-size:13px">{{ a.titolo }}</strong>
+          <span class="badge {{ a.classe_rischio or 'grigio' }}">{{ a.classe_rischio or 'n/d' }}</span>
+        </div>
+        <div class="hint">Richiesta il {{ a.richiesto_at|data_breve }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if selezionata and dettaglio %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
+      <div>
+        <h2 style="margin-bottom:2px">{{ selezionata.titolo }}</h2>
+        <p class="hint" style="margin:0">Stato contenuto: {{ selezionata.content_stato|fase }} · Richiesta il {{ selezionata.richiesto_at|data_breve }}</p>
+      </div>
+      <span class="badge {{ selezionata.classe_rischio or 'grigio' }}">{{ selezionata.classe_rischio or 'n/d' }}</span>
+    </div>
+
+    <div class="griglia griglia-auto" style="margin-top:16px">
+      {% for piattaforma, v in dettaglio.varianti.items() %}
+      <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:14px">
+        <div class="badge blu" style="margin-bottom:8px">{{ '📷 Instagram' if piattaforma == 'instagram' else '💼 LinkedIn' if piattaforma == 'linkedin' else piattaforma }}</div>
+        <p style="white-space:pre-wrap;font-size:13px;margin:0 0 8px">{{ v.testo }}</p>
+        {% if v.hashtags %}<p class="hint">{{ v.hashtags }}</p>{% endif %}
+      </div>
+      {% else %}
+      <p class="hint">Testi non ancora generati per questo contenuto.</p>
+      {% endfor %}
+    </div>
+
+    {% if dettaglio.punteggi and dettaglio.punteggi.motivi_regole %}
+    <div class="avviso giallo" style="margin-top:16px">
+      <div>
+        <strong>Motivo della revisione</strong>
+        <ul style="margin:6px 0 0;padding-left:18px">
+          {% for m in dettaglio.punteggi.motivi_regole %}<li>{{ m }}</li>{% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if dettaglio.fatti %}
+    <h3 style="margin-top:18px">Fatti verificati</h3>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      {% for f in dettaglio.fatti %}
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+        <span style="font-size:12.5px">{{ '✅' if not f.conflitto else '⚠️' }} {{ f.fatto }}</span>
+        {% if f.fonte_url %}<a class="hint" href="{{ f.fonte_url }}" target="_blank" rel="noopener">fonte →</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <p class="hint" style="margin-top:14px"><a href="/social/contenuti/{{ selezionata.content_id }}">Apri scheda contenuto completa →</a></p>
+
+    {% if 'social.approve' in permessi %}
+    <form method="post" action="/social/approvazioni/{{ selezionata.id }}" style="margin-top:16px;border-top:1px solid var(--colore-bordo);padding-top:16px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Motivazione (obbligatoria per rifiuto o richiesta modifiche)</label>
+      <textarea name="motivo" rows="2"></textarea>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="btn testo-rosso" name="azione" value="rifiuta" type="submit">✕ Rifiuta</button>
+        <button class="btn secondario" name="azione" value="modifiche" type="submit">✎ Richiedi modifiche</button>
+        <button class="btn verde" name="azione" value="approva" type="submit" style="margin-left:auto">✓ Approva e programma</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="hint" style="margin-top:14px">Il tuo ruolo non può approvare (serve social.approve).</p>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
-{% else %}
-<div class="card"><p style="color:var(--grigio)">Nessuna richiesta in attesa. 🎉</p></div>
-{% endfor %}
+{% endif %}
 {% endblock %}
