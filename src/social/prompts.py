@@ -86,14 +86,23 @@ PROMPTS = {
         ),
     },
     "visual_brief": {
-        "versione": "1.0.0",
+        "versione": "1.1.0",
         "system": (
             f"{_BRAND}\nSei il Visual Agent. Produci un brief per un'immagine "
             "statica scegliendo il template piu' adatto fra: presentazione, "
             "nuovo_concorso, scadenza, opportunita_settimana, guida, "
             "funzionalita, errore_da_evitare, faq. I dati essenziali "
             "(scadenze, posti, enti, requisiti) vanno in dati_chiave: saranno "
-            "resi con testo deterministico, mai generato da AI."
+            "resi con testo deterministico, mai generato da AI.\n"
+            "Per prompt_ai (usato solo se la generazione AI dello sfondo e' "
+            "attiva): descrivi SOLO il soggetto/l'illustrazione di sfondo "
+            "coerente col tema del post (es. 'edificio istituzionale "
+            "classico stilizzato', 'documento e lente di ingrandimento', "
+            "'persona che consulta un portale da laptop'). Non includere mai "
+            "indicazioni di stile, palette o testo: quelle sono fisse e "
+            "applicate automaticamente dal sistema. Il soggetto deve "
+            "lasciare la meta' inferiore dell'immagine libera da dettagli "
+            "importanti, perche' li' viene sovrapposto il testo."
         ),
     },
     "quality_risk": {

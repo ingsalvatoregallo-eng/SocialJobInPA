@@ -24,11 +24,28 @@ def _hex_a_rgb(colore_hex):
     return tuple(int(colore_hex[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def test_titolo_lungo_non_sconfina_nel_footer(tmp_path):
+@pytest.mark.parametrize("y_iniziale,passo,y_limite,atteso", [
+    (0, 100, 350, 3),      # 3 interi (300<=350), il 4* (400) non ci sta
+    (0, 100, 300, 3),      # esattamente al limite: ci sta
+    (0, 100, 299, 2),
+    (500, 50, 400, 0),     # gia' oltre il limite: zero elementi
+    (100, 0, 500, 0),      # passo non valido: zero elementi, mai un loop infinito
+])
+def test_numero_di_elementi_che_entrano(y_iniziale, passo, y_limite, atteso):
+    """La stessa aritmetica usata per fermare titolo/sottotitolo/righe della
+    card prima del footer, isolata dal rendering: e' quella che garantisce
+    che un testo lungo si fermi invece di sconfinare, verificabile senza
+    generare immagini."""
+    assert images._numero_di_elementi_che_entrano(y_iniziale, passo, y_limite) == atteso
+
+
+def test_titolo_lunghissimo_non_sconfina_nel_footer(tmp_path):
     """Regressione: con titolo/sottotitolo/dati_chiave molto lunghi il testo
-    finiva disegnato dietro la barra blu del footer invece di fermarsi
-    prima (bug osservato in produzione: 'Funzionari amministrativi: nessun
-    bando disponibile questa' tagliato a meta' sopra il footer)."""
+    finiva disegnato dietro il footer invece di fermarsi prima (bug
+    osservato in produzione: 'Funzionari amministrativi: nessun bando
+    disponibile questa' tagliato a meta' sopra il footer). La card bianca
+    dei dati_chiave non deve mai comparire nella fascia riservata al
+    footer: se ci fosse, vorrebbe dire che ha sconfinato."""
     provider = images.TemplateImageProvider(output_dir=tmp_path)
     titolo_lunghissimo = (
         "Funzionari amministrativi per enti pubblici centrali e periferici: "
@@ -42,14 +59,10 @@ def test_titolo_lungo_non_sconfina_nel_footer(tmp_path):
     with Image.open(asset.percorso) as img:
         larghezza, altezza = img.size
         scala = larghezza / 1080
-        altezza_footer = int(110 * scala)
+        altezza_footer = int(120 * scala)
         fascia_footer = img.crop((0, altezza - altezza_footer, larghezza, altezza))
         colori_nella_fascia = set(fascia_footer.getdata())
-        # Il testo del titolo/sottotitolo (colore "testo") e i riquadri dei
-        # dati chiave (bordo "accento") non devono MAI comparire nella
-        # fascia del footer: se ci sono, hanno sconfinato.
-        assert _hex_a_rgb(images.PALETTE_DEFAULT["testo"]) not in colori_nella_fascia
-        assert _hex_a_rgb(images.PALETTE_DEFAULT["accento"]) not in colori_nella_fascia
+        assert _hex_a_rgb(images.PALETTE_DEFAULT["card"]) not in colori_nella_fascia
 
 
 def test_dato_chiave_lungo_non_sconfina_a_destra(tmp_path):
@@ -72,11 +85,54 @@ def test_dato_chiave_lungo_non_sconfina_a_destra(tmp_path):
         larghezza, altezza = img.size
         scala = larghezza / 1080
         margine = int(larghezza * images.MARGINE_SICURO)
-        altezza_barra = int(90 * scala)
-        altezza_footer = int(110 * scala)
-        fascia_destra = img.crop((larghezza - margine, altezza_barra, larghezza, altezza - altezza_footer))
+        altezza_footer = int(120 * scala)
+        fascia_destra = img.crop((larghezza - margine, 0, larghezza, altezza - altezza_footer))
         colori_nella_fascia = set(fascia_destra.getdata())
         assert _hex_a_rgb(images.PALETTE_DEFAULT["testo"]) not in colori_nella_fascia
+
+
+def test_titolo_non_tronca_mai_va_a_capo_o_rimpicciolisce(tmp_path):
+    """Regressione: una parola composta lunga (es.
+    'amministrativo-gestionali') e' indivisibile per _a_capo (nessuno
+    spazio) e poteva sconfinare oltre il margine destro. Ora deve stare
+    dentro i margini SENZA MAI perdere contenuto (niente ellissi): a capo,
+    rimpicciolita, o come ultima rete di sicurezza spezzata a meta' parola."""
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    parola_mostruosa = "Amministrativogestionaledirigenzialecoordinamentotecnicooperativo" * 2
+    asset = provider.genera_sync(images.ImageGenerationRequest(
+        template="faq", formato="instagram_feed", titolo=parola_mostruosa,
+        dati_chiave=[parola_mostruosa]))
+    with Image.open(asset.percorso) as img:
+        larghezza, altezza = img.size
+        margine = int(larghezza * images.MARGINE_SICURO)
+        fascia_destra = img.crop((larghezza - margine, 0, larghezza, altezza))
+        colori_nella_fascia = set(fascia_destra.getdata())
+        assert _hex_a_rgb(images.PALETTE_DEFAULT["testo"]) not in colori_nella_fascia
+
+
+def test_logo_completo_disegnato_in_alto_a_destra(tmp_path, monkeypatch):
+    """Il logo completo (icona + wordmark + payoff) va in alto a destra,
+    non piu' in basso a sinistra come la vecchia icona: se presente, deve
+    comparire nell'immagine generata (a differenza di quando l'asset manca,
+    caso in cui l'immagine resta invariata)."""
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    richiesta = images.ImageGenerationRequest(
+        template="presentazione", formato="instagram_feed", titolo="JobInPA")
+    zona_logo = (700, 70, 1000, 170)  # angolo in alto a destra
+
+    monkeypatch.setattr(provider, "_logo_completo", lambda altezza_max: None)
+    asset_senza_logo = provider.genera_sync(richiesta)
+    with Image.open(asset_senza_logo.percorso) as img:
+        pixel_senza_logo = list(img.crop(zona_logo).getdata())
+
+    logo_finto = Image.new("RGBA", (280, 70), (255, 0, 0, 255))
+    monkeypatch.setattr(provider, "_logo_completo", lambda altezza_max: logo_finto)
+    asset_con_logo = provider.genera_sync(richiesta)
+    with Image.open(asset_con_logo.percorso) as img:
+        pixel_con_logo = list(img.crop(zona_logo).getdata())
+
+    assert pixel_senza_logo != pixel_con_logo
+    assert (255, 0, 0) in {p[:3] for p in pixel_con_logo}
 
 
 @pytest.mark.parametrize("formato,atteso", [
