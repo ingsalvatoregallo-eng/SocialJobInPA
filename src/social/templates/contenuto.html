@@ -13,7 +13,14 @@
   </div>
 </div>
 
-{% if c.errore %}<div class="avviso rosso">⚠️ Ultimo errore: {{ c.errore }}</div>{% endif %}
+{% if in_corso %}
+<div class="avviso info">⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
+<script>setTimeout(function () { location.reload(); }, 4000);</script>
+{% elif appena_in_coda %}
+<div class="avviso info">⏳ <strong>Pipeline in coda</strong> — un worker la prenderà in carico entro pochi secondi. Questa pagina si aggiorna automaticamente.</div>
+<script>setTimeout(function () { location.reload(); }, 3000);</script>
+{% endif %}
+{% if errore_leggibile %}<div class="avviso rosso">⚠️ {{ errore_leggibile }}</div>{% endif %}
 {% if c.brief %}<div class="card"><strong>Brief</strong><p style="white-space:pre-wrap;margin:6px 0 0">{{ c.brief }}</p></div>{% endif %}
 
 <div class="card" style="display:flex;gap:10px;flex-wrap:wrap">

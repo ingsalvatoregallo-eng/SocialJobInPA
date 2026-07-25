@@ -453,15 +453,43 @@ def crea_contenuto(request: Request, titolo: str = Form(...),
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
+_STATI_PIPELINE_IN_CORSO = {"RESEARCHING", "DRAFTING", "DRAFT_READY", "GENERATING_VISUAL", "QUALITY_CHECK"}
+
+
+def _errore_leggibile(errore):
+    """Traduce le eccezioni tecniche salvate in social_content.errore in un
+    messaggio comprensibile: senza questo, l'utente vede solo la stringa
+    grezza dell'eccezione Python (es. 'budget giornaliero anthropic
+    esaurito') senza capire cosa fare — stesso problema gia' risolto per
+    l'anteprima del brief, qui applicato alla pagina del contenuto."""
+    if not errore:
+        return None
+    testo = str(errore)
+    if "budget giornaliero" in testo:
+        return ("Pipeline interrotta: budget AI giornaliero esaurito. Riprova più tardi "
+                "(si resetta a mezzanotte) o alza ANTHROPIC_DAILY_BUDGET_EUR in .env.")
+    if "budget mensile" in testo:
+        return "Pipeline interrotta: budget AI mensile esaurito."
+    if "circuito aperto" in testo.lower() or "CircuitAperto" in testo:
+        return ("Pipeline interrotta: il provider AI ha risposto con troppi errori di fila "
+                "ed è stato temporaneamente disattivato. Riprova tra qualche minuto.")
+    return testo
+
+
 @router.get("/contenuti/{content_id}", response_class=HTMLResponse)
-def contenuto(request: Request, content_id: str,
+def contenuto(request: Request, content_id: str, avviata: bool = False,
               sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     content = db_social.get_content(conn, content_id)
     if content is None:
         raise HTTPException(status_code=404, detail="Contenuto non trovato")
     punteggi = json.loads(content["punteggi_rischio"]) if content["punteggi_rischio"] else None
+    in_corso = content["stato"] in _STATI_PIPELINE_IN_CORSO
     return templates.TemplateResponse(request, "contenuto.html", _ctx(
         request, sessione, conn, c=content, punteggi=punteggi,
+        errore_leggibile=_errore_leggibile(content["errore"]),
+        in_corso=in_corso,
+        appena_in_coda=(avviata and not in_corso and not content["errore"]
+                        and content["stato"] in agents.STATI_PIPELINE_AVVIABILE),
         varianti={v["piattaforma"]: v for v in db_social.varianti_di(conn, content_id)},
         assets=db_social.asset_di(conn, content_id),
         fatti=db_social.fatti_di(conn, content_id),
@@ -474,8 +502,9 @@ def avvia_pipeline(request: Request, content_id: str, csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
+    db_social.aggiorna_content(conn, content_id, errore=None)
     db_social.crea_job(conn, "pipeline", {"content_id": content_id})
-    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+    return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
 @router.post("/contenuti/{content_id}/pubblica")
