@@ -13,9 +13,23 @@
 
 <div class="card" style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap">
   {% for g in gruppi %}
-  <a class="btn piccolo {{ 'secondario' if g != gruppo else '' }}" href="/social/contenuti?gruppo={{ g }}">{{ g|capitalize }}</a>
+  <a class="btn piccolo {{ 'secondario' if g != gruppo else '' }}" href="/social/contenuti?gruppo={{ g }}"
+     style="display:inline-flex;align-items:center;gap:6px">
+    {{ g|capitalize }}
+    {% if conteggi.get(g) %}
+    <span class="badge {{ 'rosso' if g in ('approvazioni', 'errori') and g != gruppo else 'grigio' if g != gruppo else 'blu' }}"
+          style="padding:1px 7px">{{ conteggi[g] }}</span>
+    {% endif %}
+  </a>
   {% endfor %}
 </div>
+
+{% if altrove %}
+<div class="avviso giallo">
+  ⚠️ {% for g, n in altrove %}<a href="/social/contenuti?gruppo={{ g }}"><strong>{{ n }} in {{ g }}</strong></a>{{ ', ' if not loop.last }}{% endfor %}
+  — richiede la tua attenzione.
+</div>
+{% endif %}
 
 <div class="card">
   <table>
@@ -39,7 +53,10 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="hint">Nessun contenuto in questo gruppo.</td></tr>
+    <tr><td colspan="7" class="hint">
+      Nessun contenuto in questo gruppo.
+      {% if altrove %}Guarda {% for g, n in altrove %}<a href="/social/contenuti?gruppo={{ g }}">{{ g }}</a>{{ ' o ' if not loop.last }}{% endfor %} qui sopra.{% endif %}
+    </td></tr>
     {% endfor %}
   </table>
 </div>

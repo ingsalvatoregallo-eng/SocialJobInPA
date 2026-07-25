@@ -382,11 +382,28 @@ _GRUPPI_STATO = {
 @router.get("/contenuti", response_class=HTMLResponse)
 def contenuti(request: Request, gruppo: str = "idee",
               sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    # Un contenuto in "approvazioni" o "errori" era invisibile finche' non
+    # si cliccava per caso su quella tab: senza un conteggio per gruppo,
+    # una tab vuota ("Idee") non dava nessun indizio che ci fosse altro da
+    # vedere altrove. Un'unica query su tutti i contenuti invece di una
+    # per gruppo (7 query) evita di moltiplicare gli accessi al DB.
+    tutti = db_social.lista_content(conn, stati=None, limit=1000)
+    conteggi = {g: 0 for g in _GRUPPI_STATO}
+    for c in tutti:
+        for g, stati_gruppo in _GRUPPI_STATO.items():
+            if c["stato"] in stati_gruppo:
+                conteggi[g] += 1
+                break
     stati = _GRUPPI_STATO.get(gruppo, None)
+    contenuti_gruppo = [c for c in tutti if stati is None or c["stato"] in stati]
+    # Gruppi che richiedono attenzione (approvazioni in attesa, errori di
+    # pubblicazione): se non e' quello aperto ora, segnalato con un avviso
+    # invece di restare invisibile finche' non si clicca per caso li'.
+    altrove = [(g, conteggi[g]) for g in ("approvazioni", "errori")
+               if g != gruppo and conteggi.get(g)]
     return templates.TemplateResponse(request, "contenuti.html", _ctx(
-        request, sessione, conn, gruppo=gruppo, gruppi=list(_GRUPPI_STATO),
-        contenuti=db_social.lista_content(conn, stati=stati),
-        pillars=db_social.pillars(conn)))
+        request, sessione, conn, gruppo=gruppo, gruppi=list(_GRUPPI_STATO), conteggi=conteggi,
+        altrove=altrove, contenuti=contenuti_gruppo, pillars=db_social.pillars(conn)))
 
 
 @router.get("/contenuti/nuovo", response_class=HTMLResponse)
