@@ -13,6 +13,13 @@ Content Publishing API — POST /{ig-user-id}/media (container con image_url +
 caption) e POST /{ig-user-id}/media_publish. Richiede che l'immagine sia
 raggiungibile via URL pubblico: finche' il modulo gira solo in locale questo
 e' un requisito documentato nella checklist, non aggirato con workaround.
+
+Post carosello (2-10 immagini, es. una per bando trovato dal Research
+Agent): flusso a tre passi, distinto da quello a immagine singola — un
+container 'figlio' per immagine (is_carousel_item=true, senza caption),
+poi un container padre (media_type=CAROUSEL, children, con la caption
+unica), infine la pubblicazione. Stesso requisito di URL pubblico per
+ciascuna immagine figlio.
 """
 
 import logging
@@ -20,6 +27,8 @@ import logging
 import requests
 
 from social import config, db_social, security
+from social.images import MASSIMO_IMMAGINI_CAROSELLO
+from social.integrations.base import PublishResult, asset_a_lista
 
 log = logging.getLogger(__name__)
 
@@ -128,16 +137,22 @@ class InstagramAdapter:
 
     # --- Pubblicazione -------------------------------------------------------
 
-    def publish(self, testo, asset_path=None, image_url=None):
+    def publish(self, testo, asset_path=None):
+        """asset_path: URL singolo, o lista di URL (2-10) per un post
+        carosello — una voce per bando quando il Research Agent ne ha
+        trovati piu' di uno (vedi agents.visual)."""
         salute = self.health_check()
         if not salute["pronto"]:
             raise RuntimeError(salute["messaggio"])
         token = self._token()
         versione = self.cfg["graph_api_version"]
         ig_id = self.cfg["instagram_account_id"]
+        immagini = asset_a_lista(asset_path)[:MASSIMO_IMMAGINI_CAROSELLO]
+        if len(immagini) > 1:
+            return self._pubblica_carosello(testo, immagini, token, versione, ig_id)
         dati = {"caption": testo, "access_token": token}
-        if image_url:
-            dati["image_url"] = image_url
+        if immagini:
+            dati["image_url"] = immagini[0]
         creazione = requests.post(f"{_GRAPH}/{versione}/{ig_id}/media",
                                   data=dati, timeout=60)
         creazione.raise_for_status()
@@ -146,7 +161,36 @@ class InstagramAdapter:
             f"{_GRAPH}/{versione}/{ig_id}/media_publish",
             data={"creation_id": container_id, "access_token": token}, timeout=60)
         pubblicazione.raise_for_status()
-        from social.integrations.base import PublishResult
+        media_id = pubblicazione.json()["id"]
+        return PublishResult(remote_id=media_id,
+                             remote_url=f"https://www.instagram.com/p/{media_id}/")
+
+    def _pubblica_carosello(self, testo, immagini, token, versione, ig_id):
+        """Post carosello: un container 'figlio' per immagine
+        (is_carousel_item=true, senza caption — la caption e' unica sul
+        container padre), poi il container CAROUSEL che li referenzia,
+        infine la pubblicazione. Se la creazione di un figlio fallisce a
+        meta', i container gia' creati restano orfani lato Meta (si
+        auto-eliminano dopo 24h, comportamento normale della Content
+        Publishing API — non serve una pulizia esplicita qui)."""
+        figli = []
+        for url in immagini:
+            risposta = requests.post(
+                f"{_GRAPH}/{versione}/{ig_id}/media",
+                data={"image_url": url, "is_carousel_item": "true", "access_token": token},
+                timeout=60)
+            risposta.raise_for_status()
+            figli.append(risposta.json()["id"])
+        creazione = requests.post(
+            f"{_GRAPH}/{versione}/{ig_id}/media",
+            data={"media_type": "CAROUSEL", "caption": testo,
+                  "children": ",".join(figli), "access_token": token}, timeout=60)
+        creazione.raise_for_status()
+        container_id = creazione.json()["id"]
+        pubblicazione = requests.post(
+            f"{_GRAPH}/{versione}/{ig_id}/media_publish",
+            data={"creation_id": container_id, "access_token": token}, timeout=60)
+        pubblicazione.raise_for_status()
         media_id = pubblicazione.json()["id"]
         return PublishResult(remote_id=media_id,
                              remote_url=f"https://www.instagram.com/p/{media_id}/")

@@ -34,6 +34,11 @@ FORMATI = {
 }
 FORMATO_PER_PIATTAFORMA = {"instagram": "instagram_feed", "linkedin": "linkedin"}
 
+# Limite reale dei post carosello di Instagram (Content Publishing API):
+# condiviso fra generazione (agents.visual) e pubblicazione
+# (integrations.instagram) per evitare che i due si disallineino.
+MASSIMO_IMMAGINI_CAROSELLO = 10
+
 # Margine sicuro: nessun testo oltre questo bordo (crop delle anteprime).
 MARGINE_SICURO = 0.08
 

@@ -7,7 +7,36 @@ from social import agents, approvals, db_social, llm, models, publishing, schedu
 from social.images import MockImageProvider
 
 
-def test_e2e_percorso_verde_automatico(conn):
+class _ClienteJobInPAFinto:
+    """Bandi fissi, mai una vera chiamata di rete: gli e2e test devono
+    restare deterministici (numero di asset generati per il carosello
+    Instagram) indipendentemente da quanti bandi esistano davvero su
+    JobInPA in questo momento."""
+
+    def __init__(self, n_bandi=3):
+        self._bandi = [
+            {"id": f"CONC-{i}", "titolo": f"Concorso demo {i}", "enti": ["Ente Demo"],
+             "num_posti": 5, "scadenza": "2026-12-31", "stato": "OPEN",
+             "sintesi": "Concorso di prova.", "titolo_studio_richiesto": "Diploma",
+             "competenze": [], "url_dettaglio": "https://example.invalid"}
+            for i in range(n_bandi)]
+
+    @property
+    def configurato(self):
+        return True
+
+    def bandi(self, *, limit=10, **filtri):
+        return self._bandi[:limit]
+
+    def bando(self, concorso_id):
+        return None
+
+    def filtri_disponibili(self):
+        return {}
+
+
+def test_e2e_percorso_verde_automatico(conn, monkeypatch):
+    monkeypatch.setattr(agents.jobinpa_client, "client", lambda: _ClienteJobInPAFinto(3))
     content_id = db_social.crea_content(conn, "Nuovo concorso Comune Demo",
                                         pillar_chiave="opportunita")
     stato = agents.esegui_pipeline(conn, content_id,
@@ -21,7 +50,8 @@ def test_e2e_percorso_verde_automatico(conn):
     # varianti per entrambe le piattaforme + asset + fatti
     assert {v["piattaforma"] for v in db_social.varianti_di(conn, content_id)} \
         == {"instagram", "linkedin"}
-    assert len(db_social.asset_di(conn, content_id)) == 2
+    # 3 bandi trovati -> carosello Instagram (1 immagine per bando) + 1 LinkedIn
+    assert len(db_social.asset_di(conn, content_id)) == 4
     assert db_social.fatti_di(conn, content_id)
     # job di pubblicazione in coda
     jobs = db_social.lista_jobs(conn, stati=["pending"])
@@ -44,12 +74,13 @@ def test_e2e_percorso_verde_automatico(conn):
     assert {"transizione_stato", "pubblicazione"} <= azioni
 
 
-def test_pipeline_duplicata_e_no_op(conn):
+def test_pipeline_duplicata_e_no_op(conn, monkeypatch):
     """Un secondo job 'pipeline' sullo stesso contenuto (doppio click, o due
     job accodati) non deve sollevare TransizioneNonValida: il contenuto e'
     gia' avanzato oltre gli stati di partenza, quindi la seconda chiamata
     esce subito senza toccare nulla (regressione: prima falliva con
     "SCHEDULED -> RESEARCHING" e finiva in dead-letter dopo 5 tentativi)."""
+    monkeypatch.setattr(agents.jobinpa_client, "client", lambda: _ClienteJobInPAFinto(3))
     content_id = db_social.crea_content(conn, "Contenuto con doppio avvio")
     provider = llm.MockLLMProvider(conn)
     image_provider = MockImageProvider()
@@ -65,7 +96,7 @@ def test_pipeline_duplicata_e_no_op(conn):
     assert db_social.get_content(conn, content_id)["stato"] == "SCHEDULED"
     # varianti/asset non duplicati: la seconda chiamata non ha rifatto nulla
     assert len(db_social.varianti_di(conn, content_id)) == 2
-    assert len(db_social.asset_di(conn, content_id)) == 2
+    assert len(db_social.asset_di(conn, content_id)) == 4
 
 
 def test_e2e_percorso_giallo_con_approvazione_umana(conn):

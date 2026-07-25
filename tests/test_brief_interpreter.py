@@ -83,7 +83,7 @@ def test_research_con_criteri_specifici_e_bandi_trovati(conn):
     content_id = db_social.crea_content(
         conn, "Concorsi IT", brief="Concorsi informatici con più di 10 posti")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 3, "competenza": "informatica", "posti_minimi": 10}]
+    assert client.chiamate_bandi == [{"limit": 10, "competenza": "informatica", "posti_minimi": 10}]
     assert risultato.fatti or risultato.sintesi is not None  # non solleva, prosegue normale
 
 
@@ -110,7 +110,7 @@ def test_research_senza_criteri_specifici_non_annulla_anche_se_vuoto(conn):
     content_id = db_social.crea_content(
         conn, "Novità della settimana", brief="Raccontiamo le novità di questa settimana")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 3, "stato": "OPEN"}]  # ricerca generica, non filtrata
+    assert client.chiamate_bandi == [{"limit": 10, "stato": "OPEN"}]  # ricerca generica, non filtrata
     assert risultato is not None
 
 
@@ -121,7 +121,7 @@ def test_research_senza_brief_non_interpreta_niente(conn):
     provider = llm.MockLLMProvider(conn)
     content_id = db_social.crea_content(conn, "Contenuto senza brief")
     agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 3, "stato": "OPEN"}]
+    assert client.chiamate_bandi == [{"limit": 10, "stato": "OPEN"}]
     # nessuna chiamata al prompt interpreta_brief tra le chiamate LLM registrate
     esecuzioni = db_social.agent_runs_recenti(conn)
     assert not any(r["prompt_nome"] == "interpreta_brief" for r in esecuzioni)

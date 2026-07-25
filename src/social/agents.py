@@ -92,12 +92,16 @@ def _fetch_fonte(conn, url):
         return None, str(errore)
 
 
-def _contesto_jobinpa(concorso_id=None, limite=3, *, client=None, filtri=None):
+def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO, *,
+                      client=None, filtri=None):
     """Fatti dal portale JobInPA (fonte primaria autorizzata), letti via API
     private: il bando indicato con la sua classificazione AI (sintesi,
     requisiti, titolo di studio), oppure i bandi che soddisfano `filtri`
     (derivati dal brief, vedi interpreta_brief), oppure — senza ne'
-    concorso_id ne' filtri — i bandi aperti piu' recenti.
+    concorso_id ne' filtri — i bandi aperti piu' recenti. Il limite di
+    default e' quello di un carosello Instagram (10): se ne trova piu' di
+    uno, il Visual Agent genera un'immagine per bando invece di sceglierne
+    uno solo (vedi visual()).
     Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
     se la ricerca ha trovato qualcosa (vedi research(), annullamento su
     criteri specifici senza risultati). Senza JOBINPA_API_URL/KEY
@@ -193,6 +197,11 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
         + "\n".join(blocchi_fonte))
     risultato = _run_llm(conn, "research", "research", models.RisultatoRicerca,
                          user_prompt, content_id=content_id, provider=provider)
+    # Popolato QUI, non generato dal modello: i record grezzi dei bandi
+    # trovati servono al Visual Agent per generare un'immagine per bando
+    # in un carosello Instagram (vedi visual()), con dati sempre presi dal
+    # database JobInPA invece che dall'interpretazione del modello.
+    risultato.bandi_trovati = [b for b in righe_trovate if b]
     for fatto in risultato.fatti:
         db_social.salva_fatto(conn, fatto.fatto, content_id=content_id,
                               fonte_url=fatto.fonte_url, confidenza=fatto.confidenza,
@@ -210,10 +219,20 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None):
     base = (f"Tema: {content['titolo']}\nBrief: {content['brief'] or '(nessuno)'}\n"
             f"Fatti verificati (usa SOLO questi):\n{fatti}\n"
             f"Sintesi ricerca: {risultato_ricerca.sintesi}")
+    prompt_instagram = base + "\nScrivi la caption Instagram."
+    n_bandi = len(risultato_ricerca.bandi_trovati)
+    if n_bandi > 1:
+        # Il Visual Agent generera' un carosello di n_bandi immagini (una
+        # per bando, vedi visual()): la caption deve invitare a scorrerle
+        # invece di descriverne una sola come se fosse l'unico contenuto.
+        prompt_instagram += (
+            f"\nQuesto post avra' un carosello di {min(n_bandi, images.MASSIMO_IMMAGINI_CAROSELLO)} "
+            "immagini, una per bando trovato: invita chi legge a scorrerle tutte "
+            "invece di descriverne una sola.")
     # Due prompt distinti (sez. 29), un'unica risposta strutturata per
     # piattaforma: si passa dal prompt Instagram e si chiede la coppia.
     ig = _run_llm(conn, "copywriting", "copy_instagram", models.VarianteCopy,
-                  base + "\nScrivi la caption Instagram.", content_id=content_id,
+                  prompt_instagram, content_id=content_id,
                   provider=provider)
     li = _run_llm(conn, "copywriting", "copy_linkedin", models.VarianteCopy,
                   base + "\nScrivi il post LinkedIn.", content_id=content_id,
@@ -227,6 +246,25 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None):
 
 # --- Visual Agent ------------------------------------------------------------
 
+def _richiesta_immagine_da_bando(bando, formato, content_id):
+    """Immagine 'nuovo_concorso' per un singolo bando di un carosello, con
+    dati SEMPRE presi dal record JobInPA (mai dal modello) — stesso
+    principio dei dati_chiave del VisualBrief, qui applicato quando i
+    bandi sono piu' di uno e ognuno ha diritto alla propria immagine
+    invece che il modello ne scelga solo uno."""
+    dati_chiave = [f"Ente: {bando.get('enti') or 'n/d'}"]
+    if bando.get("num_posti"):
+        dati_chiave.append(f"Posti: {bando['num_posti']}")
+    if bando.get("scadenza"):
+        dati_chiave.append(f"Scadenza: {bando['scadenza']}")
+    if bando.get("titolo_studio_richiesto"):
+        dati_chiave.append(f"Titolo di studio: {bando['titolo_studio_richiesto']}")
+    return images.ImageGenerationRequest(
+        template="nuovo_concorso", formato=formato,
+        titolo=bando.get("titolo") or "Concorso pubblico",
+        sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id)
+
+
 def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider=None):
     content = db_social.get_content(conn, content_id)
     fatti = "\n".join(f"- {f.fatto}" for f in risultato_ricerca.fatti)
@@ -237,8 +275,20 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         brief.template = "presentazione"
     image_provider = image_provider or images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")
+    bandi_carosello = risultato_ricerca.bandi_trovati[:images.MASSIMO_IMMAGINI_CAROSELLO]
     for piattaforma in canali:
         formato = images.FORMATO_PER_PIATTAFORMA[piattaforma]
+        if piattaforma == "instagram" and len(bandi_carosello) > 1:
+            # Carosello: un'immagine per bando invece di una sola immagine
+            # che ne sceglie uno e relega gli altri a nota testuale nella
+            # caption (comportamento precedente, segnalato dall'utente).
+            for bando in bandi_carosello:
+                richiesta = _richiesta_immagine_da_bando(bando, formato, content_id)
+                asset = asyncio.run(image_provider.generate(richiesta))
+                db_social.salva_asset(conn, content_id, asset.percorso,
+                                      piattaforma=piattaforma, template=asset.template,
+                                      formato=asset.formato, provider=asset.provider)
+            continue
         richiesta = images.ImageGenerationRequest(
             template=brief.template, formato=formato, titolo=brief.titolo,
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,

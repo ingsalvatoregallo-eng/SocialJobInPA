@@ -18,6 +18,7 @@ import logging
 import requests
 
 from social import config, db_social, security
+from social.integrations.base import asset_a_lista
 
 log = logging.getLogger(__name__)
 
@@ -115,10 +116,14 @@ class LinkedInAdapter:
         return any(e.get("organization") == self.cfg["organization_urn"] for e in elementi)
 
     def publish(self, testo, asset_path=None):
+        """asset_path: percorso singolo, o lista (usa solo il primo — LinkedIn
+        non ha qui un equivalente del carosello Instagram: se il contenuto
+        ha piu' immagini, ne pubblica una sola, il match migliore)."""
         salute = self.health_check()
         if not salute["pronto"]:
             raise RuntimeError(salute["messaggio"])
         token = self._token()
+        immagini = asset_a_lista(asset_path)
         corpo = {
             "author": self.cfg["organization_urn"],
             "commentary": testo,
@@ -128,8 +133,8 @@ class LinkedInAdapter:
             "lifecycleState": "PUBLISHED",
             "isReshareDisabledByAuthor": False,
         }
-        if asset_path:
-            corpo["content"] = {"media": {"id": self._upload_image(token, asset_path)}}
+        if immagini:
+            corpo["content"] = {"media": {"id": self._upload_image(token, immagini[0])}}
         risposta = requests.post(f"{_API}/rest/posts", json=corpo,
                                  headers=self._headers(token), timeout=60)
         risposta.raise_for_status()

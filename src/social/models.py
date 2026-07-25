@@ -52,6 +52,12 @@ class RisultatoRicerca(BaseModel):
     fonti_consultate: list[str] = Field(default_factory=list)
     richiede_revisione: bool = False
     note: Optional[str] = None
+    bandi_trovati: list[dict] = Field(
+        default_factory=list,
+        description="Record grezzi dei bandi JobInPA trovati (non generati dall'AI: "
+                    "popolato da research() dopo la chiamata al modello). Usato dal "
+                    "Visual Agent per generare un'immagine per bando in un carosello "
+                    "Instagram invece di farne scegliere uno solo al modello.")
 
 
 class VarianteCopy(BaseModel):

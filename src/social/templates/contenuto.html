@@ -50,10 +50,16 @@
 
 <div class="griglia griglia-auto">
   {% for piattaforma in ('instagram', 'linkedin') %}
+  {% set assets_piattaforma = assets|selectattr("piattaforma", "equalto", piattaforma)|list %}
   <div class="card">
-    <div class="badge blu" style="margin-bottom:10px">{{ '📷 Instagram' if piattaforma == 'instagram' else '💼 LinkedIn' }}</div>
-    {% for a in assets if a.piattaforma == piattaforma %}
-      <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo)">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div class="badge blu">{{ '📷 Instagram' if piattaforma == 'instagram' else '💼 LinkedIn' }}</div>
+      {% if assets_piattaforma|length > 1 %}
+      <div class="badge viola">🎠 Carosello: {{ assets_piattaforma|length }} immagini</div>
+      {% endif %}
+    </div>
+    {% for a in assets_piattaforma %}
+      <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo);margin-bottom:8px">
       <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
     {% endfor %}
     {% if varianti.get(piattaforma) %}

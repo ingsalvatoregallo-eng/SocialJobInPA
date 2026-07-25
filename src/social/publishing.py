@@ -98,7 +98,12 @@ def pubblica_contenuto(conn, content_id, *, utente_id=None):
     modalita = modalita_effettiva(conn)
     canali = json.loads(content["canali"] or "[]")
     varianti = {v["piattaforma"]: v for v in db_social.varianti_di(conn, content_id)}
-    asset = {a["piattaforma"]: a for a in db_social.asset_di(conn, content_id)}
+    # Lista, non un solo asset per piattaforma: un contenuto con un
+    # carosello Instagram ha piu' immagini per lo stesso canale (vedi
+    # agents.visual), e un dict semplice ne terrebbe visibile solo l'ultima.
+    asset_per_piattaforma = {}
+    for a in db_social.asset_di(conn, content_id):
+        asset_per_piattaforma.setdefault(a["piattaforma"], []).append(a["percorso"])
     esiti = {}
     for piattaforma in canali:
         # In produzione i controlli sono vincolanti; in mock/sandbox si
@@ -123,8 +128,8 @@ def pubblica_contenuto(conn, content_id, *, utente_id=None):
             continue
         adapter = adapter_per(conn, piattaforma)
         try:
-            percorso_asset = asset[piattaforma]["percorso"] if piattaforma in asset else None
-            risultato = adapter.publish(variante["testo"], percorso_asset)
+            percorsi_asset = asset_per_piattaforma.get(piattaforma) or None
+            risultato = adapter.publish(variante["testo"], percorsi_asset)
             db_social.chiudi_publication(conn, pub_id, esito="ok",
                                          remote_id=risultato.remote_id,
                                          remote_url=risultato.remote_url)

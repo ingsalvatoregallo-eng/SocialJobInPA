@@ -26,6 +26,31 @@ def test_flusso_mock_pubblica_su_entrambe_le_piattaforme(conn):
                for p in pubs)
 
 
+def test_pubblica_contenuto_passa_tutti_gli_asset_del_carosello(conn, monkeypatch):
+    """Regressione: asset_per_piattaforma era costruito come dict
+    {piattaforma: ultimo asset}, quindi un contenuto con piu' immagini
+    Instagram (carosello) ne perdeva tutte tranne l'ultima al momento di
+    passarle all'adapter per la pubblicazione."""
+    content_id = _contenuto_pronto(conn)
+    percorsi_aggiunti = [f"/tmp/carosello-{i}.png" for i in range(3)]
+    for percorso in percorsi_aggiunti:
+        db_social.salva_asset(conn, content_id, percorso, piattaforma="instagram",
+                              template="nuovo_concorso", formato="instagram_feed")
+
+    adapter_instagram = MockAdapter("instagram")
+    originale = publishing.adapter_per
+
+    def adapter_per_finto(conn, piattaforma, forza_mock=False):
+        if piattaforma == "instagram":
+            return adapter_instagram
+        return originale(conn, piattaforma, forza_mock=forza_mock)
+
+    monkeypatch.setattr(publishing, "adapter_per", adapter_per_finto)
+    publishing.pubblica_contenuto(conn, content_id)
+    asset_passati = adapter_instagram.pubblicati[0]["asset"]
+    assert all(p in asset_passati for p in percorsi_aggiunti)
+
+
 def test_doppia_pubblicazione_impossibile(conn):
     content_id = _contenuto_pronto(conn)
     publishing.pubblica_contenuto(conn, content_id)
