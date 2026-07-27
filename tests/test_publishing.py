@@ -51,6 +51,38 @@ def test_pubblica_contenuto_passa_tutti_gli_asset_del_carosello(conn, monkeypatc
     assert all(p in asset_passati for p in percorsi_aggiunti)
 
 
+def test_pubblica_usa_url_pubblico_per_instagram_e_percorso_per_linkedin(conn, monkeypatch):
+    """Instagram accetta solo un image_url raggiungibile da Internet (mai i
+    byte diretti come LinkedIn): quando l'asset ha un url_pubblico (caricato
+    su R2, vedi asset_storage.py) va usato quello, non il percorso locale.
+    LinkedIn invece deve continuare a ricevere il percorso locale (legge i
+    byte da disco), anche se per qualche motivo avesse anche lui un
+    url_pubblico valorizzato."""
+    content_id = _contenuto_pronto(conn)
+    db_social.elimina_asset_di(conn, content_id)
+    db_social.salva_asset(conn, content_id, "/tmp/instagram-locale.png",
+                          piattaforma="instagram", url_pubblico="https://cdn.test/ig.png")
+    db_social.salva_asset(conn, content_id, "/tmp/linkedin-locale.png",
+                          piattaforma="linkedin", url_pubblico="https://cdn.test/li.png")
+
+    adapter_instagram = MockAdapter("instagram")
+    adapter_linkedin = MockAdapter("linkedin")
+    originale = publishing.adapter_per
+
+    def adapter_per_finto(conn, piattaforma, forza_mock=False):
+        if piattaforma == "instagram":
+            return adapter_instagram
+        if piattaforma == "linkedin":
+            return adapter_linkedin
+        return originale(conn, piattaforma, forza_mock=forza_mock)
+
+    monkeypatch.setattr(publishing, "adapter_per", adapter_per_finto)
+    publishing.pubblica_contenuto(conn, content_id)
+
+    assert adapter_instagram.pubblicati[0]["asset"] == ["https://cdn.test/ig.png"]
+    assert adapter_linkedin.pubblicati[0]["asset"] == ["/tmp/linkedin-locale.png"]
+
+
 def test_doppia_pubblicazione_impossibile(conn):
     content_id = _contenuto_pronto(conn)
     publishing.pubblica_contenuto(conn, content_id)
@@ -154,18 +186,24 @@ def test_adapter_reali_non_pronti_senza_config(conn):
         InstagramAdapter(conn).publish("test")
 
 
-def test_checklist_immagini_pubbliche_segue_app_base_url(conn, monkeypatch):
-    """Il requisito "immagini via URL pubblico" e' legato ad APP_BASE_URL:
-    localhost/127.0.0.1 = non pronto, un dominio vero = ok — prima era un
-    placeholder sempre False, non sarebbe mai diventato verde nemmeno dopo
-    un vero deploy pubblico (bug segnalato indirettamente dall'utente)."""
+def test_checklist_immagini_pubbliche_segue_configurazione_r2(conn, monkeypatch):
+    """Il requisito "immagini via URL pubblico" e' legato alla configurazione
+    di Cloudflare R2 (storage pubblico per le immagini, vedi asset_storage.py)
+    — prima era un placeholder sempre False, non sarebbe mai diventato verde
+    nemmeno dopo un vero deploy (bug segnalato indirettamente dall'utente)."""
     from social.integrations.instagram import InstagramAdapter
-    voce = "Immagini raggiungibili via URL pubblico"
+    voce = "Storage pubblico immagini (Cloudflare R2) configurato"
 
-    monkeypatch.setenv("APP_BASE_URL", "https://localhost:8100")
+    for chiave in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+                  "R2_BUCKET_NAME", "R2_PUBLIC_BASE_URL"):
+        monkeypatch.delenv(chiave, raising=False)
     checklist = InstagramAdapter(conn).health_check()["checklist"]
     assert not next(v for v in checklist if v["voce"] == voce)["ok"]
 
-    monkeypatch.setenv("APP_BASE_URL", "https://social.jobinpa.it")
+    monkeypatch.setenv("R2_ACCOUNT_ID", "account-test")
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "chiave-test")
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "segreto-test")
+    monkeypatch.setenv("R2_BUCKET_NAME", "bucket-test")
+    monkeypatch.setenv("R2_PUBLIC_BASE_URL", "https://immagini.jobinpa.it")
     checklist = InstagramAdapter(conn).health_check()["checklist"]
     assert next(v for v in checklist if v["voce"] == voce)["ok"]

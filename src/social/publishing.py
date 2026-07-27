@@ -101,9 +101,16 @@ def pubblica_contenuto(conn, content_id, *, utente_id=None):
     # Lista, non un solo asset per piattaforma: un contenuto con un
     # carosello Instagram ha piu' immagini per lo stesso canale (vedi
     # agents.visual), e un dict semplice ne terrebbe visibile solo l'ultima.
+    # Instagram richiede un image_url pubblico (mai i byte diretti come
+    # LinkedIn, che legge percorso da disco): usa url_pubblico quando c'e',
+    # altrimenti ripiega sul percorso locale (mock/sandbox, o R2 non
+    # configurato — in quel caso la checklist blocca comunque la
+    # pubblicazione reale su Instagram, vedi InstagramAdapter.health_check).
     asset_per_piattaforma = {}
     for a in db_social.asset_di(conn, content_id):
-        asset_per_piattaforma.setdefault(a["piattaforma"], []).append(a["percorso"])
+        valore = (a["url_pubblico"] if a["piattaforma"] == "instagram" and a["url_pubblico"]
+                 else a["percorso"])
+        asset_per_piattaforma.setdefault(a["piattaforma"], []).append(valore)
     esiti = {}
     for piattaforma in canali:
         # In produzione i controlli sono vincolanti; in mock/sandbox si

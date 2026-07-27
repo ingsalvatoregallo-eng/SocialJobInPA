@@ -31,8 +31,8 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from social import (  # noqa: E402
-    config, db_social, images, jobinpa_client, llm, models, prompts, risk,
-    security, state_machine,
+    asset_storage, config, db_social, images, jobinpa_client, llm, models,
+    prompts, risk, security, state_machine,
 )
 
 log = logging.getLogger(__name__)
@@ -400,7 +400,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                 db_social.salva_asset(conn, content_id, asset.percorso,
                                       piattaforma=piattaforma, template=asset.template,
                                       formato=asset.formato, provider=asset.provider,
-                                      bando_id=bando.get("id"))
+                                      bando_id=bando.get("id"),
+                                      url_pubblico=asset_storage.carica_pubblico(asset.percorso))
             continue
         richiesta = images.ImageGenerationRequest(
             template=brief.template, formato=formato, titolo=brief.titolo,
@@ -409,7 +410,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         asset = asyncio.run(image_provider.generate(richiesta))
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,
-                              formato=asset.formato, provider=asset.provider)
+                              formato=asset.formato, provider=asset.provider,
+                              url_pubblico=asset_storage.carica_pubblico(asset.percorso))
     return brief
 
 

@@ -184,6 +184,27 @@ def instagram_config():
     }
 
 
+# --- Storage pubblico immagini (Cloudflare R2) --------------------------------
+# Instagram (a differenza di LinkedIn, che riceve i byte direttamente) accetta
+# solo un image_url raggiungibile da Internet: invece di esporre l'intera app
+# dietro un dominio pubblico, ogni immagine generata viene caricata anche qui,
+# in un bucket S3-compatibile con lettura pubblica (vedi asset_storage.py).
+
+def r2_config():
+    return {
+        "account_id": os.environ.get("R2_ACCOUNT_ID", ""),
+        "access_key_id": os.environ.get("R2_ACCESS_KEY_ID", ""),
+        "secret_access_key": os.environ.get("R2_SECRET_ACCESS_KEY", ""),
+        "bucket": os.environ.get("R2_BUCKET_NAME", ""),
+        "public_base_url": os.environ.get("R2_PUBLIC_BASE_URL", ""),
+    }
+
+
+def r2_configurato():
+    cfg = r2_config()
+    return all(cfg.values())
+
+
 # --- LinkedIn ----------------------------------------------------------------
 
 def linkedin_config():

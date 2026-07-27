@@ -240,6 +240,7 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
     percorso    TEXT NOT NULL,
     provider    TEXT NOT NULL DEFAULT 'template',
     bando_id    TEXT,                 -- bando del carosello che questa immagine rappresenta (NULL fuori carosello)
+    url_pubblico TEXT,                -- URL su storage pubblico (R2), NULL se non caricato/non configurato
     creato_at   TEXT NOT NULL
 );
 
@@ -486,6 +487,11 @@ def _migra(conn):
         # il bando corrispondente da bandi_trovati (vedi elimina_asset).
         conn.execute("ALTER TABLE social_media_assets ADD COLUMN bando_id TEXT")
         conn.commit()
+    if "url_pubblico" not in colonne_assets:
+        # URL su storage pubblico (R2): Instagram richiede un image_url
+        # raggiungibile da Internet, mai i byte diretti come LinkedIn.
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN url_pubblico TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -721,12 +727,13 @@ def aggiorna_testo_variante(conn, content_id, piattaforma, testo):
 
 
 def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
-                formato=None, provider="template", bando_id=None):
+                formato=None, provider="template", bando_id=None, url_pubblico=None):
     asset_id = _nuovo_id()
     _insert(conn, "social_media_assets", {
         "id": asset_id, "content_id": content_id, "piattaforma": piattaforma,
         "template": template, "formato": formato, "percorso": str(percorso),
-        "provider": provider, "bando_id": bando_id, "creato_at": _adesso()})
+        "provider": provider, "bando_id": bando_id, "url_pubblico": url_pubblico,
+        "creato_at": _adesso()})
     conn.commit()
     return asset_id
 

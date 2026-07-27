@@ -12,8 +12,10 @@ di ambiente: si ottiene dal token stesso subito dopo l'autorizzazione
 Pubblicazione (quando configurato): flusso ufficiale in due passi del
 Content Publishing API — POST /{ig-user-id}/media (container con image_url +
 caption) e POST /{ig-user-id}/media_publish. Richiede che l'immagine sia
-raggiungibile via URL pubblico: finche' il modulo gira solo in locale questo
-e' un requisito documentato nella checklist, non aggirato con workaround.
+raggiungibile via URL pubblico: per questo ogni immagine generata viene
+caricata anche su Cloudflare R2 (vedi asset_storage.py e
+social_media_assets.url_pubblico), invece di esporre l'intera app dietro
+un dominio pubblico — resta privata, pubblico e' solo il singolo file.
 
 Post carosello (2-10 immagini, es. una per bando trovato dal Research
 Agent): flusso a tre passi, distinto da quello a immagine singola — un
@@ -38,17 +40,6 @@ _TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _GRAPH = "https://graph.instagram.com"
 _SCOPE = "instagram_business_basic,instagram_business_content_publish"
 
-_HOST_LOCALI = ("localhost", "127.0.0.1")
-
-
-def _app_esposta_pubblicamente():
-    """True se APP_BASE_URL punta a un dominio vero, non a localhost/127.0.0.1
-    — approssimazione ragionevole di "le immagini generate sono raggiungibili
-    da Internet", senza una vera sonda di rete (coerente con lo stile degli
-    altri controlli della checklist, tutti basati su configurazione)."""
-    from urllib.parse import urlparse
-    host = urlparse(config.base_url()).hostname or ""
-    return host not in _HOST_LOCALI
 
 
 class InstagramAdapter:
@@ -76,11 +67,11 @@ class InstagramAdapter:
             {"voce": "Instagram Business Account ID",
              "ok": bool(self.account and self.account["identificativo"]),
              "dettaglio": "Ottenuto automaticamente dal token dopo l'autorizzazione (GET /me)"},
-            {"voce": "Immagini raggiungibili via URL pubblico",
-             "ok": _app_esposta_pubblicamente(),
+            {"voce": "Storage pubblico immagini (Cloudflare R2) configurato",
+             "ok": config.r2_configurato(),
              "dettaglio": "Il container /media accetta solo image_url pubblici: "
-                          "APP_BASE_URL deve puntare a un dominio vero (es. "
-                          "social.jobinpa.it), non a localhost/127.0.0.1"},
+                          "R2_ACCOUNT_ID/ACCESS_KEY/SECRET/BUCKET/PUBLIC_BASE_URL "
+                          "vanno tutti impostati (vedi docs/meta-instagram-setup.md)"},
         ]
         pronto = all(v["ok"] for v in checklist)
         return {"pronto": pronto, "checklist": checklist,

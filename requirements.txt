@@ -18,5 +18,6 @@ cryptography
 stripe
 numpy
 Pillow
+boto3
 pytest
 httpx
