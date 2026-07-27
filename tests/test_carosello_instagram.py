@@ -190,6 +190,11 @@ def _adapter_instagram_pronto(conn, monkeypatch):
     monkeypatch.setattr(adapter, "_token", lambda: "token-finto")
     adapter.cfg = {**adapter.cfg, "graph_api_version": "v21.0"}
     adapter.account = {"identificativo": "IG123"}
+    # Il container e' subito FINISHED: i test sul flusso di pubblicazione
+    # non riguardano l'attesa (vedi test_attendi_container_pronto_*).
+    monkeypatch.setattr("social.integrations.instagram.requests.get",
+                        lambda url, params=None, timeout=None: _RispostaFinta(
+                            {"status_code": "FINISHED"}))
     return adapter
 
 
@@ -236,6 +241,75 @@ def test_publish_carosello_crea_un_container_per_immagine_piu_il_padre(conn, mon
     chiamata_padre = next(c for c in chiamate if c[1].get("media_type") == "CAROUSEL")
     assert chiamata_padre[1]["children"] == "figlio-1,figlio-2,figlio-3"
     assert chiamata_padre[1]["caption"] == "caption carosello"
+
+
+# --- Attesa che il container sia pronto (FINISHED) prima del publish -------
+# Bug reale: pubblicare subito dopo la creazione del container puo'
+# fallire con 400 in modo intermittente se Meta non ha ancora finito di
+# scaricare/validare l'immagine (status_code resta IN_PROGRESS per
+# qualche secondo). Riprodotto una volta su un contenuto vero: il
+# publish falliva, la stessa identica chiamata rieseguita subito dopo
+# a mano riusciva perche' nel frattempo il container era FINISHED.
+
+from social.integrations.instagram import _attendi_container_pronto
+
+
+def test_attendi_container_pronto_ritorna_subito_se_gia_finished(monkeypatch):
+    chiamate = []
+    monkeypatch.setattr("social.integrations.instagram.requests.get",
+                        lambda *a, **k: chiamate.append(1) or _RispostaFinta(
+                            {"status_code": "FINISHED"}))
+    monkeypatch.setattr("social.integrations.instagram.time.sleep", lambda s: None)
+    _attendi_container_pronto("container-1", "token", "v21.0")
+    assert len(chiamate) == 1
+
+
+def test_attendi_container_pronto_ripete_finche_non_e_finished(monkeypatch):
+    stati = iter(["IN_PROGRESS", "IN_PROGRESS", "FINISHED"])
+    attese = []
+    monkeypatch.setattr(
+        "social.integrations.instagram.requests.get",
+        lambda *a, **k: _RispostaFinta({"status_code": next(stati)}))
+    monkeypatch.setattr("social.integrations.instagram.time.sleep",
+                        lambda s: attese.append(s))
+    _attendi_container_pronto("container-1", "token", "v21.0")
+    assert attese == [2, 2]
+
+
+def test_attendi_container_pronto_solleva_errore_se_stato_error(monkeypatch):
+    monkeypatch.setattr("social.integrations.instagram.requests.get",
+                        lambda *a, **k: _RispostaFinta({"status_code": "ERROR"}))
+    with pytest.raises(RuntimeError, match="elaborazione immagine"):
+        _attendi_container_pronto("container-1", "token", "v21.0")
+
+
+def test_attendi_container_pronto_solleva_timeout(monkeypatch):
+    orologio = iter([0, 5, 15, 25, 35])
+    monkeypatch.setattr("social.integrations.instagram.time.monotonic",
+                        lambda: next(orologio))
+    monkeypatch.setattr("social.integrations.instagram.time.sleep", lambda s: None)
+    monkeypatch.setattr("social.integrations.instagram.requests.get",
+                        lambda *a, **k: _RispostaFinta({"status_code": "IN_PROGRESS"}))
+    with pytest.raises(RuntimeError, match="timeout"):
+        _attendi_container_pronto("container-1", "token", "v21.0")
+
+
+def test_publish_singola_immagine_attende_il_container_prima_di_pubblicare(conn, monkeypatch):
+    adapter = _adapter_instagram_pronto(conn, monkeypatch)
+    ordine = []
+    monkeypatch.setattr(
+        "social.integrations.instagram.requests.get",
+        lambda *a, **k: ordine.append("get") or _RispostaFinta({"status_code": "FINISHED"}))
+
+    def post_finto(url, data=None, timeout=None):
+        ordine.append("publish" if url.endswith("media_publish") else "post")
+        if url.endswith("/media"):
+            return _RispostaFinta({"id": "container-1"})
+        return _RispostaFinta({"id": "media-1"})
+
+    monkeypatch.setattr("social.integrations.instagram.requests.post", post_finto)
+    adapter.publish("caption", "https://example.invalid/img.png")
+    assert ordine == ["post", "get", "publish"]
 
 
 def test_publish_carosello_rispetta_il_limite_di_dieci_immagini(conn, monkeypatch):

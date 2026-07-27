@@ -26,6 +26,7 @@ ciascuna immagine figlio.
 """
 
 import logging
+import time
 
 import requests
 
@@ -39,6 +40,34 @@ _AUTORIZZA = "https://api.instagram.com/oauth/authorize"
 _TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _GRAPH = "https://graph.instagram.com"
 _SCOPE = "instagram_business_basic,instagram_business_content_publish"
+
+# Dopo la creazione, un container puo' restare IN_PROGRESS per qualche
+# secondo (Meta scarica e valida l'immagine): pubblicarlo subito puo'
+# fallire con 400 in modo intermittente (osservato su un contenuto reale,
+# riprodotto manualmente subito dopo con successo perche' nel frattempo
+# il container era gia' FINISHED).
+_POLL_INTERVALLO_SECONDI = 2
+_POLL_TIMEOUT_SECONDI = 30
+
+
+def _attendi_container_pronto(container_id, token, versione):
+    scadenza = time.monotonic() + _POLL_TIMEOUT_SECONDI
+    while True:
+        risposta = requests.get(
+            f"{_GRAPH}/{versione}/{container_id}",
+            params={"fields": "status_code", "access_token": token}, timeout=30)
+        risposta.raise_for_status()
+        stato = risposta.json().get("status_code")
+        if stato == "FINISHED":
+            return
+        if stato == "ERROR":
+            raise RuntimeError(
+                f"elaborazione immagine Instagram fallita (container {container_id})")
+        if time.monotonic() >= scadenza:
+            raise RuntimeError(
+                f"timeout in attesa che Instagram elabori il container {container_id} "
+                f"(ultimo stato: {stato})")
+        time.sleep(_POLL_INTERVALLO_SECONDI)
 
 
 
@@ -184,6 +213,7 @@ class InstagramAdapter:
                                   data=dati, timeout=60)
         creazione.raise_for_status()
         container_id = creazione.json()["id"]
+        _attendi_container_pronto(container_id, token, versione)
         pubblicazione = requests.post(
             f"{_GRAPH}/{versione}/{ig_id}/media_publish",
             data={"creation_id": container_id, "access_token": token}, timeout=60)
@@ -214,6 +244,7 @@ class InstagramAdapter:
                   "children": ",".join(figli), "access_token": token}, timeout=60)
         creazione.raise_for_status()
         container_id = creazione.json()["id"]
+        _attendi_container_pronto(container_id, token, versione)
         pubblicazione = requests.post(
             f"{_GRAPH}/{versione}/{ig_id}/media_publish",
             data={"creation_id": container_id, "access_token": token}, timeout=60)
