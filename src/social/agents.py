@@ -373,6 +373,11 @@ def _richiesta_immagine_da_bando(bando, formato, content_id):
 
 
 def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider=None):
+    # Sovrascrive sempre: senza cancellare prima, ogni rigenerazione (anche
+    # dopo una modifica al brief o "Richiedi modifiche") si limiterebbe ad
+    # AGGIUNGERE immagini a quelle vecchie invece di sostituirle, lasciando
+    # un carosello con versioni miste vecchie/nuove (bug segnalato dall'utente).
+    db_social.elimina_asset_di(conn, content_id)
     content = db_social.get_content(conn, content_id)
     fatti = "\n".join(f"- {f.fatto}" for f in risultato_ricerca.fatti)
     brief = _run_llm(conn, "visual", "visual_brief", models.VisualBrief,
@@ -394,7 +399,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                 asset = asyncio.run(image_provider.generate(richiesta))
                 db_social.salva_asset(conn, content_id, asset.percorso,
                                       piattaforma=piattaforma, template=asset.template,
-                                      formato=asset.formato, provider=asset.provider)
+                                      formato=asset.formato, provider=asset.provider,
+                                      bando_id=bando.get("id"))
             continue
         richiesta = images.ImageGenerationRequest(
             template=brief.template, formato=formato, titolo=brief.titolo,
@@ -407,21 +413,36 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
     return brief
 
 
-def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
-    """Rigenera SOLO le immagini di un contenuto gia' passato da research()/
-    copywriting() (in revisione o dopo), senza rifare la ricerca ne' il
-    testo: usa i fatti e i bandi_trovati gia' persistiti sul contenuto
-    (vedi research()) per ricostruire l'input minimo che visual() richiede.
-    Le vecchie immagini vengono cancellate prima (mai un mix di versioni
-    vecchie/nuove nella pagina di revisione)."""
+def _ricostruisci_risultato_ricerca(conn, content_id):
+    """Ricostruisce l'input minimo che copywriting()/visual() richiedono, dai
+    fatti e bandi_trovati gia' persistiti da research() (vedi rigenera_visual/
+    rigenera_copy): permette di rigenerare SOLO un artefatto (immagine o
+    testo) di un contenuto gia' passato dalla ricerca, senza rifarla."""
     content = db_social.get_content(conn, content_id)
     fatti = [models.FattoVerificato(fatto=r["fatto"], fonte_url=r["fonte_url"],
                                     confidenza=r["confidenza"], in_conflitto=bool(r["conflitto"]))
              for r in db_social.fatti_di(conn, content_id)]
     bandi_trovati = json.loads(content["bandi_trovati"] or "[]")
-    risultato = models.RisultatoRicerca(fatti=fatti, bandi_trovati=bandi_trovati)
-    db_social.elimina_asset_di(conn, content_id)
+    return models.RisultatoRicerca(fatti=fatti, bandi_trovati=bandi_trovati)
+
+
+def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
+    """Rigenera SOLO le immagini di un contenuto gia' passato da research()/
+    copywriting() (in revisione o dopo), senza rifare la ricerca ne' il
+    testo. Le vecchie immagini vengono cancellate prima (visual() lo fa
+    sempre, vedi sopra): mai un mix di versioni vecchie/nuove."""
+    risultato = _ricostruisci_risultato_ricerca(conn, content_id)
     return visual(conn, content_id, risultato, provider=provider, image_provider=image_provider)
+
+
+def rigenera_copy(conn, content_id, *, provider=None, note_revisore=None):
+    """Rigenera SOLO il testo (non le immagini): usato dopo aver tolto
+    una o piu' immagini dal carosello (vedi db_social.elimina_asset), per
+    allineare la caption al carosello effettivamente rimasto — es. il
+    conteggio "scorri le N immagini" deve riflettere quelle vere, non
+    quelle originarie della ricerca."""
+    risultato = _ricostruisci_risultato_ricerca(conn, content_id)
+    return copywriting(conn, content_id, risultato, provider=provider, note_revisore=note_revisore)
 
 
 # --- Quality & Risk Agent ----------------------------------------------------

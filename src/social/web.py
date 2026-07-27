@@ -512,6 +512,7 @@ def contenuto(request: Request, content_id: str, avviata: bool = False,
         appena_in_coda=(avviata and not in_corso and not content["errore"]
                         and content["stato"] in agents.STATI_PIPELINE_AVVIABILE),
         rigenerazione_in_corso=db_social.job_in_corso(conn, "rigenera_visual", content_id),
+        rigenerazione_testo_in_corso=db_social.job_in_corso(conn, "rigenera_copy", content_id),
         varianti={v["piattaforma"]: v for v in db_social.varianti_di(conn, content_id)},
         assets=db_social.asset_di(conn, content_id),
         fatti=db_social.fatti_di(conn, content_id),
@@ -561,6 +562,37 @@ def rigenera_immagine(request: Request, content_id: str, csrf: str = Form(None),
         raise HTTPException(status_code=404, detail="Contenuto non trovato")
     db_social.crea_job(conn, "rigenera_visual", {"content_id": content_id})
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
+
+
+@router.post("/contenuti/{content_id}/rigenera-testo")
+def rigenera_testo(request: Request, content_id: str, csrf: str = Form(None),
+                   sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Rigenera solo il testo (non le immagini): tipicamente dopo aver
+    tolto una o piu' immagini dal carosello, per allineare la caption
+    (es. il conteggio 'scorri le N immagini') al carosello effettivo."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    if db_social.get_content(conn, content_id) is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    db_social.crea_job(conn, "rigenera_copy", {"content_id": content_id})
+    return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
+
+
+@router.post("/contenuti/{content_id}/asset/{asset_id}/elimina")
+def elimina_asset(request: Request, content_id: str, asset_id: str,
+                  csrf: str = Form(None),
+                  sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Toglie UNA immagine dal carosello (mai l'intera rigenerazione): se
+    era collegata a un bando, lo rimuove anche da bandi_trovati (vedi
+    db_social.elimina_asset), cosi' un successivo 'Rigenera testo' non lo
+    cita/conta piu'."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    if db_social.get_content(conn, content_id) is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    if not db_social.elimina_asset(conn, content_id, asset_id):
+        raise HTTPException(status_code=404, detail="Immagine non trovata")
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
 @router.post("/contenuti/{content_id}/pubblica")

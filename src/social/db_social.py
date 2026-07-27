@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
     formato     TEXT,                 -- es. 1080x1350
     percorso    TEXT NOT NULL,
     provider    TEXT NOT NULL DEFAULT 'template',
+    bando_id    TEXT,                 -- bando del carosello che questa immagine rappresenta (NULL fuori carosello)
     creato_at   TEXT NOT NULL
 );
 
@@ -478,6 +479,13 @@ def _migra(conn):
         # la ricerca) perderebbe i dati per il carosello Instagram.
         conn.execute("ALTER TABLE social_content ADD COLUMN bandi_trovati TEXT")
         conn.commit()
+    colonne_assets = {r["name"] for r in conn.execute("PRAGMA table_info(social_media_assets)")}
+    if "bando_id" not in colonne_assets:
+        # Collega ogni immagine del carosello al bando che rappresenta:
+        # senza, eliminare una singola immagine non potrebbe togliere anche
+        # il bando corrispondente da bandi_trovati (vedi elimina_asset).
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN bando_id TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -713,12 +721,12 @@ def aggiorna_testo_variante(conn, content_id, piattaforma, testo):
 
 
 def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
-                formato=None, provider="template"):
+                formato=None, provider="template", bando_id=None):
     asset_id = _nuovo_id()
     _insert(conn, "social_media_assets", {
         "id": asset_id, "content_id": content_id, "piattaforma": piattaforma,
         "template": template, "formato": formato, "percorso": str(percorso),
-        "provider": provider, "creato_at": _adesso()})
+        "provider": provider, "bando_id": bando_id, "creato_at": _adesso()})
     conn.commit()
     return asset_id
 
@@ -734,6 +742,33 @@ def elimina_asset_di(conn, content_id):
             pass
     conn.execute("DELETE FROM social_media_assets WHERE content_id = ?", (content_id,))
     conn.commit()
+
+
+def elimina_asset(conn, content_id, asset_id):
+    """Cancella UNA singola immagine del carosello (riga + file su disco,
+    best-effort). Se l'immagine era collegata a un bando (bando_id), lo
+    toglie anche da content.bandi_trovati: senza, una successiva
+    rigenerazione del testo (rigenera_copy) continuerebbe a citare/contare
+    un bando di cui l'immagine non esiste piu'. Ritorna False se l'asset
+    non esiste o non appartiene a questo contenuto."""
+    asset = conn.execute(
+        "SELECT * FROM social_media_assets WHERE id = ? AND content_id = ?",
+        (asset_id, content_id)).fetchone()
+    if asset is None:
+        return False
+    try:
+        Path(asset["percorso"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    conn.execute("DELETE FROM social_media_assets WHERE id = ?", (asset_id,))
+    if asset["bando_id"]:
+        content = get_content(conn, content_id)
+        bandi = json.loads(content["bandi_trovati"] or "[]")
+        bandi = [b for b in bandi if b.get("id") != asset["bando_id"]]
+        conn.execute("UPDATE social_content SET bandi_trovati = ? WHERE id = ?",
+                    (json.dumps(bandi, ensure_ascii=False), content_id))
+    conn.commit()
+    return True
 
 
 def asset_di(conn, content_id):

@@ -19,6 +19,9 @@
 {% elif rigenerazione_in_corso %}
 <div class="avviso info">⏳ <strong>Rigenerazione immagine in corso</strong> — il testo resta invariato. Questa pagina si aggiorna automaticamente.</div>
 <script>setTimeout(function () { location.reload(); }, 4000);</script>
+{% elif rigenerazione_testo_in_corso %}
+<div class="avviso info">⏳ <strong>Rigenerazione testo in corso</strong> — le immagini restano invariate. Questa pagina si aggiorna automaticamente.</div>
+<script>setTimeout(function () { location.reload(); }, 4000);</script>
 {% elif appena_in_coda %}
 <div class="avviso info">⏳ <strong>Pipeline in coda</strong> — un worker la prenderà in carico entro pochi secondi. Questa pagina si aggiorna automaticamente.</div>
 <script>setTimeout(function () { location.reload(); }, 3000);</script>
@@ -59,11 +62,16 @@
     <button class="btn verde" type="submit">Pubblica ora ({{ modalita }})</button>
   </form>
   {% endif %}
-  {% if 'social.edit' in permessi and assets and not in_corso and not rigenerazione_in_corso %}
+  {% if 'social.edit' in permessi and assets and not in_corso and not rigenerazione_in_corso and not rigenerazione_testo_in_corso %}
   <form method="post" action="/social/contenuti/{{ c.id }}/rigenera-immagine" class="inline"
         onsubmit="return confirm('Rigenerare le immagini di questo contenuto? Il testo non cambia. Se le immagini AI sono abilitate, questa azione ha un costo.');">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn secondario" type="submit">🖼️ Rigenera immagine</button>
+  </form>
+  <form method="post" action="/social/contenuti/{{ c.id }}/rigenera-testo" class="inline"
+        onsubmit="return confirm('Rigenerare il testo di questo contenuto? Le immagini non cambiano — utile dopo aver tolto immagini dal carosello, per allineare la caption.');">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn secondario" type="submit">✏️ Rigenera testo</button>
   </form>
   {% endif %}
   {% if approvazione %}
@@ -89,7 +97,17 @@
       {% endif %}
     </div>
     {% for a in assets_piattaforma %}
-      <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo);margin-bottom:8px">
+      <div style="position:relative;margin-bottom:8px">
+        <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block">
+        {% if 'social.edit' in permessi and assets_piattaforma|length > 1 and not in_corso and not rigenerazione_in_corso %}
+        <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/elimina"
+              onsubmit="return confirm('Togliere questa immagine dal carosello? Se vuoi che la caption rifletta il carosello ridotto, usa poi \'Rigenera testo\'.');"
+              style="position:absolute;top:6px;right:6px">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="btn piccolo testo-rosso" type="submit" title="Togli dal carosello">🗑️</button>
+        </form>
+        {% endif %}
+      </div>
       <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
     {% endfor %}
     {% if varianti.get(piattaforma) %}
