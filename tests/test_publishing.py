@@ -152,3 +152,20 @@ def test_adapter_reali_non_pronti_senza_config(conn):
     # e publish() rifiuta esplicitamente
     with pytest.raises(RuntimeError):
         InstagramAdapter(conn).publish("test")
+
+
+def test_checklist_immagini_pubbliche_segue_app_base_url(conn, monkeypatch):
+    """Il requisito "immagini via URL pubblico" e' legato ad APP_BASE_URL:
+    localhost/127.0.0.1 = non pronto, un dominio vero = ok — prima era un
+    placeholder sempre False, non sarebbe mai diventato verde nemmeno dopo
+    un vero deploy pubblico (bug segnalato indirettamente dall'utente)."""
+    from social.integrations.instagram import InstagramAdapter
+    voce = "Immagini raggiungibili via URL pubblico"
+
+    monkeypatch.setenv("APP_BASE_URL", "https://localhost:8100")
+    checklist = InstagramAdapter(conn).health_check()["checklist"]
+    assert not next(v for v in checklist if v["voce"] == voce)["ok"]
+
+    monkeypatch.setenv("APP_BASE_URL", "https://social.jobinpa.it")
+    checklist = InstagramAdapter(conn).health_check()["checklist"]
+    assert next(v for v in checklist if v["voce"] == voce)["ok"]

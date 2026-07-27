@@ -38,6 +38,18 @@ _TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _GRAPH = "https://graph.instagram.com"
 _SCOPE = "instagram_business_basic,instagram_business_content_publish"
 
+_HOST_LOCALI = ("localhost", "127.0.0.1")
+
+
+def _app_esposta_pubblicamente():
+    """True se APP_BASE_URL punta a un dominio vero, non a localhost/127.0.0.1
+    — approssimazione ragionevole di "le immagini generate sono raggiungibili
+    da Internet", senza una vera sonda di rete (coerente con lo stile degli
+    altri controlli della checklist, tutti basati su configurazione)."""
+    from urllib.parse import urlparse
+    host = urlparse(config.base_url()).hostname or ""
+    return host not in _HOST_LOCALI
+
 
 class InstagramAdapter:
     piattaforma = "instagram"
@@ -65,9 +77,10 @@ class InstagramAdapter:
              "ok": bool(self.account and self.account["identificativo"]),
              "dettaglio": "Ottenuto automaticamente dal token dopo l'autorizzazione (GET /me)"},
             {"voce": "Immagini raggiungibili via URL pubblico",
-             "ok": False,
+             "ok": _app_esposta_pubblicamente(),
              "dettaglio": "Il container /media accetta solo image_url pubblici: "
-                          "serve l'esposizione futura (social.jobinpa.it) o uno storage pubblico"},
+                          "APP_BASE_URL deve puntare a un dominio vero (es. "
+                          "social.jobinpa.it), non a localhost/127.0.0.1"},
         ]
         pronto = all(v["ok"] for v in checklist)
         return {"pronto": pronto, "checklist": checklist,
