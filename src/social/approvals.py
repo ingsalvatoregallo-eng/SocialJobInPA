@@ -57,6 +57,10 @@ def richiedi_approvazione(conn, content_id):
         approval_id = db_social.crea_approval(conn, content_id)
     else:
         approval_id = approval["id"]
+        if approval["stato"] != "in_attesa":
+            # Riusata dopo "richiedi modifiche": senza resettare lo stato
+            # resta invisibile nella coda (vedi db_social.riapri_approval).
+            db_social.riapri_approval(conn, approval_id)
     content = db_social.get_content(conn, content_id)
     destinatari = db_social.get_setting(conn, "revisori_email", []) or []
     if destinatari:

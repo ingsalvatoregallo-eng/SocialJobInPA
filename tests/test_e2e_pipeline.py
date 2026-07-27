@@ -170,6 +170,14 @@ def test_e2e_richiesta_modifiche_e_nuovo_giro(conn):
     prompt_con_nota = [u for (_, u, _) in provider.chiamate if "Togliere la percentuale" in u]
     assert len(prompt_con_nota) >= 2  # almeno research + copywriting (instagram/linkedin)
 
+    # Bug reale: la richiesta di approvazione veniva riusata senza
+    # resettarne lo stato, restando invisibile nella coda "in_attesa" pur
+    # con il contenuto di nuovo in AWAITING_APPROVAL (segnalato dall'utente
+    # su un contenuto vero: "Richiesta di approvazione aperta" portava a
+    # una coda di revisione vuota).
+    assert db_social.get_content(conn, content_id)["stato"] == "AWAITING_APPROVAL"
+    assert any(a["content_id"] == content_id for a in db_social.approvals_in_attesa(conn))
+
 
 def test_e2e_supervisor_genera_piano_settimanale(conn):
     """Il Supervisor crea SUGGERIMENTI (non contenuti): serve un Accetta

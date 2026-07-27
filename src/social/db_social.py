@@ -866,6 +866,25 @@ def approval_aperta_di(conn, content_id):
         (content_id,)).fetchone()
 
 
+def riapri_approval(conn, approval_id):
+    """Riporta un'approvazione gia' decisa (tipicamente 'modifiche_richieste')
+    di nuovo 'in_attesa': usato quando la pipeline rigenera il contenuto
+    dopo una richiesta di modifiche e serve una nuova decisione umana.
+    Senza questo, richiedi_approvazione() riusa la riga esistente (trovata
+    da approval_aperta_di, che include anche 'modifiche_richieste') senza
+    mai resettarne lo stato — il contenuto torna in AWAITING_APPROVAL ma
+    l'approvazione resta invisibile nella coda "in_attesa" (bug reale,
+    la richiesta risultava aperta sulla scheda del contenuto ma introvabile
+    in Revisione)."""
+    conn.execute(
+        "UPDATE social_approvals SET stato = 'in_attesa', motivo = NULL, "
+        "deciso_da = NULL, deciso_at = NULL WHERE id = ?", (approval_id,))
+    _insert(conn, "social_approval_events", {
+        "id": _nuovo_id(), "approval_id": approval_id, "azione": "riaperta",
+        "creato_at": _adesso()})
+    conn.commit()
+
+
 def approvals_in_attesa(conn):
     return conn.execute(
         "SELECT a.*, c.titolo, c.classe_rischio, c.stato AS content_stato "
