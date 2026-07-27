@@ -123,6 +123,23 @@ def test_badge_pubblicazioni_conta_approvati_e_falliti(conn, client):
     assert re.search(r'Pubblicazioni\s*<span class="badge rosso"[^>]*>1</span>', pagina)
 
 
+def test_badge_pubblicazioni_conta_anche_i_programmati(conn, client):
+    """Un contenuto SCHEDULED (programmato, non ancora pubblicato) deve
+    contare nel badge: prima veniva contato solo APPROVED, un post
+    programmato per il futuro spariva dal contatore appena schedulato
+    (segnalato dall'utente)."""
+    content_id = _content_approvato(conn, "Programmato per il futuro", canali=["instagram"])
+    agents.programma_pubblicazione(conn, content_id,
+                                   quando=datetime.now(timezone.utc) + timedelta(days=1))
+
+    db_social.crea_utente(conn, "viewer-badge3@test.local",
+                          auth.hash_password("Password123!"), ruolo="viewer")
+    _login(client, "viewer-badge3@test.local")
+
+    pagina = client.get("/social/").text
+    assert re.search(r'Pubblicazioni\s*<span class="badge rosso"[^>]*>1</span>', pagina)
+
+
 # --- 4. Riprogrammazione -------------------------------------------------------
 
 def test_riprogramma_pubblicazione_aggiorna_content_e_job(conn):

@@ -85,7 +85,27 @@ STATO_ACCOUNT_COLORE = {
 
 templates.env.filters["fase"] = lambda stato: FASE_LABEL.get(fase_di(stato), stato)
 templates.env.filters["fase_colore"] = lambda stato: FASE_COLORE.get(fase_di(stato), "grigio")
-templates.env.filters["data_breve"] = lambda iso: (iso or "")[:16].replace("T", " ")
+
+
+def _data_breve(iso):
+    """Mostrava finora l'ISO grezzo troncato — quasi sempre UTC (vedi
+    programmato_at/creato_at/richiesto_at ecc.) senza mai convertirlo nel
+    fuso locale: un orario futuro corretto (es. le 18:00 di Roma, salvato
+    come 16:00 UTC) appariva "gia' passato" a chi confrontava con
+    l'orologio di casa (bug segnalato dall'utente su una programmazione
+    reale)."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso[:16].replace("T", " ")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo(config.default_timezone())).strftime("%Y-%m-%d %H:%M")
+
+
+templates.env.filters["data_breve"] = _data_breve
 templates.env.filters["stato_account"] = lambda stato: STATO_ACCOUNT_LABEL.get(stato, stato)
 templates.env.filters["stato_account_colore"] = lambda stato: STATO_ACCOUNT_COLORE.get(stato, "grigio")
 templates.env.globals["FASE_COLORE"] = FASE_COLORE
@@ -190,8 +210,11 @@ def _ctx(request, sessione, conn, **extra):
         # scoprire che c'e' qualcosa da revisionare/pubblicare era entrare
         # per caso nella pagina giusta (segnalato dall'utente).
         "revisione_in_attesa": len(db_social.approvals_in_attesa(conn)),
+        # APPROVED/SCHEDULED = non ancora pubblicato (stessa lista della
+        # tabella "Programmati" in Pubblicazioni): un pubblicato non deve
+        # piu' contare, un fallito si' (richiede attenzione).
         "pubblicazioni_da_gestire": (
-            len(db_social.lista_content(conn, stati=["APPROVED"]))
+            len(db_social.lista_content(conn, stati=["APPROVED", "SCHEDULED"]))
             + len(db_social.lista_publications(conn, stato="fallito"))),
         **extra,
     }
