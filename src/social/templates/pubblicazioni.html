@@ -10,12 +10,21 @@
 
 <div class="card">
   <h3>Programmati</h3>
-  <table><tr><th>Titolo</th><th>Fase</th><th>Programmato per</th></tr>
+  <table><tr><th>Titolo</th><th>Fase</th><th>Programmato per</th><th></th></tr>
   {% for c in programmati %}
     <tr><td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a></td>
         <td><span class="badge {{ c.stato|fase_colore }}">{{ c.stato|fase }}</span></td>
-        <td>{{ c.programmato_at|data_breve if c.programmato_at else 'prossima finestra' }}</td></tr>
-  {% else %}<tr><td colspan="3" class="hint">Nessun contenuto programmato.</td></tr>{% endfor %}
+        <td>{{ c.programmato_at|data_breve if c.programmato_at else 'prossima finestra' }}</td>
+        <td style="white-space:nowrap">
+          {% if c.stato == 'SCHEDULED' and 'social.publish' in permessi %}
+          <form method="post" action="/social/contenuti/{{ c.id }}/riprogramma" style="display:inline-flex;gap:6px;align-items:center">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="datetime-local" name="quando" value="{{ c.programmato_at|iso_a_locale_input }}" required style="font-size:12px;padding:4px 6px">
+            <button class="btn piccolo secondario" type="submit">📅 Riprogramma</button>
+          </form>
+          {% endif %}
+        </td></tr>
+  {% else %}<tr><td colspan="4" class="hint">Nessun contenuto programmato.</td></tr>{% endfor %}
   </table>
 </div>
 

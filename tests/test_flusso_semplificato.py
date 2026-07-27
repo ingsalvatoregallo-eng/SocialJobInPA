@@ -174,6 +174,20 @@ def test_route_riprogramma_rifiutata_se_non_schedulato(conn, client):
     assert r.status_code == 409
 
 
+def test_pagina_pubblicazioni_mostra_form_riprogramma_per_schedulati(conn, client):
+    content_id = _content_approvato(conn, "Da mostrare in Pubblicazioni", canali=["instagram"])
+    agents.programma_pubblicazione(conn, content_id,
+                                   quando=datetime.now(timezone.utc) + timedelta(days=1))
+    db_social.crea_utente(conn, "publisher-flusso3@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "publisher-flusso3@test.local")
+
+    pagina = client.get("/social/pubblicazioni").text
+
+    assert f"/social/contenuti/{content_id}/riprogramma" in pagina
+    assert 'type="datetime-local"' in pagina
+
+
 # --- 5. Calendario mostra anche i contenuti fuori dal piano AI ---------------
 
 def test_content_con_programmato_at_esclude_i_non_programmati(conn):
