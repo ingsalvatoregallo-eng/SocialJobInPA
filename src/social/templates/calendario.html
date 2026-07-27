@@ -18,6 +18,11 @@
   {% endif %}
 </div>
 
+{% if generazione_in_corso %}
+<div class="avviso info">⏳ <strong>Generazione temi in corso</strong> — un worker sta elaborando i 3 temi per questa settimana. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
+<script>setTimeout(function () { location.reload(); }, 4000);</script>
+{% endif %}
+
 {% if altre_settimane_suggerimenti %}
 <div class="avviso giallo">
   ⚠️ Ci sono temi suggeriti dall'AI in altre settimane:

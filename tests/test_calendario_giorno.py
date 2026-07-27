@@ -5,6 +5,28 @@ budget AI sulla pipeline)."""
 from social import agents, db_social, llm, models
 
 
+def test_job_in_corso_vero_se_pending(conn):
+    db_social.crea_job(conn, "generate_week_plan", {"settimana": "2026-08-03"})
+    assert db_social.job_in_corso(conn, "generate_week_plan", "2026-08-03")
+
+
+def test_job_in_corso_falso_se_nessun_job(conn):
+    assert not db_social.job_in_corso(conn, "generate_week_plan", "2026-08-03")
+
+
+def test_job_in_corso_filtra_per_settimana_nel_payload(conn):
+    db_social.crea_job(conn, "generate_week_plan", {"settimana": "2026-08-10"})
+    assert not db_social.job_in_corso(conn, "generate_week_plan", "2026-08-03")
+
+
+def test_job_in_corso_falso_se_job_gia_concluso(conn):
+    job_id = db_social.crea_job(conn, "generate_week_plan", {"settimana": "2026-08-03"})
+    job = db_social.prendi_job(conn, "worker-test")
+    assert job["id"] == job_id
+    db_social.chiudi_job(conn, job_id, "ok")
+    assert not db_social.job_in_corso(conn, "generate_week_plan", "2026-08-03")
+
+
 def test_crea_plan_entry_senza_content_id_e_suggerito(conn):
     entry_id = db_social.crea_plan_entry(conn, "2026-08-03", "Tema proposto",
                                          pillar_chiave="guida", giorno="2026-08-05")

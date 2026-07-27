@@ -21,12 +21,21 @@ services:
     build: .
     env_file: .env
     environment:
-      - APP_BASE_URL=${APP_BASE_URL:-http://localhost:8100}
+      - APP_BASE_URL=${APP_BASE_URL:-https://localhost:8100}
+    # HTTPS locale (certificato mkcert): serve per il login OAuth di
+    # Instagram Business Login, che richiede un redirect URI https:// vero
+    # (a differenza del vecchio Facebook Login for Business, non accetta
+    # http://localhost). Rigenera i certificati con:
+    #   mkcert -cert-file certs/localhost.pem -key-file certs/localhost-key.pem localhost 127.0.0.1 ::1
+    command: ["python", "-m", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000",
+              "--ssl-keyfile", "/app/certs/localhost-key.pem",
+              "--ssl-certfile", "/app/certs/localhost.pem"]
     ports:
       - "127.0.0.1:8100:8000"
     volumes:
       - social-data:/app/data
       - ./assets:/app/assets
+      - ./certs:/app/certs:ro
     depends_on:
       - mailpit
     restart: unless-stopped

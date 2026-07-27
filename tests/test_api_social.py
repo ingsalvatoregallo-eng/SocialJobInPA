@@ -117,7 +117,7 @@ def test_status_espone_checklist(client, utenti):
     stato = client.get("/api/v1/social/system/status",
                        headers=_bearer(utenti["viewer"])).json()
     assert stato["instagram"]["pronto"] is False
-    assert any("Pagina Facebook" in v["voce"] for v in stato["instagram"]["checklist"])
+    assert any("App Instagram" in v["voce"] for v in stato["instagram"]["checklist"])
     assert stato["modalita"] == "mock"
 
 

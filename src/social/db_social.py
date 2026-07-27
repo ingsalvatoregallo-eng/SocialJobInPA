@@ -1262,6 +1262,18 @@ def chiudi_job(conn, job_id, esito, *, errore=None, backoff_base_minuti=5):
     conn.commit()
 
 
+def job_in_corso(conn, tipo, payload_contiene=None):
+    """True se esiste un job pending o running di questo tipo (e, se
+    indicato, il cui payload JSON contiene questa sottostringa — usato per
+    il banner 'generazione in corso' con auto-refresh nel Calendario)."""
+    query = "SELECT 1 FROM social_scheduled_jobs WHERE tipo = ? AND stato IN ('pending', 'running')"
+    parametri = [tipo]
+    if payload_contiene:
+        query += " AND payload LIKE ?"
+        parametri.append(f"%{payload_contiene}%")
+    return conn.execute(query, parametri).fetchone() is not None
+
+
 def lista_jobs(conn, stati=None, limit=200):
     sql = "SELECT * FROM social_scheduled_jobs "
     parametri = []

@@ -15,6 +15,14 @@ os.environ.pop("GLOBAL_PUBLISHING_ENABLED", None)
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("JOBINPA_API_URL", None)
 os.environ.pop("JOBINPA_API_KEY", None)
+# Forzato (non pop): config._carica_env_file() gira all'IMPORT di
+# social.config (piu' sotto) e ricarica dal vero .env qualunque chiave non
+# gia' presente in os.environ — un pop qui verrebbe subito ripristinato dal
+# file. Il vero APP_BASE_URL e' https:// (richiesto da Instagram Business
+# Login): con https i cookie di sessione diventano Secure e il TestClient
+# (parla in http semplice con "testserver") non li rimanderebbe indietro,
+# rompendo il login nei test — servono sempre sullo scenario http.
+os.environ["APP_BASE_URL"] = "http://localhost:8000"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 

@@ -1,12 +1,13 @@
 """
-instagram.py — adapter Instagram via Meta Graph API (solo API ufficiali).
+instagram.py — adapter Instagram via "Instagram API with Instagram Login"
+(solo API ufficiali).
 
-Stato reale dell'account JobInPA (sez. 4/32 del prompt): account Business e
-Business Portfolio presenti, ma MANCANO la Pagina Facebook collegata e la
-Meta Developer App. Finche' la checklist non e' completa l'adapter si dichiara
-non pronto e publishing.py blocca ogni pubblicazione reale su Instagram
-("Instagram non pronto per la pubblicazione API" in dashboard); la modalita'
-mock resta sempre disponibile.
+Flusso nativo Instagram (sostituisce il vecchio "Facebook Login for
+Business" legato a una Pagina): login OAuth direttamente su instagram.com,
+scambio del code su api.instagram.com, pubblicazione su graph.instagram.com.
+L'Instagram Business Account ID (identificativo) non e' piu' una variabile
+di ambiente: si ottiene dal token stesso subito dopo l'autorizzazione
+(completa_oauth) e resta salvato su social_accounts.identificativo.
 
 Pubblicazione (quando configurato): flusso ufficiale in due passi del
 Content Publishing API — POST /{ig-user-id}/media (container con image_url +
@@ -32,7 +33,10 @@ from social.integrations.base import PublishResult, asset_a_lista
 
 log = logging.getLogger(__name__)
 
-_GRAPH = "https://graph.facebook.com"
+_AUTORIZZA = "https://www.instagram.com/oauth/authorize"
+_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
+_GRAPH = "https://graph.instagram.com"
+_SCOPE = "instagram_business_basic,instagram_business_content_publish"
 
 
 class InstagramAdapter:
@@ -40,7 +44,7 @@ class InstagramAdapter:
 
     def __init__(self, conn):
         self.conn = conn
-        self.cfg = config.meta_config()
+        self.cfg = config.instagram_config()
         self.account = db_social.account_per_piattaforma(conn, "instagram")
 
     # --- Checklist / diagnostica --------------------------------------------
@@ -49,18 +53,17 @@ class InstagramAdapter:
         cfg = self.cfg
         token = self._token()
         checklist = [
-            {"voce": "Meta Developer App creata (META_APP_ID/META_APP_SECRET)",
+            {"voce": "App Instagram creata (INSTAGRAM_APP_ID/INSTAGRAM_APP_SECRET)",
              "ok": bool(cfg["app_id"] and cfg["app_secret"]),
-             "dettaglio": "developers.facebook.com > Create App (tipo Business) — vedi docs/meta-instagram-setup.md"},
-            {"voce": "Pagina Facebook creata e collegata all'account Instagram Business",
-             "ok": bool(cfg["facebook_page_id"]),
-             "dettaglio": "La Graph API pubblica su Instagram solo tramite una Pagina collegata"},
-            {"voce": "Instagram Business Account ID (INSTAGRAM_ACCOUNT_ID)",
-             "ok": bool(cfg["instagram_account_id"]),
-             "dettaglio": "GET /{page-id}?fields=instagram_business_account"},
+             "dettaglio": "developers.facebook.com > la tua app > Instagram > "
+                          "Configura Instagram Business Login — vedi docs/meta-instagram-setup.md"},
             {"voce": "Token OAuth autorizzato e salvato",
              "ok": token is not None,
-             "dettaglio": "Login OAuth con scope instagram_content_publish, pages_read_engagement"},
+             "dettaglio": "Login OAuth con scope instagram_business_basic, "
+                          "instagram_business_content_publish"},
+            {"voce": "Instagram Business Account ID",
+             "ok": bool(self.account and self.account["identificativo"]),
+             "dettaglio": "Ottenuto automaticamente dal token dopo l'autorizzazione (GET /me)"},
             {"voce": "Immagini raggiungibili via URL pubblico",
              "ok": False,
              "dettaglio": "Il container /media accetta solo image_url pubblici: "
@@ -84,56 +87,56 @@ class InstagramAdapter:
             return None
 
     def completa_oauth(self, code):
-        """Scambia il 'code' OAuth ricevuto al callback per un Page Access
-        Token utilizzabile per pubblicare sull'account Instagram Business
-        collegato alla Pagina configurata (FACEBOOK_PAGE_ID). I Page Access
-        Token ottenuti da un token utente long-lived non hanno una scadenza
-        fissa nota (restano validi finche' l'utente non revoca l'accesso o
-        cambia password) — non serve refresh automatico.
-        Solleva RuntimeError con un messaggio chiaro ad ogni passaggio."""
+        """Scambia il 'code' OAuth di Instagram Business Login per un token
+        utente, lo scambia per uno long-lived (~60 giorni) e recupera
+        l'Instagram-scoped User ID — l'id da usare per pubblicare
+        (/{user_id}/media), salvato subito su social_accounts.identificativo
+        cosi' non va piu' configurato a mano. Solleva RuntimeError con un
+        messaggio chiaro ad ogni passaggio."""
         cfg = self.cfg
-        versione = cfg["graph_api_version"]
 
-        # 1) code -> user access token (short-lived, ~1-2 ore)
-        risposta = requests.get(
-            f"{_GRAPH}/{versione}/oauth/access_token",
-            params={"client_id": cfg["app_id"], "redirect_uri": cfg["redirect_uri"],
-                    "client_secret": cfg["app_secret"], "code": code}, timeout=30)
-        if not risposta.ok:
-            raise RuntimeError(f"scambio code->token Meta fallito: {risposta.text[:300]}")
-        user_token = risposta.json().get("access_token")
-        if not user_token:
-            raise RuntimeError("risposta Meta senza access_token")
-
-        # 2) user token -> long-lived (~60 giorni), se il provider lo concede
-        risposta = requests.get(
-            f"{_GRAPH}/{versione}/oauth/access_token",
-            params={"grant_type": "fb_exchange_token", "client_id": cfg["app_id"],
-                    "client_secret": cfg["app_secret"], "fb_exchange_token": user_token},
+        # 1) code -> short-lived user token (~1h). A differenza del vecchio
+        # flusso Facebook, lo scambio e' un POST form-encoded, non un GET.
+        risposta = requests.post(
+            _TOKEN_URL,
+            data={"client_id": cfg["app_id"], "client_secret": cfg["app_secret"],
+                  "grant_type": "authorization_code", "redirect_uri": cfg["redirect_uri"],
+                  "code": code},
             timeout=30)
-        if risposta.ok and risposta.json().get("access_token"):
-            user_token = risposta.json()["access_token"]
+        if not risposta.ok:
+            raise RuntimeError(f"scambio code->token Instagram fallito: {risposta.text[:300]}")
+        token = risposta.json().get("access_token")
+        if not token:
+            raise RuntimeError("risposta Instagram senza access_token")
 
-        # 3) page access token per la Pagina configurata: e' quello che
-        # funziona in modo affidabile per pubblicare sull'IG business account
-        # collegato (la Content Publishing API lo accetta come access_token).
-        if not cfg["facebook_page_id"]:
-            raise RuntimeError(
-                "FACEBOOK_PAGE_ID non configurato in .env: impostalo prima di autorizzare")
+        # 2) short-lived -> long-lived (~60 giorni), se il provider lo concede
         risposta = requests.get(
-            f"{_GRAPH}/{versione}/{cfg['facebook_page_id']}",
-            params={"fields": "access_token", "access_token": user_token}, timeout=30)
-        if not risposta.ok or not risposta.json().get("access_token"):
-            raise RuntimeError(f"impossibile ottenere il Page Access Token: {risposta.text[:300]}")
-        return risposta.json()["access_token"]
+            f"{_GRAPH}/access_token",
+            params={"grant_type": "ig_exchange_token", "client_secret": cfg["app_secret"],
+                    "access_token": token}, timeout=30)
+        if risposta.ok and risposta.json().get("access_token"):
+            token = risposta.json()["access_token"]
+
+        # 3) Instagram-scoped user id: sostituisce il vecchio Page Access
+        # Token + FACEBOOK_PAGE_ID — con questo flusso si pubblica
+        # direttamente sull'account, senza una Pagina Facebook di mezzo.
+        risposta = requests.get(
+            f"{_GRAPH}/{cfg['graph_api_version']}/me",
+            params={"fields": "user_id", "access_token": token}, timeout=30)
+        if not risposta.ok or not risposta.json().get("user_id"):
+            raise RuntimeError(f"impossibile ottenere l'Instagram User ID: {risposta.text[:300]}")
+        ig_user_id = str(risposta.json()["user_id"])
+        if self.account is not None:
+            db_social.aggiorna_account(self.conn, self.account["id"], identificativo=ig_user_id)
+            self.account = db_social.account_per_piattaforma(self.conn, "instagram")
+        return token
 
     def oauth_authorize_url(self, state):
-        """URL del consenso Meta (il flusso si completa dalla dashboard)."""
+        """URL del consenso Instagram Business Login (il flusso si completa
+        dalla dashboard)."""
         cfg = self.cfg
-        scope = "instagram_basic,instagram_content_publish,pages_read_engagement,pages_show_list"
-        return (f"https://www.facebook.com/{cfg['graph_api_version']}/dialog/oauth"
-                f"?client_id={cfg['app_id']}&redirect_uri={cfg['redirect_uri']}"
-                f"&state={state}&scope={scope}")
+        return (f"{_AUTORIZZA}?client_id={cfg['app_id']}&redirect_uri={cfg['redirect_uri']}"
+                f"&response_type=code&scope={_SCOPE}&state={state}")
 
     # --- Pubblicazione -------------------------------------------------------
 
@@ -146,7 +149,7 @@ class InstagramAdapter:
             raise RuntimeError(salute["messaggio"])
         token = self._token()
         versione = self.cfg["graph_api_version"]
-        ig_id = self.cfg["instagram_account_id"]
+        ig_id = self.account["identificativo"]
         immagini = asset_a_lista(asset_path)[:MASSIMO_IMMAGINI_CAROSELLO]
         if len(immagini) > 1:
             return self._pubblica_carosello(testo, immagini, token, versione, ig_id)

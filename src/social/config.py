@@ -169,16 +169,18 @@ def jobinpa_api_key():
     return os.environ.get("JOBINPA_API_KEY", "")
 
 
-# --- Meta / Instagram --------------------------------------------------------
+# --- Instagram (Instagram API with Instagram Login) --------------------------
+# Flusso nativo Instagram: login OAuth su instagram.com, non piu' tramite una
+# Pagina Facebook. L'Instagram Business Account ID si ottiene dal token dopo
+# l'autorizzazione (vedi InstagramAdapter.completa_oauth), non e' piu' una
+# variabile di ambiente da configurare a mano.
 
-def meta_config():
+def instagram_config():
     return {
-        "app_id": os.environ.get("META_APP_ID", ""),
-        "app_secret": os.environ.get("META_APP_SECRET", ""),
-        "redirect_uri": os.environ.get("META_REDIRECT_URI", ""),
-        "graph_api_version": os.environ.get("META_GRAPH_API_VERSION", "v21.0"),
-        "instagram_account_id": os.environ.get("INSTAGRAM_ACCOUNT_ID", ""),
-        "facebook_page_id": os.environ.get("FACEBOOK_PAGE_ID", ""),
+        "app_id": os.environ.get("INSTAGRAM_APP_ID", ""),
+        "app_secret": os.environ.get("INSTAGRAM_APP_SECRET", ""),
+        "redirect_uri": os.environ.get("INSTAGRAM_REDIRECT_URI", ""),
+        "graph_api_version": os.environ.get("INSTAGRAM_GRAPH_API_VERSION", "v21.0"),
     }
 
 

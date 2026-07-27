@@ -315,11 +315,14 @@ def calendario(request: Request, settimana: Optional[str] = None,
     altre_settimane_suggerimenti = sorted(
         (s, n) for s, n in conteggio_settimane.items() if s != settimana_iso)
 
+    generazione_in_corso = db_social.job_in_corso(conn, "generate_week_plan", settimana_iso)
+
     return templates.TemplateResponse(request, "calendario.html", _ctx(
         request, sessione, conn, giorni=giorni, suggerimenti=suggerimenti,
         pillars=db_social.pillars(conn),
         altre_settimane_suggerimenti=altre_settimane_suggerimenti,
         corrente=settimana_iso,
+        generazione_in_corso=generazione_in_corso,
         precedente=(inizio - timedelta(weeks=1)).isoformat(),
         successiva=(inizio + timedelta(weeks=1)).isoformat()))
 

@@ -188,7 +188,8 @@ def _adapter_instagram_pronto(conn, monkeypatch):
     adapter = InstagramAdapter(conn)
     monkeypatch.setattr(adapter, "health_check", lambda: {"pronto": True})
     monkeypatch.setattr(adapter, "_token", lambda: "token-finto")
-    adapter.cfg = {**adapter.cfg, "graph_api_version": "v21.0", "instagram_account_id": "IG123"}
+    adapter.cfg = {**adapter.cfg, "graph_api_version": "v21.0"}
+    adapter.account = {"identificativo": "IG123"}
     return adapter
 
 

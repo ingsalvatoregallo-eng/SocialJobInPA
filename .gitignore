@@ -8,3 +8,4 @@ logs/
 assets/generated/
 backups/
 node_modules/
+certs/
