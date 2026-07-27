@@ -123,15 +123,74 @@ def test_callback_linkedin_non_admin_non_verifica(client, conn, admin, monkeypat
     assert any(i["tipo"] == "publishing" for i in db_social.incidenti_aperti(conn))
 
 
-def test_callback_instagram_mai_verificato_in_locale(client, conn, admin, monkeypatch):
+def test_callback_instagram_resta_in_configurazione_senza_r2(client, conn, admin, monkeypatch):
+    """"verificato" e' raggiungibile (checklist legata a R2, vedi
+    asset_storage.py), ma non in questo test: nessuna delle altre voci
+    della checklist (App ID/Secret, R2) e' configurata nell'ambiente di
+    test, quindi resta "in_configurazione" a prescindere dal token."""
     monkeypatch.setattr(InstagramAdapter, "completa_oauth", lambda self, code: "page-token-fake")
     stato = auth.crea_token({"scopo": "social_link", "provider": "instagram", "utente_id": admin})
     client.get("/social/oauth/instagram/callback", params={"code": "c", "state": stato})
     account = db_social.account_per_piattaforma(conn, "instagram")
-    # mai "verificato" in locale: manca sempre l'URL pubblico per le immagini
     assert account["stato"] == "in_configurazione"
     riga = db_social.oauth_token_attivo(conn, account["id"])
     assert security.decrypt_token(riga["token_cifrato"]) == "page-token-fake"
+
+
+def test_callback_instagram_verificato_se_checklist_completa(client, conn, admin, monkeypatch):
+    monkeypatch.setattr(InstagramAdapter, "completa_oauth", lambda self, code: "page-token-fake")
+    monkeypatch.setattr(InstagramAdapter, "health_check",
+                        lambda self: {"pronto": True, "checklist": [], "messaggio": "ok"})
+    stato = auth.crea_token({"scopo": "social_link", "provider": "instagram", "utente_id": admin})
+    client.get("/social/oauth/instagram/callback", params={"code": "c", "state": stato})
+    account = db_social.account_per_piattaforma(conn, "instagram")
+    assert account["stato"] == "verificato"
+
+
+def test_instagram_token_manuale_salva_e_verifica(client, conn, admin, monkeypatch):
+    monkeypatch.setattr(InstagramAdapter, "completa_con_token_manuale",
+                        lambda self, token: f"long-lived-{token}")
+    monkeypatch.setattr(InstagramAdapter, "health_check",
+                        lambda self: {"pronto": True, "checklist": [], "messaggio": "ok"})
+    _login(client)
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get("/social/impostazioni").text).group(1)
+
+    r = client.post("/social/oauth/instagram/token-manuale",
+                    data={"token": "token-incollato-a-mano", "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    account = db_social.account_per_piattaforma(conn, "instagram")
+    assert account["stato"] == "verificato"
+    riga = db_social.oauth_token_attivo(conn, account["id"])
+    assert security.decrypt_token(riga["token_cifrato"]) == "long-lived-token-incollato-a-mano"
+
+
+def test_instagram_token_manuale_richiede_permesso_admin(client, conn):
+    db_social.crea_utente(conn, "editor-token@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-token@test.local")
+    # "/social/" mostra un form con csrf solo a chi ha social.publish
+    # (kill switch): "nuovo contenuto" basta social.edit, che editor ha.
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get("/social/contenuti/nuovo").text).group(1)
+    r = client.post("/social/oauth/instagram/token-manuale",
+                    data={"token": "x", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_instagram_token_manuale_fallito_registra_incidente(client, conn, admin, monkeypatch):
+    def fallisce(self, token):
+        raise RuntimeError("token non valido")
+    monkeypatch.setattr(InstagramAdapter, "completa_con_token_manuale", fallisce)
+    _login(client)
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get("/social/impostazioni").text).group(1)
+    r = client.post("/social/oauth/instagram/token-manuale",
+                    data={"token": "x", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 502
+    assert any(i["tipo"] == "publishing" for i in db_social.incidenti_aperti(conn))
 
 
 def test_callback_errore_provider_registra_incidente_e_502(client, conn, admin, monkeypatch):

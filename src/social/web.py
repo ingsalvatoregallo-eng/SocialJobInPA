@@ -934,11 +934,10 @@ def oauth_callback(request: Request, provider: str, code: Optional[str] = None,
             token = adapter.completa_oauth(code)
             db_social.salva_oauth_token(conn, account["id"], "access",
                                         security.encrypt_token(token))
-            # L'ultimo requisito della checklist (immagini via URL pubblico)
-            # non puo' mai essere vero in locale: l'account resta
-            # "in_configurazione" finche' non sara' esposto pubblicamente
-            # (vedi docs/deployment-future.md), il token e' comunque salvato.
-            nuovo_stato = "in_configurazione"
+            # Con lo storage pubblico R2 configurato (vedi asset_storage.py),
+            # "pronto" e' finalmente raggiungibile anche in locale: il token
+            # e' comunque salvato anche se qualche altro requisito manca.
+            nuovo_stato = "verificato" if adapter.health_check()["pronto"] else "in_configurazione"
         else:
             adapter = LinkedInAdapter(conn)
             token, expires_in = adapter.completa_oauth(code)
@@ -967,6 +966,41 @@ def oauth_callback(request: Request, provider: str, code: Optional[str] = None,
                         dettagli={"provider": provider, "errore": str(errore)})
         raise HTTPException(status_code=502,
                             detail=f"Autorizzazione {provider} fallita: {errore}")
+    return RedirectResponse("/social/impostazioni", status_code=303)
+
+
+@router.post("/oauth/instagram/token-manuale")
+def instagram_token_manuale(request: Request, token: str = Form(...), csrf: str = Form(None),
+                            sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Via alternativa al redirect OAuth completo: incolla qui un token
+    generato altrove (es. il bottone "Genera token" della dashboard Meta
+    per un account tester) — utile quando il redirect OAuth non funziona
+    (problema noto lato Meta in certi periodi, non del nostro codice)."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    account = db_social.account_per_piattaforma(conn, "instagram")
+    if account is None:
+        raise HTTPException(status_code=404, detail="account non configurato")
+    utente_id = sessione["utente"]["id"]
+    try:
+        adapter = InstagramAdapter(conn)
+        token_finale = adapter.completa_con_token_manuale(token.strip())
+        db_social.salva_oauth_token(conn, account["id"], "access",
+                                    security.encrypt_token(token_finale))
+        nuovo_stato = "verificato" if adapter.health_check()["pronto"] else "in_configurazione"
+        db_social.aggiorna_account(conn, account["id"], stato=nuovo_stato)
+        db_social.audit(conn, "oauth_completato", utente_id=utente_id,
+                        oggetto_tipo="account", oggetto_id=account["id"],
+                        stato_dopo=nuovo_stato,
+                        dettagli={"provider": "instagram", "metodo": "token_manuale"})
+    except Exception as errore:
+        db_social.registra_incidente(conn, "publishing",
+                                     f"Token manuale Instagram fallito: {errore}")
+        db_social.audit(conn, "oauth_fallito", utente_id=utente_id,
+                        oggetto_tipo="account", oggetto_id=account["id"],
+                        dettagli={"provider": "instagram", "metodo": "token_manuale",
+                                  "errore": str(errore)})
+        raise HTTPException(status_code=502, detail=f"Token non valido: {errore}")
     return RedirectResponse("/social/impostazioni", status_code=303)
 
 

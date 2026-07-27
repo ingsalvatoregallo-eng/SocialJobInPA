@@ -35,7 +35,7 @@ from social.integrations.base import PublishResult, asset_a_lista
 
 log = logging.getLogger(__name__)
 
-_AUTORIZZA = "https://www.instagram.com/oauth/authorize"
+_AUTORIZZA = "https://api.instagram.com/oauth/authorize"
 _TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _GRAPH = "https://graph.instagram.com"
 _SCOPE = "instagram_business_basic,instagram_business_content_publish"
@@ -92,14 +92,17 @@ class InstagramAdapter:
 
     def completa_oauth(self, code):
         """Scambia il 'code' OAuth di Instagram Business Login per un token
-        utente, lo scambia per uno long-lived (~60 giorni) e recupera
-        l'Instagram-scoped User ID — l'id da usare per pubblicare
-        (/{user_id}/media), salvato subito su social_accounts.identificativo
-        cosi' non va piu' configurato a mano. Solleva RuntimeError con un
-        messaggio chiaro ad ogni passaggio."""
+        utente, poi delega a _finalizza_token per il resto (long-lived +
+        identita'). Solleva RuntimeError con un messaggio chiaro ad ogni
+        passaggio."""
         cfg = self.cfg
+        # Instagram appende "#_" al redirect (documentazione ufficiale):
+        # in un vero redirect HTTP il browser lo scarta da solo (e' un
+        # fragment, mai inviato al server), ma lo togliamo comunque per
+        # sicurezza se il code arrivasse gia' con quella coda.
+        code = code.split("#")[0]
 
-        # 1) code -> short-lived user token (~1h). A differenza del vecchio
+        # code -> short-lived user token (~1h). A differenza del vecchio
         # flusso Facebook, lo scambio e' un POST form-encoded, non un GET.
         risposta = requests.post(
             _TOKEN_URL,
@@ -112,8 +115,23 @@ class InstagramAdapter:
         token = risposta.json().get("access_token")
         if not token:
             raise RuntimeError("risposta Instagram senza access_token")
+        return self._finalizza_token(token)
 
-        # 2) short-lived -> long-lived (~60 giorni), se il provider lo concede
+    def completa_con_token_manuale(self, token):
+        """Percorso alternativo al redirect OAuth completo: un token gia'
+        ottenuto altrove (es. il bottone "Genera token" della dashboard
+        Meta per un account tester, quando il redirect OAuth non funziona —
+        problema noto lato Meta, non del nostro codice) viene comunque
+        scambiato per uno long-lived e usato per recuperare l'identita',
+        esattamente come farebbe completa_oauth dopo lo scambio del code."""
+        return self._finalizza_token(token)
+
+    def _finalizza_token(self, token):
+        """token -> long-lived (~60 giorni, se il provider lo concede) ->
+        Instagram-scoped user id, salvato su social_accounts.identificativo
+        (sostituisce il vecchio Page Access Token + FACEBOOK_PAGE_ID: con
+        questo flusso si pubblica direttamente sull'account)."""
+        cfg = self.cfg
         risposta = requests.get(
             f"{_GRAPH}/access_token",
             params={"grant_type": "ig_exchange_token", "client_secret": cfg["app_secret"],
@@ -121,9 +139,6 @@ class InstagramAdapter:
         if risposta.ok and risposta.json().get("access_token"):
             token = risposta.json()["access_token"]
 
-        # 3) Instagram-scoped user id: sostituisce il vecchio Page Access
-        # Token + FACEBOOK_PAGE_ID — con questo flusso si pubblica
-        # direttamente sull'account, senza una Pagina Facebook di mezzo.
         risposta = requests.get(
             f"{_GRAPH}/{cfg['graph_api_version']}/me",
             params={"fields": "user_id", "access_token": token}, timeout=30)
@@ -137,10 +152,15 @@ class InstagramAdapter:
 
     def oauth_authorize_url(self, state):
         """URL del consenso Instagram Business Login (il flusso si completa
-        dalla dashboard)."""
+        dalla dashboard). Parametri URL-encoded: redirect_uri/scope inseriti
+        senza encoding potevano non corrispondere byte-per-byte a quanto
+        registrato lato Meta."""
+        from urllib.parse import urlencode
         cfg = self.cfg
-        return (f"{_AUTORIZZA}?client_id={cfg['app_id']}&redirect_uri={cfg['redirect_uri']}"
-                f"&response_type=code&scope={_SCOPE}&state={state}")
+        query = urlencode({
+            "client_id": cfg["app_id"], "redirect_uri": cfg["redirect_uri"],
+            "response_type": "code", "scope": _SCOPE, "state": state})
+        return f"{_AUTORIZZA}?{query}"
 
     # --- Pubblicazione -------------------------------------------------------
 
