@@ -41,8 +41,9 @@
     <h3>2. Regole di pubblicazione e sicurezza</h3>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
       <span style="font-size:13px">Modalità operativa</span>
-      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}">{{ modalita }}</span>
+      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}" title="{{ modalita|modalita_spiegazione }}">{{ modalita }}</span>
     </div>
+    <p class="hint" style="margin-top:-4px">{{ modalita|modalita_spiegazione }}</p>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--colore-bordo)">
       <span style="font-size:13px">Pubblicazione globale (env)</span>
       <span class="badge {{ 'verde' if publishing_env else 'grigio' }}">{{ 'abilitata' if publishing_env else 'disabilitata' }}</span>

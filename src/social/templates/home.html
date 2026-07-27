@@ -111,8 +111,9 @@
     </div>
     <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--colore-bordo)">
       <strong style="font-size:13px">Modalità</strong>
-      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}">{{ modalita }}</span>
+      <span class="badge {{ 'grigio' if modalita != 'production' else 'verde' }}" title="{{ modalita|modalita_spiegazione }}">{{ modalita }}</span>
     </div>
+    <p class="hint" style="margin-top:-6px">{{ modalita|modalita_spiegazione }}</p>
     {% if 'social.publish' in permessi %}
     <form method="post" action="/social/kill-switch" style="margin-top:10px">
       <input type="hidden" name="csrf" value="{{ csrf }}">

@@ -11,7 +11,6 @@
 <div class="griglia" style="grid-template-columns:1fr 300px;align-items:start">
   <form class="card" method="post" action="/social/contenuti" id="form-nuovo">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="azione" id="campo-azione" value="salva_idea">
 
     <label>Titolo / tema *</label>
     <input type="text" name="titolo" required placeholder="Es. Concorso Ministero X 100 posti amministrativi">
@@ -46,20 +45,19 @@
 
     <div style="display:flex;gap:10px;margin-top:6px">
       <a class="btn secondario" href="/social/contenuti">Annulla</a>
-      <button type="submit" class="btn secondario" style="margin-left:auto" onclick="document.getElementById('campo-azione').value='salva_idea'">💾 Salva come idea</button>
-      <button type="submit" class="btn" onclick="document.getElementById('campo-azione').value='avvia'">✨ Avvia elaborazione AI</button>
+      <button type="submit" class="btn" style="margin-left:auto">✨ Crea e avvia l'AI</button>
     </div>
   </form>
 
   <div class="card">
-    <h3>Come funziona</h3>
+    <h3>Cosa succede dopo</h3>
     <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px">
       <div><strong>1. Ricerca fonti</strong><div class="hint">L'AI cerca bandi reali su JobInPA in base al brief.</div></div>
       <div><strong>2. Copywriting</strong><div class="hint">Genera i testi per Instagram e LinkedIn.</div></div>
       <div><strong>3. Visual</strong><div class="hint">Crea l'immagine con il template grafico ufficiale.</div></div>
       <div><strong>4. Controllo rischio</strong><div class="hint">Classifica il contenuto (verde/giallo/rosso) prima della revisione.</div></div>
     </div>
-    <p class="hint" style="margin-top:14px">Se scegli "Salva come idea" il contenuto resta in bozza: potrai avviare l'elaborazione AI più tardi dalla pagina Contenuti.</p>
+    <p class="hint" style="margin-top:14px">L'elaborazione parte subito: resterai sulla scheda del contenuto con un indicatore di avanzamento finché non è pronta.</p>
   </div>
 </div>
 {% endblock %}

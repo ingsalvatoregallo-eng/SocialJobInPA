@@ -24,8 +24,9 @@
   <table><tr><th>Titolo</th><th>Piattaforma</th><th>Modalità</th><th>Link</th><th>Quando</th></tr>
   {% for p in pubblicate %}
     <tr><td><a href="/social/contenuti/{{ p.content_id }}">{{ p.titolo }}</a></td>
-        <td>{{ p.piattaforma }}</td><td>{{ p.modalita }}</td>
-        <td>{% if p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener noreferrer">apri</a>{% endif %}</td>
+        <td>{{ p.piattaforma }}</td><td title="{{ p.modalita|modalita_spiegazione }}">{{ p.modalita }}</td>
+        <td>{% if p.modalita != 'production' %}<span class="hint">non reale ({{ p.modalita }})</span>
+            {% elif p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener noreferrer">apri</a>{% endif %}</td>
         <td>{{ p.pubblicato_at|data_breve }}</td></tr>
   {% else %}<tr><td colspan="5" class="hint">Nessuna pubblicazione.</td></tr>{% endfor %}
   </table>

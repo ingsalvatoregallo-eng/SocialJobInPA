@@ -1277,6 +1277,33 @@ def crea_job(conn, tipo, payload=None, *, esegui_at=None, max_tentativi=5):
     return job_id
 
 
+def content_con_programmato_at(conn):
+    """Contenuti con programmato_at valorizzato (SCHEDULED e stati
+    successivi: PUBLISHING/PUBLISHED/PARTIALLY_PUBLISHED/PUBLISH_FAILED) —
+    per il Calendario, che altrimenti mostra SOLO i suggerimenti del piano
+    editoriale (plan_settimana): un contenuto creato direttamente da
+    'Nuovo contenuto' (non da un suggerimento accettato) una volta
+    programmato o pubblicato non compariva mai nel calendario."""
+    return conn.execute(
+        "SELECT * FROM social_content WHERE programmato_at IS NOT NULL "
+        "ORDER BY programmato_at").fetchall()
+
+
+def riprogramma_pubblicazione(conn, content_id, nuovo_orario_iso):
+    """Sposta la pubblicazione programmata a un nuovo orario: aggiorna sia
+    content.programmato_at sia l'esegui_at del job 'publish' pending gia'
+    in coda (creato da agents.programma_pubblicazione) — senza toccare il
+    job, il contenuto mostrerebbe il nuovo orario ma verrebbe comunque
+    pubblicato a quello vecchio."""
+    conn.execute(
+        "UPDATE social_scheduled_jobs SET esegui_at = ?, aggiornato_at = ? "
+        "WHERE tipo = 'publish' AND stato = 'pending' AND payload LIKE ?",
+        (nuovo_orario_iso, _adesso(), f"%{content_id}%"))
+    conn.execute("UPDATE social_content SET programmato_at = ?, aggiornato_at = ? WHERE id = ?",
+                (nuovo_orario_iso, _adesso(), content_id))
+    conn.commit()
+
+
 def prendi_job(conn, owner, *, lock_timeout_minuti=15):
     """Reclama atomicamente il prossimo job eseguibile (pending scaduto, o
     running con lock piu' vecchio del timeout = processo morto, recovery)."""

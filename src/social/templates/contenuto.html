@@ -50,7 +50,8 @@
 </div>
 
 <div class="card" style="display:flex;gap:10px;flex-wrap:wrap">
-  {% if 'social.edit' in permessi and c.stato in ('IDEA', 'RESEARCH_FAILED', 'CHANGES_REQUESTED') %}
+  {% if 'social.edit' in permessi and c.stato in ('IDEA', 'RESEARCH_FAILED', 'CHANGES_REQUESTED')
+        and not in_corso and not appena_in_coda %}
   <form method="post" action="/social/contenuti/{{ c.id }}/pipeline" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn" type="submit">✨ Avvia pipeline agenti (ricerca → copy → visual → rischio)</button>
@@ -59,8 +60,11 @@
   {% if 'social.publish' in permessi and c.stato in ('APPROVED', 'SCHEDULED', 'PUBLISH_FAILED') %}
   <form method="post" action="/social/contenuti/{{ c.id }}/pubblica" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="btn verde" type="submit">Pubblica ora ({{ modalita }})</button>
+    <button class="btn verde" type="submit" title="{{ modalita|modalita_spiegazione }}">Pubblica ora ({{ modalita }})</button>
   </form>
+  {% if modalita != 'production' %}
+  <p class="hint" style="width:100%;margin:2px 0 0">{{ modalita|modalita_spiegazione }}</p>
+  {% endif %}
   {% endif %}
   {% if 'social.edit' in permessi and assets and not in_corso and not rigenerazione_in_corso and not rigenerazione_testo_in_corso %}
   <form method="post" action="/social/contenuti/{{ c.id }}/rigenera-immagine" class="inline"
@@ -85,6 +89,20 @@
   </form>
   {% endif %}
 </div>
+
+{% if c.stato == 'SCHEDULED' and 'social.publish' in permessi %}
+<div class="card">
+  <strong>Programmato per</strong>
+  <form method="post" action="/social/contenuti/{{ c.id }}/riprogramma" style="display:flex;gap:10px;align-items:end;margin-top:8px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div>
+      <label>Nuova data/ora</label>
+      <input type="datetime-local" name="quando" value="{{ c.programmato_at|iso_a_locale_input }}" required>
+    </div>
+    <button class="btn piccolo secondario" type="submit">📅 Riprogramma</button>
+  </form>
+</div>
+{% endif %}
 
 <div class="griglia griglia-auto">
   {% for piattaforma in ('instagram', 'linkedin') %}

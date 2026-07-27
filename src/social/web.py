@@ -90,6 +90,32 @@ templates.env.filters["stato_account"] = lambda stato: STATO_ACCOUNT_LABEL.get(s
 templates.env.filters["stato_account_colore"] = lambda stato: STATO_ACCOUNT_COLORE.get(stato, "grigio")
 templates.env.globals["FASE_COLORE"] = FASE_COLORE
 
+MODALITA_SPIEGAZIONE = {
+    "mock": "Nessuna chiamata esterna: ne' l'AI ne' la pubblicazione sono reali. Solo per test offline.",
+    "sandbox": "L'AI genera contenuti veri, ma la pubblicazione sui social e' SEMPRE simulata "
+              "(nessun post reale, il link \"apri\" non porta a nulla di vero).",
+    "production": "Pubblicazione reale sui social configurati (richiede account verificati, "
+                  "GLOBAL_PUBLISHING_ENABLED=true e kill switch spento).",
+}
+templates.env.filters["modalita_spiegazione"] = lambda m: MODALITA_SPIEGAZIONE.get(m, "")
+
+
+def _iso_a_locale_input(iso):
+    """ISO UTC (come salvato in programmato_at) -> 'YYYY-MM-DDTHH:MM' nel
+    fuso locale, il formato richiesto da <input type="datetime-local">."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo(config.default_timezone())).strftime("%Y-%m-%dT%H:%M")
+
+
+templates.env.filters["iso_a_locale_input"] = _iso_a_locale_input
+
 
 def _hashtags_testo(valore):
     """hashtags e' salvato come JSON TEXT (vedi db_social.salva_variante):
@@ -160,6 +186,13 @@ def _ctx(request, sessione, conn, **extra):
         "kill_switch": db_social.kill_switch_attivo(conn),
         "modalita": publishing.modalita_effettiva(conn),
         "ora_locale": ora_locale,
+        # Contatori nel menu laterale (base.html): senza, l'unico modo di
+        # scoprire che c'e' qualcosa da revisionare/pubblicare era entrare
+        # per caso nella pagina giusta (segnalato dall'utente).
+        "revisione_in_attesa": len(db_social.approvals_in_attesa(conn)),
+        "pubblicazioni_da_gestire": (
+            len(db_social.lista_content(conn, stati=["APPROVED"]))
+            + len(db_social.lista_publications(conn, stato="fallito"))),
         **extra,
     }
 
@@ -315,16 +348,33 @@ def calendario(request: Request, settimana: Optional[str] = None,
     settimana_iso = inizio.isoformat()
     voci = db_social.plan_settimana(conn, settimana_iso)
 
+    # Contenuti VERI con una data di pubblicazione (programmata o gia'
+    # avvenuta), raggruppati per giorno LOCALE: senza questo, un contenuto
+    # creato da "Nuovo contenuto" (non da un suggerimento del piano AI
+    # accettato) non compariva mai nel calendario una volta programmato o
+    # pubblicato, anche se e' l'informazione piu' importante da vedere qui.
+    fuso = ZoneInfo(config.default_timezone())
+    programmati_per_giorno = {}
+    for content in db_social.content_con_programmato_at(conn):
+        data_locale = datetime.fromisoformat(content["programmato_at"]).astimezone(fuso).date()
+        programmati_per_giorno.setdefault(data_locale.isoformat(), []).append(content)
+
     giorni = []
     for offset, nome in enumerate(_NOMI_GIORNI):
         data = inizio + timedelta(days=offset)
         contenuti_giorno = []
+        id_visti = set()
         for v in voci:
             if v["giorno"] != data.isoformat() or v["content_id"] is None:
                 continue
             content = db_social.get_content(conn, v["content_id"])
-            if content:
+            if content and content["id"] not in id_visti:
                 contenuti_giorno.append(content)
+                id_visti.add(content["id"])
+        for content in programmati_per_giorno.get(data.isoformat(), []):
+            if content["id"] not in id_visti:
+                contenuti_giorno.append(content)
+                id_visti.add(content["id"])
         giorni.append({"data": data.isoformat(), "nome": nome, "contenuti": contenuti_giorno})
 
     suggerimenti = [v for v in voci if v["stato"] == "suggerito"]
@@ -458,9 +508,13 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(...),
                    pillar: str = Form(None), obiettivo: str = Form(None),
-                   brief: str = Form(None), azione: str = Form("salva_idea"),
-                   csrf: str = Form(None),
+                   brief: str = Form(None), csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
+    "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
+    senza un vero bisogno dietro (segnalato dall'utente) — chi vuole
+    davvero solo una bozza puo' comunque modificare/rilanciare in un
+    secondo momento dalla scheda del contenuto."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
@@ -469,9 +523,8 @@ def crea_contenuto(request: Request, titolo: str = Form(...),
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
-    if azione == "avvia":
-        db_social.crea_job(conn, "pipeline", {"content_id": content_id})
-    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+    db_social.crea_job(conn, "pipeline", {"content_id": content_id})
+    return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
 _STATI_PIPELINE_IN_CORSO = {"RESEARCHING", "DRAFTING", "DRAFT_READY", "GENERATING_VISUAL", "QUALITY_CHECK"}
@@ -604,6 +657,33 @@ def pubblica_ora(request: Request, content_id: str, csrf: str = Form(None),
         publishing.pubblica_contenuto(conn, content_id, utente_id=sessione["utente"]["id"])
     except state_machine.TransizioneNonValida as errore:
         raise HTTPException(status_code=409, detail=str(errore))
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+
+
+@router.post("/contenuti/{content_id}/riprogramma")
+def riprogramma(request: Request, content_id: str, quando: str = Form(...),
+                csrf: str = Form(None),
+                sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Cambia data/ora di una pubblicazione gia' programmata (stato
+    SCHEDULED): oggi non c'era alcun modo di farlo se non annullare e
+    rifare tutto da capo (segnalato dall'utente)."""
+    _richiedi(conn, sessione, "social.publish")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    if content["stato"] != "SCHEDULED":
+        raise HTTPException(status_code=409,
+                            detail="Si puo' riprogrammare solo un contenuto gia' programmato")
+    try:
+        locale = datetime.fromisoformat(quando).replace(tzinfo=ZoneInfo(config.default_timezone()))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Data/ora non valida")
+    nuovo_orario = locale.astimezone(timezone.utc)
+    db_social.riprogramma_pubblicazione(conn, content_id, nuovo_orario.isoformat())
+    db_social.audit(conn, "pubblicazione_riprogrammata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id,
+                    dettagli={"nuovo_orario": nuovo_orario.isoformat()})
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
