@@ -472,6 +472,12 @@ def _migra(conn):
     if "obiettivo" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN obiettivo TEXT")
         conn.commit()
+    if "bandi_trovati" not in colonne_content:
+        # Record grezzi dei bandi trovati da research() (JSON): senza
+        # persisterli qui, un "rigenera immagine" isolato (senza rifare tutta
+        # la ricerca) perderebbe i dati per il carosello Instagram.
+        conn.execute("ALTER TABLE social_content ADD COLUMN bandi_trovati TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -624,7 +630,7 @@ def lista_content(conn, stati=None, limit=200):
 
 def aggiorna_content(conn, content_id, **campi):
     consentiti = {"titolo", "obiettivo", "brief", "stato", "classe_rischio", "decisione_rischio",
-                  "punteggi_rischio", "canali", "programmato_at", "errore"}
+                  "punteggi_rischio", "canali", "programmato_at", "errore", "bandi_trovati"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
         return
@@ -695,6 +701,17 @@ def varianti_di(conn, content_id):
         (content_id,)).fetchall()
 
 
+def aggiorna_testo_variante(conn, content_id, piattaforma, testo):
+    """Modifica manuale del reviewer in fase di approvazione: aggiorna SOLO
+    il testo, lascia hashtags/call_to_action invariati (a differenza di
+    salva_variante, che e' un upsert pensato per l'output completo del
+    Copywriter Agent e li sovrascriverebbe a vuoto se non ripassati)."""
+    conn.execute(
+        "UPDATE social_post_variants SET testo = ? WHERE content_id = ? AND piattaforma = ?",
+        (testo, content_id, piattaforma))
+    conn.commit()
+
+
 def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
                 formato=None, provider="template"):
     asset_id = _nuovo_id()
@@ -704,6 +721,19 @@ def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
         "provider": provider, "creato_at": _adesso()})
     conn.commit()
     return asset_id
+
+
+def elimina_asset_di(conn, content_id):
+    """Cancella tutti gli asset immagine di un contenuto (righe + file su
+    disco, best-effort): usato prima di rigenerare le immagini, per non
+    accumulare vecchie versioni insieme alle nuove (vedi agents.rigenera_visual)."""
+    for asset in asset_di(conn, content_id):
+        try:
+            Path(asset["percorso"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    conn.execute("DELETE FROM social_media_assets WHERE content_id = ?", (content_id,))
+    conn.commit()
 
 
 def asset_di(conn, content_id):

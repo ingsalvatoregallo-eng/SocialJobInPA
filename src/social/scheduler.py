@@ -35,6 +35,8 @@ def esegui_job(conn, job):
     if tipo == "pipeline":
         return agents.esegui_pipeline(conn, payload["content_id"],
                                       urls_extra=payload.get("urls_extra"))
+    if tipo == "rigenera_visual":
+        return agents.rigenera_visual(conn, payload["content_id"])
     if tipo == "generate_week_plan":
         return agents.supervisor_pianifica_settimana(conn, payload["settimana"])
     if tipo == "collect_metrics":

@@ -42,13 +42,34 @@
       {% for piattaforma, v in dettaglio.varianti.items() %}
       <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:14px">
         <div class="badge blu" style="margin-bottom:8px">{{ '📷 Instagram' if piattaforma == 'instagram' else '💼 LinkedIn' if piattaforma == 'linkedin' else piattaforma }}</div>
+        {% if 'social.approve' in permessi %}
+        <form method="post" action="/social/approvazioni/{{ selezionata.content_id }}/variante/{{ piattaforma }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <textarea name="testo" rows="8" style="font-size:13px">{{ v.testo }}</textarea>
+          <button class="btn piccolo secondario" type="submit" style="margin-top:6px">💾 Salva modifica testo</button>
+        </form>
+        {% else %}
         <p style="white-space:pre-wrap;font-size:13px;margin:0 0 8px">{{ v.testo }}</p>
-        {% if v.hashtags %}<p class="hint">{{ v.hashtags }}</p>{% endif %}
+        {% endif %}
+        {% if v.hashtags %}<p class="hint" style="margin-top:8px">{{ v.hashtags|hashtags_testo }}</p>{% endif %}
       </div>
       {% else %}
       <p class="hint">Testi non ancora generati per questo contenuto.</p>
       {% endfor %}
     </div>
+
+    {% if dettaglio.bandi_trovati %}
+    <h3 style="margin-top:18px">Link ai bandi citati</h3>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      {% for b in dettaglio.bandi_trovati %}
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--colore-bordo)">
+        <span style="font-size:12.5px">{{ b.titolo or b.id }}</span>
+        {% if b.url_dettaglio %}<a class="hint" href="{{ b.url_dettaglio }}" target="_blank" rel="noopener">verifica link →</a>
+        {% else %}<span class="hint">nessun link disponibile</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
 
     {% if dettaglio.punteggi and dettaglio.punteggi.motivi_regole %}
     <div class="avviso giallo" style="margin-top:16px">

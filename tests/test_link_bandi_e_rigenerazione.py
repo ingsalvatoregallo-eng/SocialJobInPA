@@ -1,0 +1,270 @@
+"""Tre miglioramenti segnalati dall'utente dopo aver visto un post reale:
+1. il testo dei post deve citare il link ufficiale del bando, non solo un
+   generico rimando a jobinpa.it;
+2. in revisione si deve poter verificare i link e correggere il testo a
+   mano (senza AI, senza costo);
+3. si deve poter rigenerare SOLO l'immagine di un contenuto (con AI, se
+   abilitata), senza rifare la ricerca ne' il testo gia' approvato."""
+
+import re
+from pathlib import Path
+
+import auth
+import pytest
+
+from social import agents, db_social, llm, models
+from social.images import MockImageProvider
+
+_BANDO_CON_LINK = {
+    "id": "CONC-1", "titolo": "Concorso di prova per 10 posti",
+    "enti": ["Comune Demo"], "num_posti": 10, "scadenza": "2026-12-31",
+    "stato": "OPEN", "sintesi": "Bando di prova per collaudo.",
+    "titolo_studio_richiesto": "Laurea in Informatica", "competenze": [],
+    "url_dettaglio": "https://www.inpa.gov.it/dettaglio/CONC-1",
+}
+
+
+class _ClientFinto:
+    configurato = True
+
+    def __init__(self, bandi=None):
+        self._bandi = bandi if bandi is not None else [_BANDO_CON_LINK]
+
+    def bandi(self, *, stato="OPEN", limit=10, **_):
+        return self._bandi
+
+    def bandi_semantici(self, query, *, limit=10, **_):
+        return self._bandi
+
+    def bando(self, concorso_id):
+        return None
+
+    def filtri_disponibili(self):
+        return {"regioni": [], "categorie": [], "settori": [], "enti": [],
+                "inquadramenti": [], "titoli_studio": [], "tipi_contratto": [],
+                "competenze": [], "ambiti": []}
+
+
+# --- Persistenza bandi_trovati sul contenuto (research) ---------------------
+
+def test_research_persiste_bandi_trovati_sul_contenuto(conn):
+    content_id = db_social.crea_content(conn, "Contenuto senza brief")
+    agents.research(conn, content_id, provider=llm.MockLLMProvider(conn),
+                    jobinpa_client_=_ClientFinto())
+    content = db_social.get_content(conn, content_id)
+    assert content["bandi_trovati"] is not None
+    import json
+    bandi = json.loads(content["bandi_trovati"])
+    assert bandi == [_BANDO_CON_LINK]
+
+
+def test_research_annuncio_funzionalita_persiste_lista_vuota(conn):
+    content_id = db_social.crea_content(
+        conn, "Premium gratis", brief="Il premium è gratis fino al 31 agosto")
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        annuncio_funzionalita=True, nessun_criterio_specifico=True))
+    agents.research(conn, content_id, provider=provider, jobinpa_client_=_ClientFinto())
+    content = db_social.get_content(conn, content_id)
+    assert content["bandi_trovati"] == "[]"
+
+
+# --- Link ai bandi nel testo (copywriting) -----------------------------------
+
+def test_copywriting_include_il_link_del_bando_nel_prompt(conn):
+    content_id = db_social.crea_content(conn, "Concorso con link")
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="Concorso di prova.", confidenza=0.9)],
+        sintesi="Sintesi.", bandi_trovati=[_BANDO_CON_LINK])
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_instagram = next(u for (_, u, schema) in provider.chiamate if "Instagram" in u)
+    prompt_linkedin = next(u for (_, u, schema) in provider.chiamate if "LinkedIn" in u)
+    assert _BANDO_CON_LINK["url_dettaglio"] in prompt_instagram
+    assert _BANDO_CON_LINK["url_dettaglio"] in prompt_linkedin
+
+
+def test_copywriting_senza_bandi_non_menziona_link(conn):
+    content_id = db_social.crea_content(conn, "Nessun bando")
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="Fatto generico.", confidenza=0.9)],
+        sintesi="Sintesi.", bandi_trovati=[])
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_instagram = next(u for (_, u, schema) in provider.chiamate if "Instagram" in u)
+    assert "Link ufficiali" not in prompt_instagram
+
+
+# --- Modifica manuale del testo in revisione (nessuna AI) --------------------
+
+def test_aggiorna_testo_variante_non_tocca_hashtag_e_cta(conn):
+    content_id = db_social.crea_content(conn, "Da correggere")
+    db_social.salva_variante(conn, content_id, "instagram", "testo originale",
+                             hashtags=["#Prova"], call_to_action="Scopri di più")
+    db_social.aggiorna_testo_variante(conn, content_id, "instagram", "testo corretto a mano")
+    variante = next(v for v in db_social.varianti_di(conn, content_id)
+                    if v["piattaforma"] == "instagram")
+    assert variante["testo"] == "testo corretto a mano"
+    import json
+    assert json.loads(variante["hashtags"]) == ["#Prova"]
+    assert variante["call_to_action"] == "Scopri di più"
+
+
+# --- Rigenerazione della sola immagine ---------------------------------------
+
+def _contenuto_con_pipeline_completa(conn):
+    content_id = db_social.crea_content(conn, "Concorso da rigenerare",
+                                        canali=["instagram", "linkedin"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = agents.research(conn, content_id, provider=provider,
+                                jobinpa_client_=_ClientFinto())
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    agents.visual(conn, content_id, risultato, provider=provider,
+                  image_provider=MockImageProvider())
+    return content_id
+
+
+def test_rigenera_visual_cancella_le_vecchie_immagini(conn):
+    content_id = _contenuto_con_pipeline_completa(conn)
+    percorsi_vecchi = [a["percorso"] for a in db_social.asset_di(conn, content_id)]
+    assert percorsi_vecchi
+
+    agents.rigenera_visual(conn, content_id, provider=llm.MockLLMProvider(conn),
+                           image_provider=MockImageProvider())
+
+    assert all(not Path(p).exists() for p in percorsi_vecchi)
+
+
+def test_rigenera_visual_crea_nuove_immagini_senza_rifare_la_ricerca(conn):
+    content_id = _contenuto_con_pipeline_completa(conn)
+
+    class _ClientCheNonDeveEssereChiamato:
+        configurato = True
+
+        def bandi(self, *_, **__):
+            raise AssertionError("rigenera_visual non deve rifare la ricerca")
+
+    agents.rigenera_visual(conn, content_id, provider=llm.MockLLMProvider(conn),
+                           image_provider=MockImageProvider())
+
+    nuovi_asset = db_social.asset_di(conn, content_id)
+    assert nuovi_asset
+    # il testo (variante) non e' toccato dalla rigenerazione immagine
+    variante = next(v for v in db_social.varianti_di(conn, content_id)
+                    if v["piattaforma"] == "instagram")
+    assert variante["testo"]
+
+
+def test_rigenera_visual_non_perde_il_carosello(conn):
+    """bandi_trovati e' persistito su research(): rigenera_visual deve poter
+    ricreare lo stesso carosello (un'immagine per bando), non ripiegare su
+    una singola immagine per mancanza di dati."""
+    tre_bandi = [dict(_BANDO_CON_LINK, id=f"CONC-{i}") for i in range(3)]
+    content_id = db_social.crea_content(conn, "Tre concorsi", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = agents.research(conn, content_id, provider=provider,
+                                jobinpa_client_=_ClientFinto(bandi=tre_bandi))
+    agents.visual(conn, content_id, risultato, provider=provider,
+                  image_provider=MockImageProvider())
+    assert len(db_social.asset_di(conn, content_id)) == 3
+
+    agents.rigenera_visual(conn, content_id, provider=llm.MockLLMProvider(conn),
+                           image_provider=MockImageProvider())
+    assert len(db_social.asset_di(conn, content_id)) == 3
+
+
+# --- Rotte web: modifica testo in revisione + rigenera immagine -------------
+
+@pytest.fixture
+def client(conn, tmp_db_path):
+    from fastapi.testclient import TestClient
+    from app import app as fastapi_app
+    from deps import ottieni_conn
+
+    def conn_test():
+        connessione = db_social.connect(tmp_db_path)
+        try:
+            yield connessione
+        finally:
+            connessione.close()
+
+    fastapi_app.dependency_overrides[ottieni_conn] = conn_test
+    with TestClient(fastapi_app) as client:
+        yield client
+    fastapi_app.dependency_overrides.clear()
+
+
+def _login(client, email, password="Password123!"):
+    client.post("/social/login", data={"email": email, "password": password})
+
+
+def _csrf(client, url="/social/contenuti/nuovo"):
+    # "/social/" mostra il form CSRF solo a chi ha social.publish (kill
+    # switch): usiamo "nuovo contenuto" perche' basta social.edit, che
+    # hanno sia editor che admin nei test qui sotto.
+    pagina = client.get(url).text
+    return re.search(r'name="csrf" value="([0-9a-f]+)"', pagina).group(1)
+
+
+def test_route_modifica_variante_aggiorna_solo_il_testo(conn, client):
+    db_social.crea_utente(conn, "revisore@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Contenuto da correggere")
+    db_social.salva_variante(conn, content_id, "instagram", "testo vecchio",
+                             hashtags=["#Prova"], call_to_action="CTA originale")
+    _login(client, "revisore@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "testo nuovo scritto a mano", "csrf": csrf},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    variante = next(v for v in db_social.varianti_di(conn, content_id)
+                    if v["piattaforma"] == "instagram")
+    assert variante["testo"] == "testo nuovo scritto a mano"
+    assert variante["call_to_action"] == "CTA originale"
+
+
+def test_route_modifica_variante_richiede_permesso_approve(conn, client):
+    db_social.crea_utente(conn, "editor-solo@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Contenuto")
+    db_social.salva_variante(conn, content_id, "instagram", "testo")
+    _login(client, "editor-solo@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "tentativo non autorizzato", "csrf": csrf},
+                    follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_route_modifica_variante_piattaforma_sconosciuta_404(conn, client):
+    db_social.crea_utente(conn, "revisore2@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Contenuto")
+    _login(client, "revisore2@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/approvazioni/{content_id}/variante/tiktok",
+                    data={"testo": "x", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_route_rigenera_immagine_mette_in_coda_il_job(conn, client):
+    db_social.crea_utente(conn, "editor-img@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Contenuto con immagine")
+    _login(client, "editor-img@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/contenuti/{content_id}/rigenera-immagine",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "rigenera_visual", content_id)
+
+
+def test_route_rigenera_immagine_contenuto_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "editor-img2@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "editor-img2@test.local")
+    csrf = _csrf(client)
+    r = client.post("/social/contenuti/non-esiste/rigenera-immagine",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404

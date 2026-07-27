@@ -16,6 +16,9 @@
 {% if in_corso %}
 <div class="avviso info">⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
 <script>setTimeout(function () { location.reload(); }, 4000);</script>
+{% elif rigenerazione_in_corso %}
+<div class="avviso info">⏳ <strong>Rigenerazione immagine in corso</strong> — il testo resta invariato. Questa pagina si aggiorna automaticamente.</div>
+<script>setTimeout(function () { location.reload(); }, 4000);</script>
 {% elif appena_in_coda %}
 <div class="avviso info">⏳ <strong>Pipeline in coda</strong> — un worker la prenderà in carico entro pochi secondi. Questa pagina si aggiorna automaticamente.</div>
 <script>setTimeout(function () { location.reload(); }, 3000);</script>
@@ -34,6 +37,13 @@
   <form method="post" action="/social/contenuti/{{ c.id }}/pubblica" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="btn verde" type="submit">Pubblica ora ({{ modalita }})</button>
+  </form>
+  {% endif %}
+  {% if 'social.edit' in permessi and assets and not in_corso and not rigenerazione_in_corso %}
+  <form method="post" action="/social/contenuti/{{ c.id }}/rigenera-immagine" class="inline"
+        onsubmit="return confirm('Rigenerare le immagini di questo contenuto? Il testo non cambia. Se le immagini AI sono abilitate, questa azione ha un costo.');">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn secondario" type="submit">🖼️ Rigenera immagine</button>
   </form>
   {% endif %}
   {% if approvazione %}
@@ -65,7 +75,7 @@
     {% if varianti.get(piattaforma) %}
       <p style="white-space:pre-wrap;font-size:13.5px">{{ varianti[piattaforma].testo }}</p>
       {% set tags = varianti[piattaforma].hashtags %}
-      {% if tags %}<p style="color:var(--colore-primario);font-size:13px">{{ tags }}</p>{% endif %}
+      {% if tags %}<p style="color:var(--colore-primario);font-size:13px">{{ tags|hashtags_testo }}</p>{% endif %}
       {% if varianti[piattaforma].call_to_action %}
       <p><em>{{ varianti[piattaforma].call_to_action }}</em></p>{% endif %}
     {% else %}

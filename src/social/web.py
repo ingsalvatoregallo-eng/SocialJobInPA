@@ -90,6 +90,24 @@ templates.env.filters["stato_account"] = lambda stato: STATO_ACCOUNT_LABEL.get(s
 templates.env.filters["stato_account_colore"] = lambda stato: STATO_ACCOUNT_COLORE.get(stato, "grigio")
 templates.env.globals["FASE_COLORE"] = FASE_COLORE
 
+
+def _hashtags_testo(valore):
+    """hashtags e' salvato come JSON TEXT (vedi db_social.salva_variante):
+    senza questo filtro il template mostrerebbe la stringa JSON grezza
+    invece di un elenco leggibile (bug visibile in produzione, segnalato
+    dall'utente)."""
+    if isinstance(valore, str):
+        try:
+            valore = json.loads(valore)
+        except json.JSONDecodeError:
+            return valore
+    if isinstance(valore, (list, tuple)):
+        return " ".join(str(v) for v in valore if v)
+    return valore or ""
+
+
+templates.env.filters["hashtags_testo"] = _hashtags_testo
+
 _COOKIE = "social_session"
 
 
@@ -493,6 +511,7 @@ def contenuto(request: Request, content_id: str, avviata: bool = False,
         in_corso=in_corso,
         appena_in_coda=(avviata and not in_corso and not content["errore"]
                         and content["stato"] in agents.STATI_PIPELINE_AVVIABILE),
+        rigenerazione_in_corso=db_social.job_in_corso(conn, "rigenera_visual", content_id),
         varianti={v["piattaforma"]: v for v in db_social.varianti_di(conn, content_id)},
         assets=db_social.asset_di(conn, content_id),
         fatti=db_social.fatti_di(conn, content_id),
@@ -507,6 +526,20 @@ def avvia_pipeline(request: Request, content_id: str, csrf: str = Form(None),
     _verifica_csrf(sessione, csrf)
     db_social.aggiorna_content(conn, content_id, errore=None)
     db_social.crea_job(conn, "pipeline", {"content_id": content_id})
+    return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
+
+
+@router.post("/contenuti/{content_id}/rigenera-immagine")
+def rigenera_immagine(request: Request, content_id: str, csrf: str = Form(None),
+                      sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Rigenera solo le immagini (non il testo gia' approvato/in revisione),
+    in coda come gli altri agenti: puo' costare una vera chiamata AI se le
+    immagini generate da OpenAI sono abilitate (vedi images.provider_immagini)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    if db_social.get_content(conn, content_id) is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    db_social.crea_job(conn, "rigenera_visual", {"content_id": content_id})
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
@@ -570,9 +603,27 @@ def approvazioni(request: Request, content_id: str = None,
             "punteggi": json.loads(content["punteggi_rischio"]) if content["punteggi_rischio"] else None,
             "varianti": {v["piattaforma"]: v for v in db_social.varianti_di(conn, selezionata["content_id"])},
             "fatti": db_social.fatti_di(conn, selezionata["content_id"]),
+            "bandi_trovati": json.loads(content["bandi_trovati"] or "[]"),
         }
     return templates.TemplateResponse(request, "approvazioni.html", _ctx(
         request, sessione, conn, approvazioni=coda, selezionata=selezionata, dettaglio=dettaglio))
+
+
+@router.post("/approvazioni/{content_id}/variante/{piattaforma}")
+def modifica_variante(request: Request, content_id: str, piattaforma: str,
+                      testo: str = Form(...), csrf: str = Form(None),
+                      sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Modifica manuale del testo da parte del revisore (es. per correggere
+    o aggiungere un link): salva subito, nessuna chiamata AI, nessun costo."""
+    _richiedi(conn, sessione, "social.approve")
+    _verifica_csrf(sessione, csrf)
+    if piattaforma not in db_social.PIATTAFORME:
+        raise HTTPException(status_code=404, detail=f"piattaforma sconosciuta: {piattaforma}")
+    db_social.aggiorna_testo_variante(conn, content_id, piattaforma, testo)
+    db_social.audit(conn, "variante_modificata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id,
+                    dettagli={"piattaforma": piattaforma})
+    return RedirectResponse(f"/social/approvazioni?content_id={content_id}", status_code=303)
 
 
 @router.post("/approvazioni/{approval_id}")

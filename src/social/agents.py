@@ -215,6 +215,7 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
                                       fonte_url=fatto.fonte_url, confidenza=fatto.confidenza,
                                       conflitto=fatto.in_conflitto,
                                       richiede_revisione=risultato.richiede_revisione)
+            db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
             return risultato
         criteri_specifici = not criteri.nessun_criterio_specifico
         if criteri_specifici:
@@ -252,6 +253,12 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     # in un carosello Instagram (vedi visual()), con dati sempre presi dal
     # database JobInPA invece che dall'interpretazione del modello.
     risultato.bandi_trovati = [b for b in righe_trovate if b]
+    # Persistito (non solo passato in memoria a copywriting()/visual()): una
+    # rigenerazione della sola immagine, piu' avanti nel tempo senza rifare
+    # la ricerca (vedi rigenera_visual), deve poter ricostruire il carosello.
+    db_social.aggiorna_content(
+        conn, content_id,
+        bandi_trovati=json.dumps(risultato.bandi_trovati, ensure_ascii=False))
     for fatto in risultato.fatti:
         db_social.salva_fatto(conn, fatto.fatto, content_id=content_id,
                               fonte_url=fatto.fonte_url, confidenza=fatto.confidenza,
@@ -269,6 +276,16 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None):
     base = (f"Tema: {content['titolo']}\nBrief: {content['brief'] or '(nessuno)'}\n"
             f"Fatti verificati (usa SOLO questi):\n{fatti}\n"
             f"Sintesi ricerca: {risultato_ricerca.sintesi}")
+    # Link ufficiali dei bandi realmente trovati (dati grezzi da JobInPA, non
+    # dall'interpretazione del modello): senza questo il testo rimandava solo
+    # genericamente a jobinpa.it, mai al bando specifico di cui si parla.
+    link_bandi = [(b.get("titolo") or b.get("id"), b.get("url_dettaglio"))
+                  for b in risultato_ricerca.bandi_trovati if b.get("url_dettaglio")]
+    if link_bandi:
+        righe_link = "\n".join(f"- {titolo}: {url}"
+                               for titolo, url in link_bandi[:images.MASSIMO_IMMAGINI_CAROSELLO])
+        base += (f"\nLink ufficiali ai bandi citati (includi quello pertinente nel testo, "
+                f"non limitarti a un generico rimando a jobinpa.it):\n{righe_link}")
     prompt_instagram = base + "\nScrivi la caption Instagram."
     n_bandi = len(risultato_ricerca.bandi_trovati)
     if n_bandi > 1:
@@ -378,6 +395,23 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                               piattaforma=piattaforma, template=asset.template,
                               formato=asset.formato, provider=asset.provider)
     return brief
+
+
+def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
+    """Rigenera SOLO le immagini di un contenuto gia' passato da research()/
+    copywriting() (in revisione o dopo), senza rifare la ricerca ne' il
+    testo: usa i fatti e i bandi_trovati gia' persistiti sul contenuto
+    (vedi research()) per ricostruire l'input minimo che visual() richiede.
+    Le vecchie immagini vengono cancellate prima (mai un mix di versioni
+    vecchie/nuove nella pagina di revisione)."""
+    content = db_social.get_content(conn, content_id)
+    fatti = [models.FattoVerificato(fatto=r["fatto"], fonte_url=r["fonte_url"],
+                                    confidenza=r["confidenza"], in_conflitto=bool(r["conflitto"]))
+             for r in db_social.fatti_di(conn, content_id)]
+    bandi_trovati = json.loads(content["bandi_trovati"] or "[]")
+    risultato = models.RisultatoRicerca(fatti=fatti, bandi_trovati=bandi_trovati)
+    db_social.elimina_asset_di(conn, content_id)
+    return visual(conn, content_id, risultato, provider=provider, image_provider=image_provider)
 
 
 # --- Quality & Risk Agent ----------------------------------------------------
