@@ -28,7 +28,12 @@ TRANSIZIONI = {
     "QUALITY_CHECK": {"BLOCKED", "AWAITING_APPROVAL", "APPROVED", "CANCELLED"},
     "BLOCKED": {"DRAFTING", "CANCELLED", "ARCHIVED"},
     "AWAITING_APPROVAL": {"APPROVED", "CHANGES_REQUESTED", "CANCELLED"},
-    "CHANGES_REQUESTED": {"DRAFTING", "AWAITING_APPROVAL", "CANCELLED"},
+    # RESEARCHING: senza, esegui_pipeline() non puo' mai ripartire da qui
+    # (STATI_PIPELINE_AVVIABILE lo elenca come punto di ripartenza valido,
+    # ma la prima transizione della pipeline e' sempre -> RESEARCHING —
+    # bug pre-esistente, mai innescato perche' nessun test rilanciava
+    # davvero la pipeline da CHANGES_REQUESTED prima d'ora).
+    "CHANGES_REQUESTED": {"RESEARCHING", "DRAFTING", "AWAITING_APPROVAL", "CANCELLED"},
     "APPROVED": {"SCHEDULED", "CANCELLED"},
     "SCHEDULED": {"PUBLISHING", "CANCELLED"},
     "PUBLISHING": {"PUBLISHED", "PARTIALLY_PUBLISHED", "PUBLISH_FAILED"},

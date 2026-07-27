@@ -163,6 +163,13 @@ def test_e2e_richiesta_modifiche_e_nuovo_giro(conn):
                                  motivo="Togliere la percentuale")
     assert db_social.get_content(conn, content_id)["stato"] == "CHANGES_REQUESTED"
 
+    # Riavviando la pipeline, la nota del revisore deve arrivare da sola ai
+    # prompt di research/copywriting (mai piu' bisogno di ritrascriverla).
+    agents.esegui_pipeline(conn, content_id, provider=provider,
+                           image_provider=MockImageProvider())
+    prompt_con_nota = [u for (_, u, _) in provider.chiamate if "Togliere la percentuale" in u]
+    assert len(prompt_con_nota) >= 2  # almeno research + copywriting (instagram/linkedin)
+
 
 def test_e2e_supervisor_genera_piano_settimanale(conn):
     """Il Supervisor crea SUGGERIMENTI (non contenuti): serve un Accetta

@@ -529,6 +529,26 @@ def avvia_pipeline(request: Request, content_id: str, csrf: str = Form(None),
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
+@router.post("/contenuti/{content_id}/brief")
+def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
+                   brief: str = Form(None), csrf: str = Form(None),
+                   sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Modifica il tema/brief PRIMA di rilanciare la pipeline (es. dopo una
+    richiesta di modifiche): salva subito, nessuna chiamata AI. Non riavvia
+    da sola la pipeline — il revisore decide quando farlo (bottone a parte)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    if content["stato"] not in agents.STATI_PIPELINE_AVVIABILE:
+        raise HTTPException(status_code=409,
+                            detail="Il brief si modifica solo prima di (ri)lanciare la pipeline")
+    db_social.aggiorna_content(conn, content_id, titolo=titolo.strip(),
+                               brief=(brief or "").strip() or None)
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+
+
 @router.post("/contenuti/{content_id}/rigenera-immagine")
 def rigenera_immagine(request: Request, content_id: str, csrf: str = Form(None),
                       sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
@@ -634,6 +654,10 @@ def decidi_approvazione(request: Request, approval_id: str,
     _richiedi(conn, sessione, "social.approve")
     _verifica_csrf(sessione, csrf)
     utente_id = sessione["utente"]["id"]
+    approval = conn.execute("SELECT * FROM social_approvals WHERE id = ?",
+                            (approval_id,)).fetchone()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="approvazione inesistente")
     try:
         if azione == "approva":
             approvals.approva(conn, approval_id, utente_id, motivo)
@@ -644,10 +668,17 @@ def decidi_approvazione(request: Request, approval_id: str,
                 raise HTTPException(status_code=422,
                                     detail="La richiesta di modifiche richiede un motivo")
             approvals.richiedi_modifiche(conn, approval_id, utente_id, motivo)
+            # Riparte da sola: la nota appena registrata viene recuperata
+            # automaticamente da esegui_pipeline (vedi agents.py), niente
+            # bisogno di ricliccare "Avvia pipeline" a mano.
+            db_social.crea_job(conn, "pipeline", {"content_id": approval["content_id"]})
         else:
             raise HTTPException(status_code=422, detail="azione sconosciuta")
     except ValueError as errore:
         raise HTTPException(status_code=404, detail=str(errore))
+    if azione == "modifiche":
+        return RedirectResponse(f"/social/contenuti/{approval['content_id']}?avviata=1",
+                                status_code=303)
     return RedirectResponse("/social/approvazioni", status_code=303)
 
 

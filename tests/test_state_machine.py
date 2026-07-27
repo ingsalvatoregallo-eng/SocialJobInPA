@@ -47,6 +47,24 @@ def test_archived_e_terminale(conn):
         state_machine.transisci(conn, content_id, "IDEA")
 
 
+def test_changes_requested_puo_ripartire_dalla_ricerca(conn):
+    """Bug reale: STATI_PIPELINE_AVVIABILE (agents.py) elenca CHANGES_REQUESTED
+    come punto di ripartenza valido per esegui_pipeline(), ma la prima
+    transizione della pipeline e' sempre -> RESEARCHING — senza questa
+    transizione consentita, rilanciare la pipeline dopo una richiesta di
+    modifiche falliva sempre con TransizioneNonValida."""
+    content_id = db_social.crea_content(conn, "Test")
+    state_machine.transisci(conn, content_id, "RESEARCHING")
+    state_machine.transisci(conn, content_id, "DRAFTING")
+    state_machine.transisci(conn, content_id, "DRAFT_READY")
+    state_machine.transisci(conn, content_id, "GENERATING_VISUAL")
+    state_machine.transisci(conn, content_id, "QUALITY_CHECK")
+    state_machine.transisci(conn, content_id, "AWAITING_APPROVAL")
+    state_machine.transisci(conn, content_id, "CHANGES_REQUESTED")
+    riga = state_machine.transisci(conn, content_id, "RESEARCHING")
+    assert riga["stato"] == "RESEARCHING"
+
+
 def test_tutte_le_transizioni_puntano_a_stati_noti():
     for da, destinazioni in state_machine.TRANSIZIONI.items():
         assert da in state_machine.STATI
