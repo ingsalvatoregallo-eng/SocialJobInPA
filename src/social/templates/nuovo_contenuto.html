@@ -15,6 +15,13 @@
     <label>Titolo / tema *</label>
     <input type="text" name="titolo" required placeholder="Es. Concorso Ministero X 100 posti amministrativi">
 
+    <label>Tipologia</label>
+    <select name="tipologia" id="campo-tipologia" onchange="document.getElementById('blocco-promozione').style.display = this.value === 'promozione' ? 'block' : 'none'">
+      <option value="concorso">Concorso — cerca bandi reali su JobInPA dal brief</option>
+      <option value="promozione">Promozione — offerta/piano JobInPA (usa il template immagine configurato in Impostazioni)</option>
+      <option value="generico">Generico/annuncio — post libero senza ricerca bandi</option>
+    </select>
+
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <label>Pillar</label>
@@ -35,12 +42,18 @@
       </div>
     </div>
 
+    <div id="blocco-promozione" style="display:none">
+      <label>Data scadenza promozione</label>
+      <input type="date" name="scadenza_promo">
+      <p class="hint">Titolo, sottotitolo, punti vantaggio e CTA li scrive l'AI copywriter a partire da nome e scadenza.</p>
+    </div>
+
     <label>Brief</label>
     <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
               placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
-    <p class="hint">Più il brief è specifico (regione, competenza, posti minimi...), più la ricerca sui bandi sarà mirata.</p>
+    <p class="hint">Più il brief è specifico (regione, competenza, posti minimi...), più la ricerca sui bandi sarà mirata. Per Promozione/Generico è un dettaglio facoltativo in più, non guida una ricerca bandi.</p>
     <div class="avviso giallo" style="margin-top:14px">
-      ⚠️ Se non viene trovato nessun bando reale che corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
+      ⚠️ Se scegli "Concorso" e non viene trovato nessun bando reale che corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
     </div>
 
     <div style="display:flex;gap:10px;margin-top:6px">

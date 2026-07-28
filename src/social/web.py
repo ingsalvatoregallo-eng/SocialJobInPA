@@ -531,7 +531,8 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(...),
                    pillar: str = Form(None), obiettivo: str = Form(None),
-                   brief: str = Form(None), csrf: str = Form(None),
+                   brief: str = Form(None), tipologia: str = Form("concorso"),
+                   scadenza_promo: str = Form(None), csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
     "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
@@ -540,9 +541,13 @@ def crea_contenuto(request: Request, titolo: str = Form(...),
     secondo momento dalla scheda del contenuto."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
+    if tipologia not in db_social.TIPOLOGIE_CONTENUTO:
+        raise HTTPException(status_code=400, detail="tipologia non valida")
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
                                         obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
+                                        tipologia=tipologia,
+                                        scadenza_promo=(scadenza_promo or "").strip() or None,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
@@ -1048,6 +1053,7 @@ def impostazioni(request: Request, sessione=Depends(utente_web),
         linkedin=LinkedInAdapter(conn).health_check(),
         fonti=db_social.source_domains(conn, solo_attivi=False),
         settings=settings, prompt_versioni=prompt_versioni,
+        prompt_templates_immagine=db_social.get_setting(conn, "prompt_templates_immagine", {}),
         utenti_social=utenti_social,
         publishing_env=config.publishing_enabled_env(),
         costo_anthropic=db_social.costo_periodo(conn, "anthropic"),
@@ -1090,6 +1096,23 @@ def imposta_revisori(request: Request, emails: str = Form(""), csrf: str = Form(
     db_social.set_setting(conn, "revisori_email", lista)
     db_social.audit(conn, "revisori_aggiornati", utente_id=sessione["utente"]["id"],
                     dettagli={"quanti": len(lista)})
+    return RedirectResponse("/social/impostazioni", status_code=303)
+
+
+@router.post("/impostazioni/prompt-template")
+def salva_prompt_template(request: Request, tipologia: str = Form(...),
+                          prompt: str = Form(...), csrf: str = Form(None),
+                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    if tipologia not in db_social.TIPOLOGIE_CONTENUTO:
+        raise HTTPException(status_code=400, detail="tipologia non valida")
+    modelli = dict(db_social.get_setting(conn, "prompt_templates_immagine", {}))
+    modelli[tipologia] = prompt.strip()
+    db_social.set_setting(conn, "prompt_templates_immagine", modelli)
+    db_social.audit(conn, "prompt_template_immagine_aggiornato",
+                    utente_id=sessione["utente"]["id"], oggetto_tipo="prompt_template",
+                    oggetto_id=tipologia)
     return RedirectResponse("/social/impostazioni", status_code=303)
 
 

@@ -94,6 +94,12 @@ PILLARS_SEED = (
 )
 
 PIATTAFORME = ("instagram", "linkedin")
+# concorso: ricerca bandi su JobInPA dal brief (comportamento storico).
+# promozione: niente ricerca bandi, prompt_ai dell'immagine preso dal
+# template configurabile in Impostazioni (vedi agents.research/visual).
+# generico: post libero, stesso comportamento dinamico di 'concorso' per
+# copy/immagine ma senza ricerca bandi (es. annunci di funzionalita').
+TIPOLOGIE_CONTENUTO = ("concorso", "promozione", "generico")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS utenti (
@@ -214,6 +220,8 @@ CREATE TABLE IF NOT EXISTS social_content (
     programmato_at TEXT,              -- ISO UTC di pubblicazione programmata
     concorso_id   TEXT,               -- riferimento facoltativo a bandi.id
     errore        TEXT,
+    tipologia     TEXT NOT NULL DEFAULT 'concorso',  -- concorso | promozione | generico
+    scadenza_promo TEXT,              -- data (YYYY-MM-DD), solo tipologia 'promozione'
     is_demo       INTEGER NOT NULL DEFAULT 0,
     creato_da     INTEGER,            -- utenti.id
     creato_at     TEXT NOT NULL,
@@ -436,6 +444,19 @@ SETTINGS_DEFAULT = {
     },
     "prezzo_immagine_ai_eur": 0.04,
     "retention_backup_giorni": 30,
+    "prompt_templates_immagine": {
+        # Solo il soggetto/l'illustrazione (vedi agents.visual): stile,
+        # palette e assenza di testo restano fissi lato codice come per
+        # ogni altra immagine (images._STILE_OPENAI_IMAGES).
+        "promozione": (
+            "Illustrazione 3D moderna ed elegante di un pacchetto regalo "
+            "nei colori del brand, accanto a un calendario stilizzato "
+            "(senza numeri ne' testo) che richiama una scadenza imminente. "
+            "Piccoli elementi decorativi coerenti: scintille, forme morbide, "
+            "onde leggere sullo sfondo. Composizione calda e promozionale. "
+            "Tema della promozione: {NOME_PROMO}."
+        ),
+    },
 }
 
 
@@ -491,6 +512,13 @@ def _migra(conn):
         # URL su storage pubblico (R2): Instagram richiede un image_url
         # raggiungibile da Internet, mai i byte diretti come LinkedIn.
         conn.execute("ALTER TABLE social_media_assets ADD COLUMN url_pubblico TEXT")
+        conn.commit()
+    if "tipologia" not in colonne_content:
+        conn.execute(
+            "ALTER TABLE social_content ADD COLUMN tipologia TEXT NOT NULL DEFAULT 'concorso'")
+        conn.commit()
+    if "scadenza_promo" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN scadenza_promo TEXT")
         conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
@@ -607,7 +635,10 @@ def audit_recenti(conn, limit=100):
 # --- Contenuti ---------------------------------------------------------------
 
 def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None, canali=None,
-                 concorso_id=None, creato_da=None, is_demo=False):
+                 concorso_id=None, creato_da=None, is_demo=False, tipologia="concorso",
+                 scadenza_promo=None):
+    if tipologia not in TIPOLOGIE_CONTENUTO:
+        raise ValueError(f"tipologia non valida: {tipologia}")
     pillar_id = None
     if pillar_chiave:
         riga = conn.execute(
@@ -617,7 +648,8 @@ def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None
     _insert(conn, "social_content", {
         "id": content_id, "titolo": titolo, "pillar_id": pillar_id, "obiettivo": obiettivo,
         "brief": brief, "stato": "IDEA", "canali": json.dumps(canali or list(PIATTAFORME)),
-        "concorso_id": concorso_id, "creato_da": creato_da,
+        "concorso_id": concorso_id, "creato_da": creato_da, "tipologia": tipologia,
+        "scadenza_promo": scadenza_promo,
         "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()
     return content_id

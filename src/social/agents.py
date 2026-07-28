@@ -195,6 +195,27 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     non annulla mai, anche se la ricerca semantica non trova nulla: non
     c'era una richiesta precisa da soddisfare."""
     content = db_social.get_content(conn, content_id)
+    if content["tipologia"] == "promozione":
+        # Nessun bando da cercare: il fatto e' la promozione stessa (nome +
+        # scadenza, dati inseriti dall'utente alla creazione). Stesso motivo
+        # di annuncio_funzionalita per forzare la revisione umana in
+        # esegui_pipeline: un claim commerciale ("gratis fino al...") non ha
+        # una fonte esterna verificabile come un bando su JobInPA.
+        scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"])
+        fatto = f"Promozione \"{content['titolo']}\""
+        if scadenza_leggibile:
+            fatto += f", valida fino al {scadenza_leggibile}"
+        if content["brief"]:
+            fatto += f". Dettagli: {content['brief']}"
+        risultato = models.RisultatoRicerca(
+            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0)],
+            sintesi=fatto, richiede_revisione=True, annuncio_funzionalita=True)
+        for f in risultato.fatti:
+            db_social.salva_fatto(conn, f.fatto, content_id=content_id,
+                                  confidenza=f.confidenza,
+                                  richiede_revisione=risultato.richiede_revisione)
+        db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
+        return risultato
     client = jobinpa_client_ or jobinpa_client.client()
     filtri = None
     query_semantica = None
@@ -385,6 +406,17 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                      content_id=content_id, provider=provider)
     if brief.template not in images.TEMPLATE_VALIDI:
         brief.template = "presentazione"
+    if content["tipologia"] == "promozione":
+        # Il "soggetto" dell'illustrazione non e' lasciato all'AI (rischio
+        # di uno stile incoerente da un post all'altro): viene dal template
+        # configurabile in Impostazioni, con solo il nome della promo come
+        # dato variabile (niente testo/numeri richiesti all'AI, vedi
+        # prompt_templates_immagine in db_social.SETTINGS_DEFAULT).
+        modello = db_social.get_setting(conn, "prompt_templates_immagine", {}).get("promozione")
+        if modello:
+            scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
+            brief.prompt_ai = modello.replace("{NOME_PROMO}", content["titolo"]).replace(
+                "{DATA_SCADENZA}", scadenza_leggibile)
     image_provider = image_provider or images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")
     bandi_carosello = risultato_ricerca.bandi_trovati[:images.MASSIMO_IMMAGINI_CAROSELLO]
