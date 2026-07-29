@@ -257,13 +257,14 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
 -- Categorie personalizzate di prompt immagine (menu "Categorie"): ogni
 -- categoria descrive SOLO il soggetto/l'illustrazione (stile e palette
 -- restano fissi in codice, vedi images._STILE_OPENAI_IMAGES) e puo'
--- opzionalmente avere un'immagine di riferimento che guida davvero
--- OpenAI (endpoint /v1/images/edits invece di /v1/images/generations).
+-- opzionalmente avere una o piu' immagini di riferimento che guidano
+-- davvero OpenAI (endpoint /v1/images/edits, che accetta piu' immagini
+-- nella stessa richiesta, invece di /v1/images/generations).
 CREATE TABLE IF NOT EXISTS social_content_categories (
     id                      TEXT PRIMARY KEY,
     nome                    TEXT NOT NULL UNIQUE,
     prompt_ai               TEXT NOT NULL,
-    immagine_riferimento_path TEXT,
+    immagini_riferimento    TEXT,  -- JSON lista di percorsi locali, [] o NULL se nessuna
     creato_at               TEXT NOT NULL,
     aggiornato_at           TEXT
 );
@@ -542,6 +543,23 @@ def _migra(conn):
     if "categoria_id" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN categoria_id TEXT")
         conn.commit()
+    colonne_categorie = {r["name"] for r in conn.execute("PRAGMA table_info(social_content_categories)")}
+    if "immagini_riferimento" not in colonne_categorie:
+        # Prima si supportava una sola immagine di riferimento
+        # (immagine_riferimento_path): l'endpoint /v1/images/edits accetta
+        # piu' immagini nella stessa richiesta, quindi si passa a una
+        # lista JSON — le categorie gia' create con una singola immagine
+        # la mantengono come lista di un elemento.
+        conn.execute("ALTER TABLE social_content_categories ADD COLUMN immagini_riferimento TEXT")
+        conn.commit()
+        if "immagine_riferimento_path" in colonne_categorie:
+            for riga in conn.execute(
+                    "SELECT id, immagine_riferimento_path FROM social_content_categories "
+                    "WHERE immagine_riferimento_path IS NOT NULL"):
+                conn.execute(
+                    "UPDATE social_content_categories SET immagini_riferimento = ? WHERE id = ?",
+                    (json.dumps([riga["immagine_riferimento_path"]]), riga["id"]))
+            conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -762,38 +780,47 @@ def elimina_content(conn, content_id, *, utente_id=None):
     return True
 
 
-# --- Categorie personalizzate (prompt + immagine di riferimento) -------------
+# --- Categorie personalizzate (prompt + immagini di riferimento) ------------
 
-def crea_categoria(conn, nome, prompt_ai, *, immagine_riferimento_path=None):
-    """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE)."""
+def _parse_categoria(riga):
+    d = dict(riga)
+    d["immagini_riferimento"] = json.loads(d["immagini_riferimento"]) if d.get("immagini_riferimento") else []
+    return d
+
+
+def crea_categoria(conn, nome, prompt_ai, *, immagini_riferimento=None):
+    """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE).
+    immagini_riferimento: lista di percorsi locali (0 o piu' immagini),
+    passate insieme a OpenAI /v1/images/edits (vedi images.py)."""
     categoria_id = _nuovo_id()
     _insert(conn, "social_content_categories", {
         "id": categoria_id, "nome": nome.strip(), "prompt_ai": prompt_ai.strip(),
-        "immagine_riferimento_path": immagine_riferimento_path, "creato_at": _adesso()})
+        "immagini_riferimento": json.dumps(immagini_riferimento) if immagini_riferimento else None,
+        "creato_at": _adesso()})
     conn.commit()
     return categoria_id
 
 
 def lista_categorie(conn):
-    return conn.execute(
-        "SELECT * FROM social_content_categories ORDER BY nome").fetchall()
+    righe = conn.execute("SELECT * FROM social_content_categories ORDER BY nome").fetchall()
+    return [_parse_categoria(r) for r in righe]
 
 
 def get_categoria(conn, categoria_id):
     riga = conn.execute(
         "SELECT * FROM social_content_categories WHERE id = ?", (categoria_id,)).fetchone()
-    return dict(riga) if riga is not None else None
+    return _parse_categoria(riga) if riga is not None else None
 
 
-def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagine_riferimento_path=None):
-    """immagine_riferimento_path: passare esplicitamente None lascia il
-    valore esistente invariato (non lo cancella) — per rimuovere davvero
-    l'immagine si passa la stringa vuota "" (vedi web.py)."""
+def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimento=None):
+    """immagini_riferimento: passare esplicitamente None lascia la lista
+    esistente invariata — per svuotarla davvero si passa una lista vuota
+    [] (vedi web.py)."""
     campi = {}
     if prompt_ai is not None:
         campi["prompt_ai"] = prompt_ai.strip()
-    if immagine_riferimento_path is not None:
-        campi["immagine_riferimento_path"] = immagine_riferimento_path or None
+    if immagini_riferimento is not None:
+        campi["immagini_riferimento"] = json.dumps(immagini_riferimento) if immagini_riferimento else None
     if not campi:
         return
     campi["aggiornato_at"] = _adesso()

@@ -1,10 +1,11 @@
 """Categorie personalizzate (menu Categorie, richiesto dall'utente): un
-prompt immagine — e opzionalmente un'immagine di riferimento che guida
-davvero OpenAI (/v1/images/edits) — configurabile per QUALSIASI tipologia
-di contenuto, non solo 'promozione' come nella prima versione. La
-categoria 'Promozione' e' seminata di default (vedi db_social._migra) e
-scelta automaticamente per la tipologia 'promozione' quando non se ne
-sceglie esplicitamente un'altra."""
+prompt immagine — e opzionalmente una o piu' immagini di riferimento che
+guidano davvero OpenAI (/v1/images/edits, che accetta piu' immagini nella
+stessa richiesta) — configurabile per QUALSIASI tipologia di contenuto,
+non solo 'promozione' come nella prima versione. La categoria
+'Promozione' e' seminata di default (vedi db_social._migra) e scelta
+automaticamente per la tipologia 'promozione' quando non se ne sceglie
+esplicitamente un'altra."""
 
 import re
 
@@ -13,6 +14,10 @@ import pytest
 
 from social import agents, db_social, llm, models
 from social.images import MockImageProvider
+
+_PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
 
 
 # --- db_social: CRUD -----------------------------------------------------
@@ -30,7 +35,19 @@ def test_crea_categoria_e_recupera(conn):
     categoria = db_social.get_categoria(conn, categoria_id)
     assert categoria["nome"] == "Guida rapida"
     assert categoria["prompt_ai"] == "Illustrazione di {TITOLO}"
-    assert categoria["immagine_riferimento_path"] is None
+    assert categoria["immagini_riferimento"] == []
+
+
+def test_crea_categoria_con_piu_immagini_di_riferimento(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con piu' immagini", "prompt", immagini_riferimento=["/a.png", "/b.png"])
+    assert db_social.get_categoria(conn, categoria_id)["immagini_riferimento"] == ["/a.png", "/b.png"]
+
+
+def test_lista_categorie_ritorna_liste_parsate(conn):
+    db_social.crea_categoria(conn, "Con immagini", "prompt", immagini_riferimento=["/a.png"])
+    categoria = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Con immagini")
+    assert categoria["immagini_riferimento"] == ["/a.png"]
 
 
 def test_crea_categoria_nome_duplicato_solleva_errore(conn):
@@ -53,6 +70,20 @@ def test_aggiorna_categoria_prompt(conn):
     categoria_id = db_social.crea_categoria(conn, "Guida rapida", "vecchio prompt")
     db_social.aggiorna_categoria(conn, categoria_id, prompt_ai="nuovo prompt")
     assert db_social.get_categoria(conn, categoria_id)["prompt_ai"] == "nuovo prompt"
+
+
+def test_aggiorna_categoria_immagini_none_non_le_tocca(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con immagini", "prompt", immagini_riferimento=["/a.png"])
+    db_social.aggiorna_categoria(conn, categoria_id, prompt_ai="nuovo prompt")
+    assert db_social.get_categoria(conn, categoria_id)["immagini_riferimento"] == ["/a.png"]
+
+
+def test_aggiorna_categoria_immagini_lista_vuota_le_svuota(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con immagini", "prompt", immagini_riferimento=["/a.png"])
+    db_social.aggiorna_categoria(conn, categoria_id, immagini_riferimento=[])
+    assert db_social.get_categoria(conn, categoria_id)["immagini_riferimento"] == []
 
 
 # --- agents.visual: integrazione categoria -------------------------------
@@ -113,18 +144,18 @@ def test_visual_concorso_senza_categoria_non_viene_toccato(conn):
     assert catturate[0].prompt_ai is None
 
 
-def test_visual_passa_immagine_di_riferimento_alla_richiesta(conn):
+def test_visual_passa_piu_immagini_di_riferimento_alla_richiesta(conn):
     categoria_id = db_social.crea_categoria(
         conn, "Con riferimento", "prompt qualsiasi",
-        immagine_riferimento_path="/percorso/finto/esempio.png")
+        immagini_riferimento=["/percorso/finto/uno.png", "/percorso/finto/due.png"])
     catturate = _content_con_richiesta_catturata(
         conn, titolo="Tema", tipologia="generico", categoria_id=categoria_id)
-    assert catturate[0].immagine_riferimento == "/percorso/finto/esempio.png"
+    assert catturate[0].immagini_riferimento == ["/percorso/finto/uno.png", "/percorso/finto/due.png"]
 
 
-def test_visual_senza_categoria_non_passa_immagine_di_riferimento(conn):
+def test_visual_senza_categoria_non_passa_immagini_di_riferimento(conn):
     catturate = _content_con_richiesta_catturata(conn, titolo="Tema")
-    assert catturate[0].immagine_riferimento is None
+    assert catturate[0].immagini_riferimento == []
 
 
 # --- web: rotte CRUD -------------------------------------------------------
@@ -180,30 +211,30 @@ def test_crea_categoria_via_web(conn, client):
     assert "Categoria via web" in nomi
 
 
-def test_crea_categoria_con_immagine_di_riferimento_via_web(conn, client):
-    """L'immagine caricata deve essere salvata su disco e collegata alla
-    categoria, poi servita da /social/categorie/{id}/immagine (stesso
-    pattern di autenticazione di /social/asset/{id})."""
+def test_crea_categoria_con_piu_immagini_di_riferimento_via_web(conn, client):
+    """Piu' file caricati insieme (stesso campo "immagini", multiple):
+    devono essere salvati tutti e serviti singolarmente per indice."""
     db_social.crea_utente(conn, "admin-cat5@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     _login(client, "admin-cat5@test.local")
     csrf = _csrf(client)
-    png_1x1 = bytes.fromhex(
-        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
-        "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
 
     r = client.post("/social/categorie",
-                    data={"nome": "Con immagine", "prompt_ai": "x", "csrf": csrf},
-                    files={"immagine": ("riferimento.png", png_1x1, "image/png")},
+                    data={"nome": "Con immagini", "prompt_ai": "x", "csrf": csrf},
+                    files=[("immagini", ("uno.png", _PNG_1X1, "image/png")),
+                          ("immagini", ("due.png", _PNG_1X1 + b"\x00extra", "image/png"))],
                     follow_redirects=False)
 
     assert r.status_code == 303
-    categoria = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Con immagine")
-    assert categoria["immagine_riferimento_path"]
+    categoria = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Con immagini")
+    assert len(categoria["immagini_riferimento"]) == 2
 
-    risposta_immagine = client.get(f"/social/categorie/{categoria['id']}/immagine")
-    assert risposta_immagine.status_code == 200
-    assert risposta_immagine.content == png_1x1
+    risposta_0 = client.get(f"/social/categorie/{categoria['id']}/immagine/0")
+    risposta_1 = client.get(f"/social/categorie/{categoria['id']}/immagine/1")
+    assert risposta_0.status_code == 200
+    assert risposta_1.status_code == 200
+    assert risposta_0.content == _PNG_1X1
+    assert risposta_1.content == _PNG_1X1 + b"\x00extra"
 
 
 def test_aggiorna_categoria_via_web_cambia_il_prompt(conn, client):
@@ -221,49 +252,44 @@ def test_aggiorna_categoria_via_web_cambia_il_prompt(conn, client):
     assert db_social.get_categoria(conn, categoria_id)["prompt_ai"] == "nuovo prompt per {TITOLO}"
 
 
-def test_aggiorna_categoria_sostituisce_immagine_di_riferimento(conn, client):
+def test_aggiorna_categoria_aggiunge_nuove_immagini_mantenendo_le_vecchie(conn, client):
     db_social.crea_utente(conn, "admin-cat7@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     _login(client, "admin-cat7@test.local")
     csrf = _csrf(client)
-    png_1 = bytes.fromhex(
-        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
-        "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
-    png_2 = png_1 + b"\x00seconda-immagine-diversa"  # basta che sia byte diversi da png_1
     categoria_id = db_social.crea_categoria(conn, "Con vecchia immagine", "x")
     client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
-                files={"immagine": ("prima.png", png_1, "image/png")})
-    vecchio_percorso = db_social.get_categoria(conn, categoria_id)["immagine_riferimento_path"]
+                files={"immagini_nuove": ("prima.png", _PNG_1X1, "image/png")})
 
     r = client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
-                    files={"immagine": ("seconda.png", png_2, "image/png")},
+                    files={"immagini_nuove": ("seconda.png", _PNG_1X1 + b"\x00extra", "image/png")},
                     follow_redirects=False)
 
     assert r.status_code == 303
-    from pathlib import Path
-    assert not Path(vecchio_percorso).exists()
-    risposta = client.get(f"/social/categorie/{categoria_id}/immagine")
-    assert risposta.content == png_2
+    assert len(db_social.get_categoria(conn, categoria_id)["immagini_riferimento"]) == 2
 
 
-def test_aggiorna_categoria_rimuove_immagine_di_riferimento(conn, client):
+def test_aggiorna_categoria_rimuove_una_singola_immagine(conn, client):
+    """Puo' rimuovere solo una delle immagini, mantenendo le altre —
+    l'utente deve poter comporre/scomporre gli elementi grafici separati."""
     db_social.crea_utente(conn, "admin-cat8@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     _login(client, "admin-cat8@test.local")
     csrf = _csrf(client)
-    png_1x1 = bytes.fromhex(
-        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
-        "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
     categoria_id = db_social.crea_categoria(conn, "Da spogliare", "x")
     client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
-                files={"immagine": ("prima.png", png_1x1, "image/png")})
+                files=[("immagini_nuove", ("prima.png", _PNG_1X1, "image/png")),
+                      ("immagini_nuove", ("seconda.png", _PNG_1X1 + b"\x00extra", "image/png"))])
+    percorso_da_rimuovere = db_social.get_categoria(conn, categoria_id)["immagini_riferimento"][0]
 
     r = client.post(f"/social/categorie/{categoria_id}",
-                    data={"prompt_ai": "x", "rimuovi_immagine": "1", "csrf": csrf},
+                    data={"prompt_ai": "x", "rimuovi_immagini": percorso_da_rimuovere, "csrf": csrf},
                     follow_redirects=False)
 
     assert r.status_code == 303
-    assert db_social.get_categoria(conn, categoria_id)["immagine_riferimento_path"] is None
+    from pathlib import Path
+    assert not Path(percorso_da_rimuovere).exists()
+    assert len(db_social.get_categoria(conn, categoria_id)["immagini_riferimento"]) == 1
 
 
 def test_aggiorna_categoria_inesistente_404(conn, client):
@@ -327,13 +353,13 @@ def test_elimina_categoria_via_web(conn, client):
     assert db_social.get_categoria(conn, categoria_id) is None
 
 
-def test_immagine_categoria_404_se_assente(conn, client):
+def test_immagine_categoria_404_se_indice_fuori_range(conn, client):
     db_social.crea_utente(conn, "admin-cat4@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     _login(client, "admin-cat4@test.local")
     categoria_id = db_social.crea_categoria(conn, "Senza immagine", "x")
 
-    r = client.get(f"/social/categorie/{categoria_id}/immagine")
+    r = client.get(f"/social/categorie/{categoria_id}/immagine/0")
     assert r.status_code == 404
 
 

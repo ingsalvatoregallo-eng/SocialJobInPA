@@ -430,8 +430,7 @@ def _categoria_per_content(conn, content):
     if content["categoria_id"]:
         return db_social.get_categoria(conn, content["categoria_id"])
     if content["tipologia"] == "promozione":
-        riga = next((c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione"), None)
-        return dict(riga) if riga is not None else None
+        return next((c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione"), None)
     return None
 
 
@@ -449,18 +448,18 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
     if brief.template not in images.TEMPLATE_VALIDI:
         brief.template = "presentazione"
     categoria = _categoria_per_content(conn, content)
-    immagine_riferimento = None
+    immagini_riferimento = []
     if categoria:
         # Il "soggetto" dell'illustrazione non e' lasciato all'AI (rischio
         # di uno stile incoerente da un post all'altro): viene dalla
         # categoria scelta (menu Categorie), con titolo/scadenza come
         # unici dati variabili (niente testo/numeri richiesti all'AI). Se
-        # la categoria ha un'immagine di riferimento, guida davvero la
+        # la categoria ha immagini di riferimento, guidano davvero la
         # generazione (endpoint /v1/images/edits, vedi images.py).
         scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
         brief.prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", content["titolo"]).replace(
             "{SCADENZA}", scadenza_leggibile)
-        immagine_riferimento = categoria.get("immagine_riferimento_path")
+        immagini_riferimento = categoria["immagini_riferimento"]
     image_provider = image_provider or images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")
     bandi_carosello = risultato_ricerca.bandi_trovati[:images.MASSIMO_IMMAGINI_CAROSELLO]
@@ -483,7 +482,7 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             template=brief.template, formato=formato, titolo=brief.titolo,
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
             prompt_ai=brief.prompt_ai, content_id=content_id,
-            immagine_riferimento=immagine_riferimento)
+            immagini_riferimento=immagini_riferimento)
         asset = asyncio.run(image_provider.generate(richiesta))
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,

@@ -4,11 +4,11 @@
 <div class="header-pagina">
   <div>
     <h1>Categorie</h1>
-    <p class="sottotitolo">Template di prompt (e, opzionalmente, un'immagine di riferimento) per l'illustrazione AI di ogni tipo di post.</p>
+    <p class="sottotitolo">Template di prompt (e, opzionalmente, una o più immagini di riferimento) per l'illustrazione AI di ogni tipo di post.</p>
   </div>
 </div>
 
-<div class="avviso info">ℹ️ Ogni categoria descrive SOLO il soggetto/l'illustrazione: stile, palette e assenza di testo/numeri restano fissi per tutte le immagini. Placeholder disponibili nel prompt: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>. Con un'immagine di riferimento, l'AI la usa davvero come guida di stile (non solo come nota testuale).</div>
+<div class="avviso info">ℹ️ Ogni categoria descrive SOLO il soggetto/l'illustrazione: stile, palette e assenza di testo/numeri restano fissi per tutte le immagini. Placeholder disponibili nel prompt: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>. Con una o più immagini di riferimento (es. gli elementi grafici separati: pacchetto, calendario, scintille...), l'AI le usa davvero come guida di stile nella stessa richiesta (non solo come nota testuale).</div>
 
 <div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
   <div class="card">
@@ -16,9 +16,11 @@
     {% for c in categorie %}
     <div style="border-top:1px solid var(--colore-bordo);padding:14px 0">
       <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
-        <div style="display:flex;gap:10px;align-items:start">
-          {% if c.immagine_riferimento_path %}<img src="/social/categorie/{{ c.id }}/immagine" alt="riferimento {{ c.nome }}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">{% endif %}
-          <strong style="font-size:14px">{{ c.nome }}</strong>
+        <div style="display:flex;gap:6px;align-items:start;flex-wrap:wrap">
+          {% for _ in c.immagini_riferimento %}
+          <img src="/social/categorie/{{ c.id }}/immagine/{{ loop.index0 }}" alt="riferimento {{ c.nome }} {{ loop.index }}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">
+          {% endfor %}
+          <strong style="font-size:14px;align-self:center">{{ c.nome }}</strong>
         </div>
         <div style="display:flex;gap:8px;white-space:nowrap">
           <button type="button" class="btn piccolo secondario" onclick="mostraModificaCategoria('{{ c.id }}')">✏️ Modifica</button>
@@ -39,14 +41,21 @@
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <label>Prompt immagine</label>
           <textarea name="prompt_ai" rows="6" required maxlength="2000">{{ c.prompt_ai }}</textarea>
-          <label>Nuova immagine di riferimento (opzionale)</label>
-          <input type="file" name="immagine" accept="image/png,image/jpeg">
-          {% if c.immagine_riferimento_path %}
-          <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:6px">
-            <input type="checkbox" name="rimuovi_immagine" value="1" style="width:auto">
-            Rimuovi l'immagine di riferimento attuale
-          </label>
+
+          {% if c.immagini_riferimento %}
+          <label>Immagini di riferimento attuali</label>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+            {% for percorso in c.immagini_riferimento %}
+            <label style="display:flex;flex-direction:column;align-items:center;gap:4px;font-weight:400;font-size:11px">
+              <img src="/social/categorie/{{ c.id }}/immagine/{{ loop.index0 }}" alt="riferimento {{ loop.index }}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">
+              <span style="display:flex;align-items:center;gap:4px"><input type="checkbox" name="rimuovi_immagini" value="{{ percorso }}" style="width:auto">Rimuovi</span>
+            </label>
+            {% endfor %}
+          </div>
           {% endif %}
+
+          <label>Aggiungi nuove immagini di riferimento (opzionale)</label>
+          <input type="file" name="immagini_nuove" accept="image/png,image/jpeg" multiple>
           <div style="display:flex;gap:10px;margin-top:10px">
             <button type="button" class="btn piccolo secondario" onclick="nascondiModificaCategoria('{{ c.id }}')">Annulla</button>
             <button class="btn piccolo" type="submit" style="margin-left:auto">💾 Salva</button>
@@ -68,9 +77,9 @@
       <label>Prompt immagine *</label>
       <textarea name="prompt_ai" rows="6" required maxlength="2000"
                 placeholder="Descrivi SOLO il soggetto/l'illustrazione, es. 'Illustrazione 3D di ... Tema: {TITOLO}.'"></textarea>
-      <label>Immagine di riferimento (opzionale)</label>
-      <input type="file" name="immagine" accept="image/png,image/jpeg">
-      <p class="hint">Se presente, guida davvero la generazione (OpenAI la usa come riferimento di stile).</p>
+      <label>Immagini di riferimento (opzionale, anche più di una)</label>
+      <input type="file" name="immagini" accept="image/png,image/jpeg" multiple>
+      <p class="hint">Se presenti, guidano davvero la generazione (OpenAI le usa come riferimento di stile nella stessa richiesta) — utile per combinare più elementi grafici separati.</p>
       <button class="btn piccolo" type="submit" style="margin-top:10px">Crea categoria</button>
     </form>
   </div>

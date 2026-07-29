@@ -82,7 +82,7 @@ class ImageGenerationRequest:
     prompt_ai: Optional[str] = None  # usato solo da OpenAIImageProvider
     palette: dict = field(default_factory=dict)
     content_id: Optional[str] = None
-    immagine_riferimento: Optional[str] = None  # percorso locale, guida /v1/images/edits
+    immagini_riferimento: list = field(default_factory=list)  # percorsi locali, guidano /v1/images/edits
 
 
 @dataclass
@@ -547,7 +547,7 @@ class OpenAIImageProvider:
         taglia = _taglia_openai_per_formato(request.formato)
         sfondo_bytes = await asyncio.to_thread(
             self._chiama_api, request.prompt_ai or request.titolo, taglia,
-            request.immagine_riferimento)
+            request.immagini_riferimento)
         db_social.registra_costo(self.conn, "openai_images", prezzo,
                                  modello=config.openai_image_model(),
                                  content_id=request.content_id)
@@ -577,24 +577,30 @@ class OpenAIImageProvider:
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 
-    def _chiama_api(self, prompt, taglia, immagine_riferimento=None):
+    def _chiama_api(self, prompt, taglia, immagini_riferimento=None):
         import base64
         import requests
         prompt_completo = _STILE_OPENAI_IMAGES + prompt
-        if immagine_riferimento and Path(immagine_riferimento).is_file():
-            # /v1/images/edits: l'immagine di riferimento (categoria
-            # personalizzata, vedi social_content_categories) guida
-            # davvero lo stile generato, non e' solo una nota testuale —
-            # multipart, non JSON.
-            with open(immagine_riferimento, "rb") as file_immagine:
+        percorsi_validi = [p for p in (immagini_riferimento or []) if p and Path(p).is_file()]
+        if percorsi_validi:
+            # /v1/images/edits: le immagini di riferimento (categoria
+            # personalizzata, vedi social_content_categories) guidano
+            # davvero lo stile generato, non sono solo una nota testuale —
+            # multipart, non JSON. Piu' file sotto la stessa chiave
+            # "image[]" (gpt-image-1 accetta piu' immagini in una richiesta).
+            file_aperti = [open(p, "rb") for p in percorsi_validi]
+            try:
+                files = [("image[]", (Path(p).name, f, "image/png"))
+                        for p, f in zip(percorsi_validi, file_aperti)]
                 risposta = requests.post(
                     "https://api.openai.com/v1/images/edits",
                     headers={"Authorization": f"Bearer {config.openai_api_key()}"},
                     data={"model": config.openai_image_model(), "prompt": prompt_completo,
                           "n": 1, "size": taglia},
-                    files={"image": (Path(immagine_riferimento).name, file_immagine,
-                                     "image/png")},
-                    timeout=120)
+                    files=files, timeout=120)
+            finally:
+                for f in file_aperti:
+                    f.close()
         else:
             risposta = requests.post(
                 "https://api.openai.com/v1/images/generations",

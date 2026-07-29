@@ -1063,7 +1063,7 @@ def instagram_token_manuale(request: Request, token: str = Form(...), csrf: str 
     return RedirectResponse("/social/impostazioni", status_code=303)
 
 
-# --- Categorie (prompt + immagine di riferimento) ---------------------------
+# --- Categorie (prompt + immagini di riferimento) ---------------------------
 
 def _cartella_categorie():
     cartella = config.asset_storage_path() / "categorie"
@@ -1079,21 +1079,23 @@ def categorie(request: Request, sessione=Depends(utente_web), conn=Depends(ottie
         categorie=db_social.lista_categorie(conn)))
 
 
+async def _salva_immagine_categoria(file: UploadFile) -> str:
+    estensione = Path(file.filename).suffix or ".png"
+    percorso = _cartella_categorie() / f"{uuid.uuid4().hex}{estensione}"
+    percorso.write_bytes(await file.read())
+    return str(percorso)
+
+
 @router.post("/categorie")
 async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str = Form(...),
-                         immagine: UploadFile = File(None), csrf: str = Form(None),
+                         immagini: Optional[list[UploadFile]] = File(None), csrf: str = Form(None),
                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
     _verifica_csrf(sessione, csrf)
-    percorso_immagine = None
-    if immagine is not None and immagine.filename:
-        estensione = Path(immagine.filename).suffix or ".png"
-        percorso = _cartella_categorie() / f"{uuid.uuid4().hex}{estensione}"
-        percorso.write_bytes(await immagine.read())
-        percorso_immagine = str(percorso)
+    percorsi = [await _salva_immagine_categoria(f) for f in (immagini or []) if f and f.filename]
     try:
         categoria_id = db_social.crea_categoria(
-            conn, nome.strip(), prompt_ai, immagine_riferimento_path=percorso_immagine)
+            conn, nome.strip(), prompt_ai, immagini_riferimento=percorsi)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Esiste già una categoria con questo nome")
     db_social.audit(conn, "categoria_creata", utente_id=sessione["utente"]["id"],
@@ -1103,7 +1105,8 @@ async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str
 
 @router.post("/categorie/{categoria_id}")
 async def aggiorna_categoria(request: Request, categoria_id: str, prompt_ai: str = Form(...),
-                             immagine: UploadFile = File(None), rimuovi_immagine: str = Form(None),
+                             immagini_nuove: Optional[list[UploadFile]] = File(None),
+                             rimuovi_immagini: Optional[list[str]] = Form(None),
                              csrf: str = Form(None),
                              sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
@@ -1111,19 +1114,16 @@ async def aggiorna_categoria(request: Request, categoria_id: str, prompt_ai: str
     categoria = db_social.get_categoria(conn, categoria_id)
     if categoria is None:
         raise HTTPException(status_code=404)
-    nuovo_percorso_immagine = None  # None = lascia l'immagine attuale invariata
-    if immagine is not None and immagine.filename:
-        if categoria["immagine_riferimento_path"]:
-            Path(categoria["immagine_riferimento_path"]).unlink(missing_ok=True)
-        estensione = Path(immagine.filename).suffix or ".png"
-        percorso = _cartella_categorie() / f"{uuid.uuid4().hex}{estensione}"
-        percorso.write_bytes(await immagine.read())
-        nuovo_percorso_immagine = str(percorso)
-    elif rimuovi_immagine and categoria["immagine_riferimento_path"]:
-        Path(categoria["immagine_riferimento_path"]).unlink(missing_ok=True)
-        nuovo_percorso_immagine = ""  # aggiorna_categoria: stringa vuota = azzera il campo
+    percorsi = list(categoria["immagini_riferimento"])
+    for percorso_da_rimuovere in (rimuovi_immagini or []):
+        if percorso_da_rimuovere in percorsi:
+            Path(percorso_da_rimuovere).unlink(missing_ok=True)
+            percorsi.remove(percorso_da_rimuovere)
+    for file in (immagini_nuove or []):
+        if file and file.filename:
+            percorsi.append(await _salva_immagine_categoria(file))
     db_social.aggiorna_categoria(conn, categoria_id, prompt_ai=prompt_ai,
-                                 immagine_riferimento_path=nuovo_percorso_immagine)
+                                 immagini_riferimento=percorsi)
     db_social.audit(conn, "categoria_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="categoria", oggetto_id=categoria_id)
     return RedirectResponse("/social/categorie", status_code=303)
@@ -1137,21 +1137,21 @@ def elimina_categoria(request: Request, categoria_id: str, csrf: str = Form(None
     riga = db_social.get_categoria(conn, categoria_id)
     if riga is None:
         raise HTTPException(status_code=404)
-    if riga["immagine_riferimento_path"]:
-        Path(riga["immagine_riferimento_path"]).unlink(missing_ok=True)
+    for percorso in riga["immagini_riferimento"]:
+        Path(percorso).unlink(missing_ok=True)
     db_social.elimina_categoria(conn, categoria_id)
     db_social.audit(conn, "categoria_eliminata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="categoria", oggetto_id=categoria_id)
     return RedirectResponse("/social/categorie", status_code=303)
 
 
-@router.get("/categorie/{categoria_id}/immagine")
-def anteprima_immagine_categoria(categoria_id: str, sessione=Depends(utente_web),
+@router.get("/categorie/{categoria_id}/immagine/{indice}")
+def anteprima_immagine_categoria(categoria_id: str, indice: int, sessione=Depends(utente_web),
                                  conn=Depends(ottieni_conn)):
     riga = db_social.get_categoria(conn, categoria_id)
-    if riga is None or not riga["immagine_riferimento_path"]:
+    if riga is None or indice < 0 or indice >= len(riga["immagini_riferimento"]):
         raise HTTPException(status_code=404)
-    percorso = Path(riga["immagine_riferimento_path"]).resolve()
+    percorso = Path(riga["immagini_riferimento"][indice]).resolve()
     radice = config.asset_storage_path().resolve()
     if radice not in percorso.parents and percorso != radice:
         raise HTTPException(status_code=403, detail="percorso fuori dallo storage asset")
