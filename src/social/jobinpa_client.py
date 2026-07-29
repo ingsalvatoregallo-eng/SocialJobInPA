@@ -114,6 +114,21 @@ class JobInPAClient:
             log.warning("lettura bando %s da JobInPA fallita: %s", concorso_id, errore)
             return None
 
+    def promozioni(self):
+        """Piani/pacchetti con promozione davvero attiva in questo momento
+        (nome, descrizione, prezzo/prezzo promozionale, scadenza, link
+        JobInPA): usate per creare contenuti 'promozione' senza inserire
+        dati a mano (mai un claim commerciale senza fonte verificabile).
+        Lista di dict; [] se non configurato o in caso di errore di rete."""
+        if not self.configurato:
+            log.info("JobInPA API non configurata (JOBINPA_API_URL/KEY): nessuna promozione")
+            return []
+        try:
+            return self._get("/api/internal/promozioni")["promozioni"]
+        except requests.RequestException as errore:
+            log.warning("lettura promozioni da JobInPA fallita: %s", errore)
+            return []
+
     def filtri_disponibili(self):
         """Vocabolari chiusi/valori realmente presenti per i filtri di
         bandi() (regioni, categorie, competenze, ecc.) — serve all'interprete

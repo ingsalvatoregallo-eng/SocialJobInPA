@@ -185,6 +185,7 @@ th { color: var(--colore-testo-muto); font-weight: 600; font-size: 11.5px; text-
     <a href="/social/analytics" class="{{ 'attivo' if pagina_attiva == 'analytics' else '' }}">📊 Analytics</a>
     {% if 'social.admin' in permessi %}
     <div class="sidebar-sezione">Amministrazione</div>
+    <a href="/social/categorie" class="{{ 'attivo' if pagina_attiva == 'categorie' else '' }}">🎨 Categorie</a>
     <a href="/social/impostazioni" class="{{ 'attivo' if pagina_attiva == 'impostazioni' else '' }}">🔌 Integrazioni e impostazioni</a>
     <a href="/social/log" class="{{ 'attivo' if pagina_attiva == 'log' else '' }}">📜 Log attività</a>
     {% endif %}

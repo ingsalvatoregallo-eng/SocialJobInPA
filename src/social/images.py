@@ -82,6 +82,7 @@ class ImageGenerationRequest:
     prompt_ai: Optional[str] = None  # usato solo da OpenAIImageProvider
     palette: dict = field(default_factory=dict)
     content_id: Optional[str] = None
+    immagine_riferimento: Optional[str] = None  # percorso locale, guida /v1/images/edits
 
 
 @dataclass
@@ -545,7 +546,8 @@ class OpenAIImageProvider:
         larghezza, altezza = FORMATI[request.formato]
         taglia = _taglia_openai_per_formato(request.formato)
         sfondo_bytes = await asyncio.to_thread(
-            self._chiama_api, request.prompt_ai or request.titolo, taglia)
+            self._chiama_api, request.prompt_ai or request.titolo, taglia,
+            request.immagine_riferimento)
         db_social.registra_costo(self.conn, "openai_images", prezzo,
                                  modello=config.openai_image_model(),
                                  content_id=request.content_id)
@@ -575,16 +577,31 @@ class OpenAIImageProvider:
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 
-    def _chiama_api(self, prompt, taglia):
+    def _chiama_api(self, prompt, taglia, immagine_riferimento=None):
         import base64
         import requests
         prompt_completo = _STILE_OPENAI_IMAGES + prompt
-        risposta = requests.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={"Authorization": f"Bearer {config.openai_api_key()}"},
-            json={"model": config.openai_image_model(), "prompt": prompt_completo,
-                  "n": 1, "size": taglia},
-            timeout=120)
+        if immagine_riferimento and Path(immagine_riferimento).is_file():
+            # /v1/images/edits: l'immagine di riferimento (categoria
+            # personalizzata, vedi social_content_categories) guida
+            # davvero lo stile generato, non e' solo una nota testuale —
+            # multipart, non JSON.
+            with open(immagine_riferimento, "rb") as file_immagine:
+                risposta = requests.post(
+                    "https://api.openai.com/v1/images/edits",
+                    headers={"Authorization": f"Bearer {config.openai_api_key()}"},
+                    data={"model": config.openai_image_model(), "prompt": prompt_completo,
+                          "n": 1, "size": taglia},
+                    files={"image": (Path(immagine_riferimento).name, file_immagine,
+                                     "image/png")},
+                    timeout=120)
+        else:
+            risposta = requests.post(
+                "https://api.openai.com/v1/images/generations",
+                headers={"Authorization": f"Bearer {config.openai_api_key()}"},
+                json={"model": config.openai_image_model(), "prompt": prompt_completo,
+                      "n": 1, "size": taglia},
+                timeout=120)
         risposta.raise_for_status()
         dato = risposta.json()["data"][0]
         if "b64_json" in dato:

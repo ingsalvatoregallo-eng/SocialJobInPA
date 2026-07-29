@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block titolo %}Categorie — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<div class="header-pagina">
+  <div>
+    <h1>Categorie</h1>
+    <p class="sottotitolo">Template di prompt (e, opzionalmente, un'immagine di riferimento) per l'illustrazione AI di ogni tipo di post.</p>
+  </div>
+</div>
+
+<div class="avviso info">ℹ️ Ogni categoria descrive SOLO il soggetto/l'illustrazione: stile, palette e assenza di testo/numeri restano fissi per tutte le immagini. Placeholder disponibili nel prompt: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>. Con un'immagine di riferimento, l'AI la usa davvero come guida di stile (non solo come nota testuale).</div>
+
+<div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
+  <div class="card">
+    <h3>Categorie esistenti</h3>
+    <table><tr><th>Nome</th><th>Prompt</th><th>Immagine</th><th></th></tr>
+    {% for c in categorie %}
+      <tr>
+        <td style="white-space:nowrap;font-weight:600">{{ c.nome }}</td>
+        <td style="font-size:12px;color:var(--colore-testo-muto)">{{ c.prompt_ai[:140] }}{{ '…' if c.prompt_ai|length > 140 else '' }}</td>
+        <td>{% if c.immagine_riferimento_path %}<img src="/social/categorie/{{ c.id }}/immagine" alt="riferimento {{ c.nome }}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">{% else %}<span class="hint">nessuna</span>{% endif %}</td>
+        <td>
+          <form method="post" action="/social/categorie/{{ c.id }}/elimina" class="inline"
+                onsubmit="return confirm('Eliminare la categoria {{ c.nome }}? I contenuti gia\' generati non cambiano.');">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn piccolo secondario" type="submit">🗑️ Elimina</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="hint">Nessuna categoria configurata.</td></tr>
+    {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Nuova categoria</h3>
+    <form method="post" action="/social/categorie" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Nome *</label>
+      <input type="text" name="nome" required placeholder="Es. Guida rapida, Novità prodotto">
+      <label>Prompt immagine *</label>
+      <textarea name="prompt_ai" rows="6" required maxlength="2000"
+                placeholder="Descrivi SOLO il soggetto/l'illustrazione, es. 'Illustrazione 3D di ... Tema: {TITOLO}.'"></textarea>
+      <label>Immagine di riferimento (opzionale)</label>
+      <input type="file" name="immagine" accept="image/png,image/jpeg">
+      <p class="hint">Se presente, guida davvero la generazione (OpenAI la usa come riferimento di stile).</p>
+      <button class="btn piccolo" type="submit" style="margin-top:10px">Crea categoria</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

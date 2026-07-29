@@ -222,6 +222,8 @@ CREATE TABLE IF NOT EXISTS social_content (
     errore        TEXT,
     tipologia     TEXT NOT NULL DEFAULT 'concorso',  -- concorso | promozione | generico
     scadenza_promo TEXT,              -- data (YYYY-MM-DD), solo tipologia 'promozione'
+    promo_dati    TEXT,               -- JSON: dati reali della promo letti da JobInPA
+    categoria_id  TEXT,               -- riferimento facoltativo a social_content_categories(id)
     is_demo       INTEGER NOT NULL DEFAULT 0,
     creato_da     INTEGER,            -- utenti.id
     creato_at     TEXT NOT NULL,
@@ -250,6 +252,20 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
     bando_id    TEXT,                 -- bando del carosello che questa immagine rappresenta (NULL fuori carosello)
     url_pubblico TEXT,                -- URL su storage pubblico (R2), NULL se non caricato/non configurato
     creato_at   TEXT NOT NULL
+);
+
+-- Categorie personalizzate di prompt immagine (menu "Categorie"): ogni
+-- categoria descrive SOLO il soggetto/l'illustrazione (stile e palette
+-- restano fissi in codice, vedi images._STILE_OPENAI_IMAGES) e puo'
+-- opzionalmente avere un'immagine di riferimento che guida davvero
+-- OpenAI (endpoint /v1/images/edits invece di /v1/images/generations).
+CREATE TABLE IF NOT EXISTS social_content_categories (
+    id                      TEXT PRIMARY KEY,
+    nome                    TEXT NOT NULL UNIQUE,
+    prompt_ai               TEXT NOT NULL,
+    immagine_riferimento_path TEXT,
+    creato_at               TEXT NOT NULL,
+    aggiornato_at           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS social_approvals (
@@ -444,20 +460,20 @@ SETTINGS_DEFAULT = {
     },
     "prezzo_immagine_ai_eur": 0.04,
     "retention_backup_giorni": 30,
-    "prompt_templates_immagine": {
-        # Solo il soggetto/l'illustrazione (vedi agents.visual): stile,
-        # palette e assenza di testo restano fissi lato codice come per
-        # ogni altra immagine (images._STILE_OPENAI_IMAGES).
-        "promozione": (
-            "Illustrazione 3D moderna ed elegante di un pacchetto regalo "
-            "nei colori del brand, accanto a un calendario stilizzato "
-            "(senza numeri ne' testo) che richiama una scadenza imminente. "
-            "Piccoli elementi decorativi coerenti: scintille, forme morbide, "
-            "onde leggere sullo sfondo. Composizione calda e promozionale. "
-            "Tema della promozione: {NOME_PROMO}."
-        ),
-    },
 }
+
+# Categoria seminata di default (menu "Categorie", vedi crea_categoria):
+# solo il soggetto/l'illustrazione (stile, palette e assenza di testo
+# restano fissi lato codice, vedi images._STILE_OPENAI_IMAGES). Placeholder
+# disponibili: {TITOLO}, {SCADENZA} (vedi agents.visual).
+CATEGORIA_PROMOZIONE_DEFAULT_PROMPT = (
+    "Illustrazione 3D moderna ed elegante di un pacchetto regalo nei "
+    "colori del brand, accanto a un calendario stilizzato (senza numeri "
+    "ne' testo) che richiama una scadenza imminente. Piccoli elementi "
+    "decorativi coerenti: scintille, forme morbide, onde leggere sullo "
+    "sfondo. Composizione calda e promozionale. Tema della promozione: "
+    "{TITOLO}."
+)
 
 
 def _adesso():
@@ -520,6 +536,12 @@ def _migra(conn):
     if "scadenza_promo" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN scadenza_promo TEXT")
         conn.commit()
+    if "promo_dati" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN promo_dati TEXT")
+        conn.commit()
+    if "categoria_id" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN categoria_id TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -532,6 +554,14 @@ def _migra(conn):
         conn.execute(
             "INSERT OR IGNORE INTO social_system_settings (chiave, valore, aggiornato_at) "
             "VALUES (?, ?, ?)", (chiave, json.dumps(valore), adesso))
+    # Categoria "Promozione" sempre presente (seed idempotente, come i
+    # pillar/le fonti sopra): prima di questa migrazione lo stesso testo
+    # viveva nel setting prompt_templates_immagine, ora sostituito dal
+    # menu Categorie (vedi crea_categoria) — qualunque tipologia puo'
+    # sceglierla, non solo 'promozione'.
+    if not conn.execute(
+            "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Promozione",)).fetchone():
+        crea_categoria(conn, "Promozione", CATEGORIA_PROMOZIONE_DEFAULT_PROMPT)
     # I due account gestiti (uno per piattaforma): creati subito in stato
     # non_configurato, la checklist in dashboard guida il completamento.
     for piattaforma, nome in (("instagram", "JobInPA (Instagram)"), ("linkedin", "JobInPA (LinkedIn)")):
@@ -636,7 +666,7 @@ def audit_recenti(conn, limit=100):
 
 def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None, canali=None,
                  concorso_id=None, creato_da=None, is_demo=False, tipologia="concorso",
-                 scadenza_promo=None):
+                 scadenza_promo=None, promo_dati=None, categoria_id=None):
     if tipologia not in TIPOLOGIE_CONTENUTO:
         raise ValueError(f"tipologia non valida: {tipologia}")
     pillar_id = None
@@ -650,6 +680,8 @@ def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None
         "brief": brief, "stato": "IDEA", "canali": json.dumps(canali or list(PIATTAFORME)),
         "concorso_id": concorso_id, "creato_da": creato_da, "tipologia": tipologia,
         "scadenza_promo": scadenza_promo,
+        "promo_dati": json.dumps(promo_dati, ensure_ascii=False) if promo_dati else None,
+        "categoria_id": categoria_id,
         "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()
     return content_id
@@ -726,6 +758,60 @@ def elimina_content(conn, content_id, *, utente_id=None):
     conn.execute("UPDATE social_editorial_plans SET content_id = NULL WHERE content_id = ?",
                  (content_id,))
     conn.execute("DELETE FROM social_content WHERE id = ?", (content_id,))
+    conn.commit()
+    return True
+
+
+# --- Categorie personalizzate (prompt + immagine di riferimento) -------------
+
+def crea_categoria(conn, nome, prompt_ai, *, immagine_riferimento_path=None):
+    """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE)."""
+    categoria_id = _nuovo_id()
+    _insert(conn, "social_content_categories", {
+        "id": categoria_id, "nome": nome.strip(), "prompt_ai": prompt_ai.strip(),
+        "immagine_riferimento_path": immagine_riferimento_path, "creato_at": _adesso()})
+    conn.commit()
+    return categoria_id
+
+
+def lista_categorie(conn):
+    return conn.execute(
+        "SELECT * FROM social_content_categories ORDER BY nome").fetchall()
+
+
+def get_categoria(conn, categoria_id):
+    riga = conn.execute(
+        "SELECT * FROM social_content_categories WHERE id = ?", (categoria_id,)).fetchone()
+    return dict(riga) if riga is not None else None
+
+
+def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagine_riferimento_path=None):
+    """immagine_riferimento_path: passare esplicitamente None lascia il
+    valore esistente invariato (non lo cancella) — per rimuovere davvero
+    l'immagine si passa la stringa vuota "" (vedi web.py)."""
+    campi = {}
+    if prompt_ai is not None:
+        campi["prompt_ai"] = prompt_ai.strip()
+    if immagine_riferimento_path is not None:
+        campi["immagine_riferimento_path"] = immagine_riferimento_path or None
+    if not campi:
+        return
+    campi["aggiornato_at"] = _adesso()
+    assegnazioni = ", ".join(f"{k} = ?" for k in campi)
+    conn.execute(f"UPDATE social_content_categories SET {assegnazioni} WHERE id = ?",
+                 (*campi.values(), categoria_id))
+    conn.commit()
+
+
+def elimina_categoria(conn, categoria_id):
+    """Ritorna False se la categoria non esiste. I contenuti che la
+    referenziano restano com'erano (categoria_id non e' una FK con CASCADE
+    qui: un contenuto gia' generato non deve rompersi se la categoria usata
+    viene rimossa in seguito)."""
+    riga = get_categoria(conn, categoria_id)
+    if riga is None:
+        return False
+    conn.execute("DELETE FROM social_content_categories WHERE id = ?", (categoria_id,))
     conn.commit()
     return True
 

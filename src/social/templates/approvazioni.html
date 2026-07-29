@@ -58,28 +58,73 @@
       {% endfor %}
     </div>
 
+    {% if dettaglio.content.tipologia == 'promozione' %}
+    <h3 style="margin-top:18px">Promozione citata</h3>
+    {% if dettaglio.promo_dati %}
+    <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+        <strong style="font-size:13px">{{ dettaglio.promo_dati.nome }}</strong>
+        <span class="badge verde" title="Letta in diretta da /api/internal/promozioni al momento della creazione">✅ Verificata via API JobInPA</span>
+      </div>
+      {% if dettaglio.promo_dati.descrizione %}<p class="hint" style="margin:4px 0">{{ dettaglio.promo_dati.descrizione }}</p>{% endif %}
+      <p class="hint" style="margin:4px 0">
+        {% if dettaglio.promo_dati.prezzo_promozionale_eur is not none %}Prezzo promozionale: <strong>{{ "%.2f"|format(dettaglio.promo_dati.prezzo_promozionale_eur) }} €</strong>{% if dettaglio.promo_dati.prezzo_eur %} (invece di {{ "%.2f"|format(dettaglio.promo_dati.prezzo_eur) }} €){% endif %} · {% endif %}
+        {% if dettaglio.promo_dati.scadenza %}Scade il {{ dettaglio.promo_dati.scadenza }}{% endif %}
+      </p>
+      {% if dettaglio.promo_dati.url_jobinpa %}<a class="hint" href="{{ dettaglio.promo_dati.url_jobinpa }}" target="_blank" rel="noopener">🔗 Verifica su JobInPA →</a>{% endif %}
+    </div>
+    {% else %}
+    <div class="avviso giallo">⚠️ Contenuto creato senza lettura automatica da JobInPA (inserito a mano): verifica tu stesso che la promozione sia ancora reale prima di approvare.</div>
+    {% endif %}
+    {% endif %}
+
     {% if dettaglio.bandi_trovati %}
-    <h3 style="margin-top:18px">Link ai bandi citati</h3>
-    <div style="display:flex;flex-direction:column;gap:6px">
+    <h3 style="margin-top:18px">Bandi citati</h3>
+    <div style="display:flex;flex-direction:column;gap:8px">
       {% for b in dettaglio.bandi_trovati %}
-      <div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--colore-bordo)">
-        <span style="font-size:12.5px">{{ b.titolo or b.id }}</span>
-        {% if b.url_dettaglio %}<a class="hint" href="{{ b.url_dettaglio }}" target="_blank" rel="noopener">verifica link →</a>
-        {% else %}<span class="hint">nessun link disponibile</span>{% endif %}
+      <div style="padding:8px 0;border-top:1px solid var(--colore-bordo)">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+          <span style="font-size:12.5px">{{ b.titolo or b.id }}</span>
+          <span class="badge verde" title="Dati letti in diretta dal database JobInPA">✅ Verificato via API</span>
+        </div>
+        <div style="display:flex;gap:14px;margin-top:4px">
+          {% if b.url_jobinpa %}<a class="hint" href="{{ b.url_jobinpa }}" target="_blank" rel="noopener">🔗 Verifica su JobInPA →</a>{% endif %}
+          {% if b.url_dettaglio %}<a class="hint" href="{{ b.url_dettaglio }}" target="_blank" rel="noopener">🏛️ Fonte ufficiale InPA →</a>{% endif %}
+          {% if not b.url_jobinpa and not b.url_dettaglio %}<span class="hint">nessun link disponibile</span>{% endif %}
+        </div>
       </div>
       {% endfor %}
     </div>
     {% endif %}
 
-    {% if dettaglio.punteggi and dettaglio.punteggi.motivi_regole %}
-    <div class="avviso giallo" style="margin-top:16px">
-      <div>
-        <strong>Motivo della revisione</strong>
-        <ul style="margin:6px 0 0;padding-left:18px">
-          {% for m in dettaglio.punteggi.motivi_regole %}<li>{{ m }}</li>{% endfor %}
-        </ul>
-      </div>
+    {% if dettaglio.punteggi %}
+    <h3 style="margin-top:18px">Cosa ha verificato il Quality &amp; Risk Agent</h3>
+    <p class="hint" style="margin-top:-6px">Regole automatiche: <span class="badge {{ dettaglio.punteggi.classe_regole }}">{{ dettaglio.punteggi.classe_regole }}</span>
+       · Giudizio AI: <span class="badge {{ dettaglio.punteggi.classe_ai }}">{{ dettaglio.punteggi.classe_ai }}</span>
+       (accuratezza {{ "%.0f"|format(dettaglio.punteggi.accuratezza * 100) }}% · brand {{ "%.0f"|format(dettaglio.punteggi.brand * 100) }}% · conformità {{ "%.0f"|format(dettaglio.punteggi.conformita * 100) }}%)</p>
+    {% if dettaglio.punteggi.motivi_regole %}
+    <div class="avviso giallo" style="margin-top:10px">
+      <strong>🔒 Regole automatiche (oggettive, non modificabili dal reviewer)</strong>
+      <ul style="margin:6px 0 0;padding-left:18px">
+        {% for m in dettaglio.punteggi.motivi_regole %}<li style="font-size:13px">{{ m }}</li>{% endfor %}
+      </ul>
     </div>
+    {% endif %}
+    {% if dettaglio.punteggi.motivi_ai %}
+    <div class="avviso giallo" style="margin-top:10px">
+      <strong>🤖 Dubbi del giudizio AI (agisci su ognuno: cita nella richiesta di modifiche)</strong>
+      <ul style="margin:6px 0 0;padding-left:18px;list-style:none">
+        {% for m in dettaglio.punteggi.motivi_ai %}
+        <li style="font-size:13px;display:flex;justify-content:space-between;gap:8px;align-items:start;padding:4px 0">
+          <span>{{ m }}</span>
+          {% if 'social.approve' in permessi %}
+          <button type="button" class="btn piccolo secondario" style="white-space:nowrap" onclick="citaDubbio({{ m|tojson }})">↩ cita</button>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
     {% endif %}
 
     {% if dettaglio.fatti %}
@@ -88,7 +133,12 @@
       {% for f in dettaglio.fatti %}
       <div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--colore-bordo)">
         <span style="font-size:12.5px">{{ '✅' if not f.conflitto else '⚠️' }} {{ f.fatto }}</span>
-        {% if f.fonte_url %}<a class="hint" href="{{ f.fonte_url }}" target="_blank" rel="noopener">fonte →</a>{% endif %}
+        <span style="display:flex;gap:10px;align-items:center;white-space:nowrap">
+          {% if f.fonte_url %}<a class="hint" href="{{ f.fonte_url }}" target="_blank" rel="noopener">fonte →</a>{% endif %}
+          {% if f.conflitto and 'social.approve' in permessi %}
+          <button type="button" class="btn piccolo secondario" onclick="citaDubbio({{ ('Fatto in conflitto tra fonti: ' + f.fatto)|tojson }})">↩ cita</button>
+          {% endif %}
+        </span>
       </div>
       {% endfor %}
     </div>
@@ -100,7 +150,7 @@
     <form method="post" action="/social/approvazioni/{{ selezionata.id }}" style="margin-top:16px;border-top:1px solid var(--colore-bordo);padding-top:16px">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Motivazione (obbligatoria per rifiuto o richiesta modifiche)</label>
-      <textarea name="motivo" rows="2"></textarea>
+      <textarea name="motivo" id="campo-motivo" rows="2"></textarea>
       <div style="display:flex;gap:10px;margin-top:10px">
         <button class="btn testo-rosso" name="azione" value="rifiuta" type="submit">✕ Rifiuta</button>
         <button class="btn secondario" name="azione" value="modifiche" type="submit">✎ Richiedi modifiche</button>
@@ -114,4 +164,13 @@
   {% endif %}
 </div>
 {% endif %}
+
+<script>
+function citaDubbio(testo) {
+  var campo = document.getElementById('campo-motivo');
+  if (!campo) { return; }
+  campo.value = campo.value ? (campo.value + '\n' + testo) : testo;
+  campo.focus();
+}
+</script>
 {% endblock %}

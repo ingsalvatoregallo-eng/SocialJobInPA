@@ -10,13 +10,15 @@ social.* (db_social.ha_permesso) — admin/editor/reviewer/viewer.
 
 import json
 import logging
+import sqlite3
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -24,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import auth  # noqa: E402
 from deps import ottieni_conn  # noqa: E402
 from social import (  # noqa: E402
-    agents, approvals, config, db_social, publishing, security, state_machine,
+    agents, approvals, config, db_social, jobinpa_client, publishing, security, state_machine,
 )
 from social.integrations.instagram import InstagramAdapter  # noqa: E402
 from social.integrations.linkedin import LinkedInAdapter  # noqa: E402
@@ -525,14 +527,20 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
                          conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.edit")
     return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
-        request, sessione, conn, pillars=db_social.pillars(conn)))
+        request, sessione, conn, pillars=db_social.pillars(conn),
+        categorie=db_social.lista_categorie(conn),
+        # Promozioni davvero attive lette in diretta da JobInPA (mai
+        # inserite a mano, vedi crea_contenuto sotto): [] se l'API non e'
+        # configurata o irraggiungibile, il form lo segnala.
+        promozioni_disponibili=jobinpa_client.client().promozioni()))
 
 
 @router.post("/contenuti")
-def crea_contenuto(request: Request, titolo: str = Form(...),
+def crea_contenuto(request: Request, titolo: str = Form(None),
                    pillar: str = Form(None), obiettivo: str = Form(None),
                    brief: str = Form(None), tipologia: str = Form("concorso"),
-                   scadenza_promo: str = Form(None), csrf: str = Form(None),
+                   promo_selezionata: str = Form(None), categoria_id: str = Form(None),
+                   csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
     "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
@@ -543,11 +551,33 @@ def crea_contenuto(request: Request, titolo: str = Form(...),
     _verifica_csrf(sessione, csrf)
     if tipologia not in db_social.TIPOLOGIE_CONTENUTO:
         raise HTTPException(status_code=400, detail="tipologia non valida")
+    scadenza_promo = None
+    promo_dati = None
+    if tipologia == "promozione":
+        # Titolo/prezzo/scadenza NON arrivano dal form (mai un claim
+        # commerciale scritto a mano): si rilegge la promo in diretta da
+        # JobInPA, cosi' e' sempre quella davvero attiva in questo momento,
+        # non uno snapshot potenzialmente scaduto passato dal browser.
+        if not promo_selezionata or "|" not in promo_selezionata:
+            raise HTTPException(status_code=400, detail="Seleziona una promozione")
+        tipo_sel, chiave_sel = promo_selezionata.split("|", 1)
+        promo = next((p for p in jobinpa_client.client().promozioni()
+                     if p["tipo"] == tipo_sel and p["chiave"] == chiave_sel), None)
+        if promo is None:
+            raise HTTPException(
+                status_code=400, detail="Promozione non più attiva su JobInPA: ricarica la pagina")
+        titolo = promo["nome"]
+        scadenza_promo = promo.get("scadenza")
+        promo_dati = promo
+    elif not titolo or not titolo.strip():
+        raise HTTPException(status_code=400, detail="Titolo obbligatorio")
+    if categoria_id and db_social.get_categoria(conn, categoria_id) is None:
+        raise HTTPException(status_code=400, detail="Categoria non valida")
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
                                         obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
-                                        tipologia=tipologia,
-                                        scadenza_promo=(scadenza_promo or "").strip() or None,
+                                        tipologia=tipologia, scadenza_promo=scadenza_promo,
+                                        promo_dati=promo_dati, categoria_id=categoria_id or None,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
@@ -764,6 +794,7 @@ def approvazioni(request: Request, content_id: str = None,
             "varianti": {v["piattaforma"]: v for v in db_social.varianti_di(conn, selezionata["content_id"])},
             "fatti": db_social.fatti_di(conn, selezionata["content_id"]),
             "bandi_trovati": json.loads(content["bandi_trovati"] or "[]"),
+            "promo_dati": json.loads(content["promo_dati"]) if content["promo_dati"] else None,
         }
     return templates.TemplateResponse(request, "approvazioni.html", _ctx(
         request, sessione, conn, approvazioni=coda, selezionata=selezionata, dettaglio=dettaglio))
@@ -1032,6 +1063,75 @@ def instagram_token_manuale(request: Request, token: str = Form(...), csrf: str 
     return RedirectResponse("/social/impostazioni", status_code=303)
 
 
+# --- Categorie (prompt + immagine di riferimento) ---------------------------
+
+def _cartella_categorie():
+    cartella = config.asset_storage_path() / "categorie"
+    cartella.mkdir(parents=True, exist_ok=True)
+    return cartella
+
+
+@router.get("/categorie", response_class=HTMLResponse)
+def categorie(request: Request, sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    return templates.TemplateResponse(request, "categorie.html", _ctx(
+        request, sessione, conn, pagina_attiva="categorie",
+        categorie=db_social.lista_categorie(conn)))
+
+
+@router.post("/categorie")
+async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str = Form(...),
+                         immagine: UploadFile = File(None), csrf: str = Form(None),
+                         sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    percorso_immagine = None
+    if immagine is not None and immagine.filename:
+        estensione = Path(immagine.filename).suffix or ".png"
+        percorso = _cartella_categorie() / f"{uuid.uuid4().hex}{estensione}"
+        percorso.write_bytes(await immagine.read())
+        percorso_immagine = str(percorso)
+    try:
+        categoria_id = db_social.crea_categoria(
+            conn, nome.strip(), prompt_ai, immagine_riferimento_path=percorso_immagine)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Esiste già una categoria con questo nome")
+    db_social.audit(conn, "categoria_creata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="categoria", oggetto_id=categoria_id)
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
+@router.post("/categorie/{categoria_id}/elimina")
+def elimina_categoria(request: Request, categoria_id: str, csrf: str = Form(None),
+                      sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    riga = db_social.get_categoria(conn, categoria_id)
+    if riga is None:
+        raise HTTPException(status_code=404)
+    if riga["immagine_riferimento_path"]:
+        Path(riga["immagine_riferimento_path"]).unlink(missing_ok=True)
+    db_social.elimina_categoria(conn, categoria_id)
+    db_social.audit(conn, "categoria_eliminata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="categoria", oggetto_id=categoria_id)
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
+@router.get("/categorie/{categoria_id}/immagine")
+def anteprima_immagine_categoria(categoria_id: str, sessione=Depends(utente_web),
+                                 conn=Depends(ottieni_conn)):
+    riga = db_social.get_categoria(conn, categoria_id)
+    if riga is None or not riga["immagine_riferimento_path"]:
+        raise HTTPException(status_code=404)
+    percorso = Path(riga["immagine_riferimento_path"]).resolve()
+    radice = config.asset_storage_path().resolve()
+    if radice not in percorso.parents and percorso != radice:
+        raise HTTPException(status_code=403, detail="percorso fuori dallo storage asset")
+    if not percorso.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(percorso)
+
+
 # --- Impostazioni ------------------------------------------------------------
 
 @router.get("/impostazioni", response_class=HTMLResponse)
@@ -1053,7 +1153,6 @@ def impostazioni(request: Request, sessione=Depends(utente_web),
         linkedin=LinkedInAdapter(conn).health_check(),
         fonti=db_social.source_domains(conn, solo_attivi=False),
         settings=settings, prompt_versioni=prompt_versioni,
-        prompt_templates_immagine=db_social.get_setting(conn, "prompt_templates_immagine", {}),
         utenti_social=utenti_social,
         publishing_env=config.publishing_enabled_env(),
         costo_anthropic=db_social.costo_periodo(conn, "anthropic"),
@@ -1096,23 +1195,6 @@ def imposta_revisori(request: Request, emails: str = Form(""), csrf: str = Form(
     db_social.set_setting(conn, "revisori_email", lista)
     db_social.audit(conn, "revisori_aggiornati", utente_id=sessione["utente"]["id"],
                     dettagli={"quanti": len(lista)})
-    return RedirectResponse("/social/impostazioni", status_code=303)
-
-
-@router.post("/impostazioni/prompt-template")
-def salva_prompt_template(request: Request, tipologia: str = Form(...),
-                          prompt: str = Form(...), csrf: str = Form(None),
-                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
-    _richiedi(conn, sessione, "social.admin")
-    _verifica_csrf(sessione, csrf)
-    if tipologia not in db_social.TIPOLOGIE_CONTENUTO:
-        raise HTTPException(status_code=400, detail="tipologia non valida")
-    modelli = dict(db_social.get_setting(conn, "prompt_templates_immagine", {}))
-    modelli[tipologia] = prompt.strip()
-    db_social.set_setting(conn, "prompt_templates_immagine", modelli)
-    db_social.audit(conn, "prompt_template_immagine_aggiornato",
-                    utente_id=sessione["utente"]["id"], oggetto_tipo="prompt_template",
-                    oggetto_id=tipologia)
     return RedirectResponse("/social/impostazioni", status_code=303)
 
 

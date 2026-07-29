@@ -196,23 +196,43 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     c'era una richiesta precisa da soddisfare."""
     content = db_social.get_content(conn, content_id)
     if content["tipologia"] == "promozione":
-        # Nessun bando da cercare: il fatto e' la promozione stessa (nome +
-        # scadenza, dati inseriti dall'utente alla creazione). Stesso motivo
-        # di annuncio_funzionalita per forzare la revisione umana in
-        # esegui_pipeline: un claim commerciale ("gratis fino al...") non ha
-        # una fonte esterna verificabile come un bando su JobInPA.
-        scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"])
-        fatto = f"Promozione \"{content['titolo']}\""
-        if scadenza_leggibile:
-            fatto += f", valida fino al {scadenza_leggibile}"
-        if content["brief"]:
-            fatto += f". Dettagli: {content['brief']}"
+        # Nessun bando da cercare: il fatto e' la promozione stessa, letta
+        # in diretta da JobInPA (promo_dati, popolato alla creazione da
+        # jobinpa_client.promozioni() — vedi web.crea_contenuto), non un
+        # claim scritto a mano. Stesso motivo di annuncio_funzionalita per
+        # forzare comunque la revisione umana in esegui_pipeline: un dato
+        # commerciale ("gratis fino al...") va sempre controllato da un
+        # umano prima di pubblicare, anche se verificato via API.
+        promo = json.loads(content["promo_dati"]) if content["promo_dati"] else None
+        if promo:
+            fatto = f"Promozione \"{promo['nome']}\" su JobInPA"
+            if promo.get("descrizione"):
+                fatto += f": {promo['descrizione']}"
+            if promo.get("prezzo_promozionale_eur") is not None:
+                fatto += f". Prezzo promozionale: {promo['prezzo_promozionale_eur']:.2f} EUR"
+                if promo.get("prezzo_eur") is not None:
+                    fatto += f" (invece di {promo['prezzo_eur']:.2f} EUR)"
+            scadenza_leggibile = _formatta_scadenza(promo.get("scadenza"))
+            if scadenza_leggibile:
+                fatto += f". Valida fino al {scadenza_leggibile}"
+            fonte_url = promo.get("url_jobinpa")
+        else:
+            # Fallback per contenuti creati prima del fetch automatico (o
+            # se JobInPA non era raggiungibile alla creazione): stessi dati
+            # minimi inseriti a mano, mai una fonte certa come promo_dati.
+            scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"])
+            fatto = f"Promozione \"{content['titolo']}\""
+            if scadenza_leggibile:
+                fatto += f", valida fino al {scadenza_leggibile}"
+            if content["brief"]:
+                fatto += f". Dettagli: {content['brief']}"
+            fonte_url = None
         risultato = models.RisultatoRicerca(
-            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0)],
+            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0, fonte_url=fonte_url)],
             sintesi=fatto, richiede_revisione=True, annuncio_funzionalita=True)
         for f in risultato.fatti:
             db_social.salva_fatto(conn, f.fatto, content_id=content_id,
-                                  confidenza=f.confidenza,
+                                  fonte_url=f.fonte_url, confidenza=f.confidenza,
                                   richiede_revisione=risultato.richiede_revisione)
         db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
         return risultato
@@ -303,16 +323,24 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
     base = (f"Tema: {content['titolo']}\nBrief: {content['brief'] or '(nessuno)'}\n"
             f"Fatti verificati (usa SOLO questi):\n{fatti}\n"
             f"Sintesi ricerca: {risultato_ricerca.sintesi}")
-    # Link ufficiali dei bandi realmente trovati (dati grezzi da JobInPA, non
-    # dall'interpretazione del modello): senza questo il testo rimandava solo
-    # genericamente a jobinpa.it, mai al bando specifico di cui si parla.
-    link_bandi = [(b.get("titolo") or b.get("id"), b.get("url_dettaglio"))
-                  for b in risultato_ricerca.bandi_trovati if b.get("url_dettaglio")]
+    # Link JobInPA (fonte primaria, mai un generico rimando al sito) dei
+    # bandi realmente trovati: url_jobinpa e' la pagina JobInPA del bando,
+    # url_dettaglio (usato come fallback per contenuti creati prima di
+    # questo campo) e' invece la fonte ufficiale esterna, non quella da
+    # citare nel testo del post.
+    link_bandi = [(b.get("titolo") or b.get("id"), b.get("url_jobinpa") or b.get("url_dettaglio"))
+                  for b in risultato_ricerca.bandi_trovati
+                  if b.get("url_jobinpa") or b.get("url_dettaglio")]
     if link_bandi:
         righe_link = "\n".join(f"- {titolo}: {url}"
                                for titolo, url in link_bandi[:images.MASSIMO_IMMAGINI_CAROSELLO])
-        base += (f"\nLink ufficiali ai bandi citati (includi quello pertinente nel testo, "
-                f"non limitarti a un generico rimando a jobinpa.it):\n{righe_link}")
+        base += (f"\nLink JobInPA dei bandi citati (fonte primaria: includi quello pertinente "
+                f"nel testo, mai un generico invito a visitare il sito):\n{righe_link}")
+    if content["tipologia"] == "promozione" and content["promo_dati"]:
+        promo_link = json.loads(content["promo_dati"]).get("url_jobinpa")
+        if promo_link:
+            base += (f"\nLink JobInPA della promozione (fonte primaria, includilo nel "
+                    f"testo): {promo_link}")
     if note_revisore:
         # Ripartenza da CHANGES_REQUESTED (vedi esegui_pipeline): questa e'
         # la correzione esplicita chiesta dal revisore, va applicata al testo.
@@ -393,6 +421,20 @@ def _richiesta_immagine_da_bando(bando, formato, content_id):
         sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id)
 
 
+def _categoria_per_content(conn, content):
+    """Categoria da usare per l'illustrazione (menu Categorie): quella
+    scelta esplicitamente alla creazione, oppure — solo per tipologia
+    'promozione' senza scelta esplicita — la categoria 'Promozione'
+    seminata di default (vedi db_social._migra), cosi' una promozione ha
+    sempre un'illustrazione coerente anche senza passare dal menu."""
+    if content["categoria_id"]:
+        return db_social.get_categoria(conn, content["categoria_id"])
+    if content["tipologia"] == "promozione":
+        riga = next((c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione"), None)
+        return dict(riga) if riga is not None else None
+    return None
+
+
 def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider=None):
     # Sovrascrive sempre: senza cancellare prima, ogni rigenerazione (anche
     # dopo una modifica al brief o "Richiedi modifiche") si limiterebbe ad
@@ -406,17 +448,19 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                      content_id=content_id, provider=provider)
     if brief.template not in images.TEMPLATE_VALIDI:
         brief.template = "presentazione"
-    if content["tipologia"] == "promozione":
+    categoria = _categoria_per_content(conn, content)
+    immagine_riferimento = None
+    if categoria:
         # Il "soggetto" dell'illustrazione non e' lasciato all'AI (rischio
-        # di uno stile incoerente da un post all'altro): viene dal template
-        # configurabile in Impostazioni, con solo il nome della promo come
-        # dato variabile (niente testo/numeri richiesti all'AI, vedi
-        # prompt_templates_immagine in db_social.SETTINGS_DEFAULT).
-        modello = db_social.get_setting(conn, "prompt_templates_immagine", {}).get("promozione")
-        if modello:
-            scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
-            brief.prompt_ai = modello.replace("{NOME_PROMO}", content["titolo"]).replace(
-                "{DATA_SCADENZA}", scadenza_leggibile)
+        # di uno stile incoerente da un post all'altro): viene dalla
+        # categoria scelta (menu Categorie), con titolo/scadenza come
+        # unici dati variabili (niente testo/numeri richiesti all'AI). Se
+        # la categoria ha un'immagine di riferimento, guida davvero la
+        # generazione (endpoint /v1/images/edits, vedi images.py).
+        scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
+        brief.prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", content["titolo"]).replace(
+            "{SCADENZA}", scadenza_leggibile)
+        immagine_riferimento = categoria.get("immagine_riferimento_path")
     image_provider = image_provider or images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")
     bandi_carosello = risultato_ricerca.bandi_trovati[:images.MASSIMO_IMMAGINI_CAROSELLO]
@@ -438,7 +482,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         richiesta = images.ImageGenerationRequest(
             template=brief.template, formato=formato, titolo=brief.titolo,
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
-            prompt_ai=brief.prompt_ai, content_id=content_id)
+            prompt_ai=brief.prompt_ai, content_id=content_id,
+            immagine_riferimento=immagine_riferimento)
         asset = asyncio.run(image_provider.generate(richiesta))
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,
