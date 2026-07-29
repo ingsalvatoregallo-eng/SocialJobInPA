@@ -206,6 +206,100 @@ def test_crea_categoria_con_immagine_di_riferimento_via_web(conn, client):
     assert risposta_immagine.content == png_1x1
 
 
+def test_aggiorna_categoria_via_web_cambia_il_prompt(conn, client):
+    db_social.crea_utente(conn, "admin-cat6@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat6@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Da modificare", "vecchio prompt")
+
+    r = client.post(f"/social/categorie/{categoria_id}", data={
+        "prompt_ai": "nuovo prompt per {TITOLO}", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_categoria(conn, categoria_id)["prompt_ai"] == "nuovo prompt per {TITOLO}"
+
+
+def test_aggiorna_categoria_sostituisce_immagine_di_riferimento(conn, client):
+    db_social.crea_utente(conn, "admin-cat7@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat7@test.local")
+    csrf = _csrf(client)
+    png_1 = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+        "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
+    png_2 = png_1 + b"\x00seconda-immagine-diversa"  # basta che sia byte diversi da png_1
+    categoria_id = db_social.crea_categoria(conn, "Con vecchia immagine", "x")
+    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+                files={"immagine": ("prima.png", png_1, "image/png")})
+    vecchio_percorso = db_social.get_categoria(conn, categoria_id)["immagine_riferimento_path"]
+
+    r = client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+                    files={"immagine": ("seconda.png", png_2, "image/png")},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    from pathlib import Path
+    assert not Path(vecchio_percorso).exists()
+    risposta = client.get(f"/social/categorie/{categoria_id}/immagine")
+    assert risposta.content == png_2
+
+
+def test_aggiorna_categoria_rimuove_immagine_di_riferimento(conn, client):
+    db_social.crea_utente(conn, "admin-cat8@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat8@test.local")
+    csrf = _csrf(client)
+    png_1x1 = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+        "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
+    categoria_id = db_social.crea_categoria(conn, "Da spogliare", "x")
+    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+                files={"immagine": ("prima.png", png_1x1, "image/png")})
+
+    r = client.post(f"/social/categorie/{categoria_id}",
+                    data={"prompt_ai": "x", "rimuovi_immagine": "1", "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_categoria(conn, categoria_id)["immagine_riferimento_path"] is None
+
+
+def test_aggiorna_categoria_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "admin-cat9@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat9@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/categorie/non-esiste",
+                    data={"prompt_ai": "x", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_aggiorna_categoria_richiede_admin(conn, client):
+    db_social.crea_utente(conn, "editor-cat3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    categoria_id = db_social.crea_categoria(conn, "Protetta", "x")
+    _login(client, "editor-cat3@test.local")
+    csrf = _csrf(client, "/social/contenuti/nuovo")
+
+    r = client.post(f"/social/categorie/{categoria_id}",
+                    data={"prompt_ai": "y", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_pagina_categorie_mostra_il_prompt_completo_non_troncato(conn, client):
+    db_social.crea_utente(conn, "admin-cat10@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat10@test.local")
+    prompt_lungo = "Illustrazione molto dettagliata " * 10  # oltre 140 caratteri
+    db_social.crea_categoria(conn, "Prompt lungo", prompt_lungo)
+
+    pagina = client.get("/social/categorie").text
+    assert prompt_lungo.strip() in pagina  # crea_categoria fa .strip() sul prompt salvato
+
+
 def test_crea_categoria_nome_duplicato_via_web_400(conn, client):
     db_social.crea_utente(conn, "admin-cat2@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")

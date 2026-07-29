@@ -1101,6 +1101,34 @@ async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str
     return RedirectResponse("/social/categorie", status_code=303)
 
 
+@router.post("/categorie/{categoria_id}")
+async def aggiorna_categoria(request: Request, categoria_id: str, prompt_ai: str = Form(...),
+                             immagine: UploadFile = File(None), rimuovi_immagine: str = Form(None),
+                             csrf: str = Form(None),
+                             sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    categoria = db_social.get_categoria(conn, categoria_id)
+    if categoria is None:
+        raise HTTPException(status_code=404)
+    nuovo_percorso_immagine = None  # None = lascia l'immagine attuale invariata
+    if immagine is not None and immagine.filename:
+        if categoria["immagine_riferimento_path"]:
+            Path(categoria["immagine_riferimento_path"]).unlink(missing_ok=True)
+        estensione = Path(immagine.filename).suffix or ".png"
+        percorso = _cartella_categorie() / f"{uuid.uuid4().hex}{estensione}"
+        percorso.write_bytes(await immagine.read())
+        nuovo_percorso_immagine = str(percorso)
+    elif rimuovi_immagine and categoria["immagine_riferimento_path"]:
+        Path(categoria["immagine_riferimento_path"]).unlink(missing_ok=True)
+        nuovo_percorso_immagine = ""  # aggiorna_categoria: stringa vuota = azzera il campo
+    db_social.aggiorna_categoria(conn, categoria_id, prompt_ai=prompt_ai,
+                                 immagine_riferimento_path=nuovo_percorso_immagine)
+    db_social.audit(conn, "categoria_modificata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="categoria", oggetto_id=categoria_id)
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
 @router.post("/categorie/{categoria_id}/elimina")
 def elimina_categoria(request: Request, categoria_id: str, csrf: str = Form(None),
                       sessione=Depends(utente_web), conn=Depends(ottieni_conn)):

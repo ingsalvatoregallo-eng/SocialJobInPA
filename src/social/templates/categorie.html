@@ -13,24 +13,50 @@
 <div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
   <div class="card">
     <h3>Categorie esistenti</h3>
-    <table><tr><th>Nome</th><th>Prompt</th><th>Immagine</th><th></th></tr>
     {% for c in categorie %}
-      <tr>
-        <td style="white-space:nowrap;font-weight:600">{{ c.nome }}</td>
-        <td style="font-size:12px;color:var(--colore-testo-muto)">{{ c.prompt_ai[:140] }}{{ '…' if c.prompt_ai|length > 140 else '' }}</td>
-        <td>{% if c.immagine_riferimento_path %}<img src="/social/categorie/{{ c.id }}/immagine" alt="riferimento {{ c.nome }}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">{% else %}<span class="hint">nessuna</span>{% endif %}</td>
-        <td>
+    <div style="border-top:1px solid var(--colore-bordo);padding:14px 0">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
+        <div style="display:flex;gap:10px;align-items:start">
+          {% if c.immagine_riferimento_path %}<img src="/social/categorie/{{ c.id }}/immagine" alt="riferimento {{ c.nome }}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">{% endif %}
+          <strong style="font-size:14px">{{ c.nome }}</strong>
+        </div>
+        <div style="display:flex;gap:8px;white-space:nowrap">
+          <button type="button" class="btn piccolo secondario" onclick="mostraModificaCategoria('{{ c.id }}')">✏️ Modifica</button>
           <form method="post" action="/social/categorie/{{ c.id }}/elimina" class="inline"
                 onsubmit="return confirm('Eliminare la categoria {{ c.nome }}? I contenuti gia\' generati non cambiano.');">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <button class="btn piccolo secondario" type="submit">🗑️ Elimina</button>
           </form>
-        </td>
-      </tr>
+        </div>
+      </div>
+
+      <div id="vista-{{ c.id }}" style="margin-top:8px">
+        <p style="white-space:pre-wrap;font-size:13px;color:var(--colore-testo);margin:0">{{ c.prompt_ai }}</p>
+      </div>
+
+      <div id="modifica-{{ c.id }}" style="display:none;margin-top:10px">
+        <form method="post" action="/social/categorie/{{ c.id }}" enctype="multipart/form-data">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label>Prompt immagine</label>
+          <textarea name="prompt_ai" rows="6" required maxlength="2000">{{ c.prompt_ai }}</textarea>
+          <label>Nuova immagine di riferimento (opzionale)</label>
+          <input type="file" name="immagine" accept="image/png,image/jpeg">
+          {% if c.immagine_riferimento_path %}
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:6px">
+            <input type="checkbox" name="rimuovi_immagine" value="1" style="width:auto">
+            Rimuovi l'immagine di riferimento attuale
+          </label>
+          {% endif %}
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button type="button" class="btn piccolo secondario" onclick="nascondiModificaCategoria('{{ c.id }}')">Annulla</button>
+            <button class="btn piccolo" type="submit" style="margin-left:auto">💾 Salva</button>
+          </div>
+        </form>
+      </div>
+    </div>
     {% else %}
-      <tr><td colspan="4" class="hint">Nessuna categoria configurata.</td></tr>
+    <p class="hint">Nessuna categoria configurata.</p>
     {% endfor %}
-    </table>
   </div>
 
   <div class="card">
@@ -49,4 +75,15 @@
     </form>
   </div>
 </div>
+
+<script>
+function mostraModificaCategoria(id) {
+  document.getElementById('vista-' + id).style.display = 'none';
+  document.getElementById('modifica-' + id).style.display = 'block';
+}
+function nascondiModificaCategoria(id) {
+  document.getElementById('modifica-' + id).style.display = 'none';
+  document.getElementById('vista-' + id).style.display = 'block';
+}
+</script>
 {% endblock %}

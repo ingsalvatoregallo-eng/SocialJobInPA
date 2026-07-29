@@ -17,7 +17,15 @@ from social import db_social, jobinpa_client
 
 # --- jobinpa_client.promozioni() --------------------------------------------
 
-def test_promozioni_non_configurato_ritorna_lista_vuota():
+def test_promozioni_non_configurato_ritorna_lista_vuota(monkeypatch):
+    """JobInPAClient(base_url=None) ricade sempre su config.jobinpa_api_url()
+    (pattern "or": None e' equivalente a "usa il default"): su una macchina
+    con JOBINPA_API_URL/KEY reali gia' in .env (come questa di sviluppo,
+    puntata su jobinpa.it) il client risulterebbe comunque "configurato" e
+    la chiamata colpirebbe davvero la produzione invece di restare isolata
+    (stesso gotcha di test_agents_contesto.test_contesto_jobinpa_client_non_configurato)."""
+    monkeypatch.setattr("social.config.jobinpa_api_url", lambda: "")
+    monkeypatch.setattr("social.config.jobinpa_api_key", lambda: "")
     client = jobinpa_client.JobInPAClient(base_url=None, api_key=None)
     assert client.promozioni() == []
 
