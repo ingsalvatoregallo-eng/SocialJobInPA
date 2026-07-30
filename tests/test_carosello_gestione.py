@@ -194,6 +194,40 @@ def test_route_elimina_asset_inesistente_404(conn, client):
     assert r.status_code == 404
 
 
+def test_pagina_contenuto_mostra_carosello_come_slider(conn, client):
+    """Piu' immagini per lo stesso post: nella scheda contenuto devono
+    scorrere in uno slider orizzontale stile Instagram (scroll-snap), non
+    una sotto l'altra come prima (segnalato dall'utente)."""
+    content_id = _contenuto_con_carosello(conn)
+    db_social.crea_utente(conn, "editor-slider@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-slider@test.local")
+
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+
+    assert "scroll-snap-type:x mandatory" in pagina
+    assert "1/3" in pagina and "3/3" in pagina  # contatore per immagine
+    asset_ids = [a["id"] for a in db_social.asset_di(conn, content_id)]
+    for asset_id in asset_ids:
+        assert f"/social/asset/{asset_id}" in pagina
+
+
+def test_pagina_contenuto_immagine_singola_non_usa_lo_slider(conn, client):
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider,
+                  image_provider=MockImageProvider())
+    db_social.crea_utente(conn, "editor-slider2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-slider2@test.local")
+
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert "scroll-snap-type:x mandatory" not in pagina
+
+
 def test_route_rigenera_testo_mette_in_coda_il_job(conn, client):
     content_id = _contenuto_con_carosello(conn)
     db_social.crea_utente(conn, "editor-testo@test.local",
