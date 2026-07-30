@@ -492,6 +492,46 @@ _STILE_OPENAI_IMAGES = (
     "uncluttered, suitable for overlaid text. Subject: "
 )
 
+def _prompt_promozione_completa(request):
+    """Prompt per il template "promozione" (vedi OpenAIImageProvider.
+    _genera_promozione): a differenza di _STILE_OPENAI_IMAGES, qui il testo
+    NON e' vietato — al contrario, ogni stringa e' messa tra virgolette ed
+    esplicitamente marcata come testo esatto da riprodurre, per aiutare il
+    modello a non storpiarla/inventarne altra. dati_chiave/titolo/
+    sottotitolo arrivano gia' verificati dal resto della pipeline (mai
+    testo libero dell'LLM), qui vengono solo inseriti nella descrizione
+    della composizione."""
+    dati = request.dati_chiave[:4]
+    righe_dati = "\n".join(f'   - "{dato}"' for dato in dati) or '   - "Scopri i vantaggi su JobInPA"'
+    riga_sottotitolo = (
+        f'3. Below the headline, a short subtitle line with this exact text: "{request.sottotitolo}".\n'
+        if request.sottotitolo else "")
+    soggetto = request.prompt_ai or (
+        "a glossy 3D gift box with a ribbon, next to a stylized desk "
+        "calendar, small sparkles around them")
+    return (
+        "Design a single complete Instagram promotional graphic for JobInPA "
+        "(an AI-powered job search assistant for Italian public "
+        "administration jobs). A polished modern SaaS marketing graphic "
+        "design, NOT a plain photo — real crisp, legible, correctly spelled "
+        "Italian text rendered directly in the image, exactly as quoted "
+        "below. No other text, no placeholder lorem ipsum, no invented "
+        "numbers or words beyond what is quoted here.\n\n"
+        "Composition, top to bottom:\n"
+        "1. Top-left: a small rounded pill badge with a sparkle icon and "
+        "this exact bold white text: \"PROMOZIONE JOBINPA\".\n"
+        "2. Top-right: the brand wordmark \"JobInPA\" in bold navy blue.\n"
+        f'3. A large bold headline with this exact text: "{request.titolo}".\n'
+        f"{riga_sottotitolo}"
+        f"4. On the right side of the composition, {soggetto}.\n"
+        "5. A white rounded card listing exactly these lines, each with a "
+        f"small relevant icon (calendar, lock, or people):\n{righe_dati}\n"
+        "6. At the bottom, a full-width rounded button with a purple-to-navy "
+        "gradient, a white circular arrow icon, and this exact bold white "
+        "text: \"Scopri di più su JobInPA\".\n"
+    )
+
+
 # Formati OpenAI Images supportati da gpt-image-1/dall-e-3 (no formati
 # custom): si sceglie il piu' vicino al rapporto d'aspetto richiesto, poi si
 # adatta con un resize "a copertura" + ritaglio centrale — mai uno stretch,
@@ -591,177 +631,34 @@ class OpenAIImageProvider:
                               template=request.template, formato=request.formato)
 
     async def _genera_promozione(self, request: ImageGenerationRequest) -> GeneratedAsset:
-        """Layout a card: sfondo chiaro (stesso stile di TemplateImageProvider),
-        badge+logo in alto, titolo/sottotitolo in una colonna, l'illustrazione
-        AI come riquadro arrotondato laterale (non a tutto schermo), card dati
-        con icone a pallino, bottone CTA in fondo. L'AI genera SOLO
-        l'illustrazione (guidata da prompt_ai/stile_ai/immagini_riferimento
-        come sempre); ogni testo resta disegnato in modo deterministico —
-        stesso principio del resto del modulo."""
+        """A differenza di ogni altro template, qui l'AI compone l'INTERA
+        grafica — badge, titolo, elenco punti, bottone CTA, testo incluso —
+        invece di generare solo un'illustrazione su cui poi sovrapporre un
+        layout disegnato con Pillow. Deroga esplicita al principio "mai
+        testo generato dall'AI nell'immagine" seguito nel resto del modulo:
+        un layout composto a mano (badge+logo+card+bottone via Pillow +
+        illustrazione AI laterale) e' rimasto troppo lontano dal mockup
+        atteso dall'utente anche dopo piu' iterazioni sullo stile.
+        Rischio noto e accettato: il testo nell'immagine generata non e'
+        garantito corretto al 100% — il testo esatto e verificato resta
+        comunque nella didascalia del post, mai solo nell'immagine."""
         import asyncio
-        import io
         prezzo = self._verifica_budget()
         larghezza, altezza = FORMATI[request.formato]
         taglia = _taglia_openai_per_formato(request.formato)
-        illustrazione_bytes = await asyncio.to_thread(
-            self._chiama_api, request.prompt_ai or request.titolo, taglia,
+        prompt_composto = _prompt_promozione_completa(request)
+        immagine_bytes = await asyncio.to_thread(
+            self._chiama_api, prompt_composto, taglia,
             request.immagini_riferimento, request.stile_ai)
         db_social.registra_costo(self.conn, "openai_images", prezzo,
                                  modello=config.openai_image_model(),
                                  content_id=request.content_id)
-        illustrazione = Image.open(io.BytesIO(illustrazione_bytes)).convert("RGB")
-
-        palette = {**PALETTE_DEFAULT, **(request.palette or {})}
-        scala = larghezza / 1080
-        margine = int(larghezza * MARGINE_SICURO)
-        interno = larghezza - 2 * margine
-        y_limite = altezza - int(56 * scala)
-
-        immagine = _sfondo_con_blob(larghezza, altezza, palette, scala)
-        draw = ImageDraw.Draw(immagine)
-
-        # Badge pillola in alto a sinistra + logo in alto a destra (stesso
-        # stile degli altri template, vedi TemplateImageProvider.genera_sync).
-        font_etichetta = _font(int(28 * scala), bold=True)
-        testo_etichetta = _ETICHETTA_TEMPLATE["promozione"]
-        larghezza_etichetta = draw.textlength(testo_etichetta, font=font_etichetta)
-        altezza_badge = int(66 * scala)
-        padding_badge = int(26 * scala)
-        icona_raggio = int(9 * scala)
-        larghezza_badge = int(padding_badge * 2.4 + icona_raggio * 2 + 12 * scala + larghezza_etichetta)
-        badge = _pillola_sfumata(larghezza_badge, altezza_badge, palette["viola"], palette["primario"])
-        y_badge = margine
-        immagine.paste(badge, (margine, y_badge), badge)
-        draw = ImageDraw.Draw(immagine)
-        cx_icona = margine + padding_badge + icona_raggio
-        _disegna_stella(draw, cx_icona, y_badge + altezza_badge // 2, icona_raggio, palette["testo_su_primario"])
-        draw.text((cx_icona + icona_raggio + int(12 * scala), y_badge + altezza_badge // 2),
-                  testo_etichetta, font=font_etichetta, fill=palette["testo_su_primario"], anchor="lm")
-
-        logo = _logo_completo(int(altezza_badge * 1.05))
-        if logo is not None:
-            x_logo = larghezza - margine - logo.width
-            y_logo = y_badge + (altezza_badge - logo.height) // 2
-            immagine.paste(logo, (x_logo, y_logo), logo)
-            draw = ImageDraw.Draw(immagine)
-
-        y = y_badge + altezza_badge + int(48 * scala)
-
-        # Illustrazione AI come riquadro arrotondato a destra (non a tutto
-        # schermo): resize "a copertura" dentro un box fisso, poi ritagliata
-        # con una maschera arrotondata e composta con un'ombra morbida sotto,
-        # come le card bianche del resto del design system.
-        illus_larghezza = int(interno * 0.36)
-        illus_altezza = int(altezza * 0.26)
-        illus_x1 = larghezza - margine
-        illus_x0 = illus_x1 - illus_larghezza
-        illus_y0 = y
-        illus_y1 = illus_y0 + illus_altezza
-        raggio_illus = int(28 * scala)
-        immagine = _disegna_ombra(immagine, (illus_x0, illus_y0, illus_x1, illus_y1), raggio_illus, scala)
-        illustrazione_cover = _ridimensiona_a_copertura(illustrazione, illus_larghezza, illus_altezza)
-        maschera_illus = Image.new("L", (illus_larghezza, illus_altezza), 0)
-        ImageDraw.Draw(maschera_illus).rounded_rectangle(
-            [0, 0, illus_larghezza - 1, illus_altezza - 1], radius=raggio_illus, fill=255)
-        illustrazione_rgba = illustrazione_cover.convert("RGBA")
-        illustrazione_rgba.putalpha(maschera_illus)
-        immagine.paste(illustrazione_rgba, (illus_x0, illus_y0), illustrazione_rgba)
-        draw = ImageDraw.Draw(immagine)
-
-        # Titolo + sottotitolo: colonna a sinistra dell'illustrazione (mai
-        # sotto di essa), colorati (non piu' bianco su fascia scura).
-        larghezza_colonna = illus_x0 - margine - int(30 * scala)
-        font_titolo, righe_titolo, altezza_riga_titolo = _adatta_testo_multilinea(
-            draw, request.titolo, dimensione_max=int(58 * scala), dimensione_min=int(34 * scala),
-            bold=True, larghezza_max=larghezza_colonna, altezza_disponibile=illus_altezza)
-        y_testo = y
-        for riga in righe_titolo[:_numero_di_elementi_che_entrano(y_testo, altezza_riga_titolo, illus_y1)]:
-            draw.text((margine, y_testo), riga, font=font_titolo, fill=palette["primario"])
-            y_testo += altezza_riga_titolo
-        if request.sottotitolo and y_testo < illus_y1:
-            font_sotto, righe_sotto, altezza_riga_sotto = _adatta_testo_multilinea(
-                draw, request.sottotitolo, dimensione_max=int(32 * scala), dimensione_min=int(22 * scala),
-                bold=False, larghezza_max=larghezza_colonna, altezza_disponibile=illus_y1 - y_testo)
-            for riga in righe_sotto[:_numero_di_elementi_che_entrano(y_testo, altezza_riga_sotto, illus_y1)]:
-                draw.text((margine, y_testo), riga, font=font_sotto, fill=palette["testo_muto"])
-                y_testo += altezza_riga_sotto
-
-        y = illus_y1 + int(40 * scala)
-
-        # Bottone CTA: riservato PRIMA della card dati, cosi' la card si
-        # ferma sempre in tempo invece di finire sotto/dietro il bottone.
-        altezza_pulsante = int(84 * scala)
-        y_limite_card = y_limite - altezza_pulsante - int(30 * scala)
-
-        # Card dati chiave: stessa struttura di TemplateImageProvider ma con
-        # un pallino piu' grande al posto del pallino piccolo — nessun
-        # glifo/emoji per l'icona (DejaVu su Linux/Docker non ha i
-        # Dingbats, vedi _disegna_stella): un cerchio pieno resta leggibile
-        # ovunque.
-        dati = request.dati_chiave[:4]
-        if dati and y < y_limite_card:
-            padding_card = int(28 * scala)
-            raggio_pallino = int(11 * scala)
-            rientro_testo = raggio_pallino * 2 + int(22 * scala)
-            larghezza_testo_dato = interno - 2 * padding_card - rientro_testo
-            spaziatura_item = int(20 * scala)
-            righe_per_dato = []
-            for dato in dati:
-                font_d, righe_d, altezza_riga_d = _adatta_testo_multilinea(
-                    draw, str(dato), dimensione_max=int(32 * scala), dimensione_min=int(20 * scala),
-                    bold=True, larghezza_max=larghezza_testo_dato,
-                    altezza_disponibile=int(32 * scala * 1.22) * 2)
-                righe_per_dato.append((font_d, righe_d, altezza_riga_d,
-                                       altezza_riga_d * len(righe_d) + spaziatura_item))
-            y_cursore = y + padding_card
-            limite_card = y_limite_card - padding_card
-            item_da_disegnare = []
-            for item in righe_per_dato:
-                if y_cursore + item[3] - spaziatura_item > limite_card:
-                    break
-                item_da_disegnare.append(item)
-                y_cursore += item[3]
-            if item_da_disegnare:
-                altezza_contenuto = sum(i[3] for i in item_da_disegnare) - spaziatura_item
-                altezza_card = padding_card * 2 + altezza_contenuto
-                box_card = (margine, y, larghezza - margine, y + altezza_card)
-                immagine = _disegna_ombra(immagine, box_card, int(22 * scala), scala)
-                draw = ImageDraw.Draw(immagine)
-                draw.rounded_rectangle(box_card, radius=int(22 * scala), fill=palette["card"],
-                                       outline=palette["bordo_card"], width=max(1, int(1.5 * scala)))
-                y_item = y + padding_card
-                for indice, (font_d, righe_d, altezza_riga_d, altezza_item) in enumerate(item_da_disegnare):
-                    cy_pallino = y_item + altezza_riga_d // 2
-                    draw.ellipse([margine + padding_card - raggio_pallino,
-                                 cy_pallino - raggio_pallino,
-                                 margine + padding_card + raggio_pallino,
-                                 cy_pallino + raggio_pallino], fill=palette["accento"])
-                    y_riga_testo = y_item
-                    for riga_testo in righe_d:
-                        draw.text((margine + padding_card + rientro_testo, y_riga_testo + altezza_riga_d // 2),
-                                  riga_testo, font=font_d, fill=palette["testo"], anchor="lm")
-                        y_riga_testo += altezza_riga_d
-                    if indice < len(item_da_disegnare) - 1:
-                        y_separatore = y_item + altezza_riga_d * len(righe_d) + spaziatura_item // 2
-                        draw.line([(margine + padding_card, y_separatore),
-                                  (larghezza - margine - padding_card, y_separatore)],
-                                 fill=palette["bordo_card"], width=max(1, int(1.5 * scala)))
-                    y_item += altezza_item
-                y = box_card[3] + int(30 * scala)
-
-        # Bottone CTA: pillola sfumata a tutta larghezza, ancorata in fondo
-        # (mai piu' in alto di quanto serva per non sovrapporsi alla card).
-        y_bottone = max(y, y_limite - altezza_pulsante)
-        bottone = _pillola_sfumata(interno, altezza_pulsante, palette["viola"], palette["primario"])
-        immagine.paste(bottone, (margine, y_bottone), bottone)
-        draw = ImageDraw.Draw(immagine)
-        font_bottone = _font(int(34 * scala), bold=True)
-        draw.text((larghezza // 2, y_bottone + altezza_pulsante // 2), "Scopri di più su JobInPA  →",
-                  font=font_bottone, fill=palette["testo_su_primario"], anchor="mm")
-
+        import io
+        immagine = Image.open(io.BytesIO(immagine_bytes)).convert("RGB")
+        immagine = _ridimensiona_a_copertura(immagine, larghezza, altezza)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         percorso = self.output_dir / f"ai_promo_{request.formato}_{uuid.uuid4().hex[:10]}.png"
-        immagine.convert("RGB").save(percorso, "PNG")
+        immagine.save(percorso, "PNG")
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 

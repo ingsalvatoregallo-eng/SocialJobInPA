@@ -44,6 +44,15 @@ def test_categoria_promozioni_seminata_con_stile_immagine_di_default(conn):
     assert "Flat vector" not in promozioni["stile_immagine"]
 
 
+def test_categoria_promozioni_stile_di_default_non_vieta_piu_il_testo(conn):
+    """Il template "promozione" fa comporre all'AI l'intera grafica, testo
+    incluso (vedi images._prompt_promozione_completa): un'istruzione "no
+    text" nello stile di default (residuo del vecchio layout disegnato a
+    mano) lo contraddirebbe direttamente."""
+    promozioni = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
+    assert "no text" not in promozioni["stile_immagine"].lower()
+
+
 def test_crea_categoria_e_recupera(conn):
     categoria_id = db_social.crea_categoria(conn, "Guida rapida", "Illustrazione di {TITOLO}")
     categoria = db_social.get_categoria(conn, categoria_id)

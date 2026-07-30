@@ -478,17 +478,18 @@ SETTINGS_DEFAULT = {
     "retention_backup_giorni": 30,
 }
 
-# Categoria seminata di default (menu "Categorie", vedi crea_categoria):
-# solo il soggetto/l'illustrazione (stile, palette e assenza di testo
-# restano fissi lato codice, vedi images._STILE_OPENAI_IMAGES). Placeholder
-# disponibili: {TITOLO}, {SCADENZA} (vedi agents.visual).
+# Categoria seminata di default (menu "Categorie", vedi crea_categoria).
+# Per "Promozioni" questo testo descrive SOLO l'illustrazione laterale:
+# viene inserito (in inglese, come frammento di frase) dentro il prompt
+# completo del template "promozione" (vedi images._prompt_promozione_
+# completa), che a differenza di images._STILE_OPENAI_IMAGES fa comporre
+# all'AI l'intera grafica testo incluso — non solo un'illustrazione senza
+# scritte. Placeholder disponibili: {TITOLO}, {SCADENZA} (vedi agents.visual).
 CATEGORIA_PROMOZIONI_DEFAULT_PROMPT = (
-    "Illustrazione 3D moderna ed elegante di un pacchetto regalo nei "
-    "colori del brand, accanto a un calendario stilizzato (senza numeri "
-    "ne' testo) che richiama una scadenza imminente. Piccoli elementi "
-    "decorativi coerenti: scintille, forme morbide, onde leggere sullo "
-    "sfondo. Composizione calda e promozionale. Tema della promozione: "
-    "{TITOLO}."
+    "a glossy 3D gift box in the brand colors with a ribbon, next to a "
+    "stylized desk calendar highlighting the expiry date, small sparkles "
+    "and soft decorative shapes around them, warm and promotional "
+    "composition. Promotion theme: {TITOLO}, expiring {SCADENZA}."
 )
 
 # Struttura suggerita al Copywriter Agent per le promozioni (l'AI scrive
@@ -508,16 +509,16 @@ CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA = (
 # confligge con l'estetica commerciale/SaaS che una promozione richiede
 # (sfondo sfumato, look 3D lucido). Sostituisce del tutto lo stile fisso
 # per questa categoria (vedi social_content_categories.stile_immagine).
+# A differenza dello stile fisso, qui NON si vieta il testo: il template
+# "promozione" fa comporre all'AI l'intera grafica, testo incluso (vedi
+# images._prompt_promozione_completa) — le istruzioni di testo esatto
+# stanno in quel prompt, qui solo l'estetica generale.
 CATEGORIA_PROMOZIONI_DEFAULT_STILE = (
-    "Modern glossy 3D/semi-3D illustration, premium SaaS/tech aesthetic, "
-    "soft rounded shapes with gentle shadows and highlights. Background: "
-    "smooth gradient from white to light lavender/blue. Accent colors: "
-    "purple #7C3AED and institutional blue #0B3D91 on the main "
-    "illustrated object, plus small decorative sparkles. Clean and "
-    "elegant, not flat vector, not photorealistic, no real people. No "
-    "text, no letters, no numbers, no words anywhere in the image. Leave "
-    "the bottom half of the composition visually calm and uncluttered, "
-    "suitable for overlaid text. Subject: "
+    "Modern glossy 3D SaaS marketing graphic, premium and polished, soft "
+    "rounded shapes with gentle shadows and highlights. Background: smooth "
+    "gradient from white to light lavender/blue. Accent colors: purple "
+    "#7C3AED and institutional blue #0B3D91. Small decorative sparkles. "
+    "Clean, elegant, not flat vector, not photorealistic, no real people."
 )
 
 
@@ -650,6 +651,26 @@ def _migra(conn):
             "UPDATE social_content_categories SET stile_immagine = ? "
             "WHERE id = ? AND (stile_immagine IS NULL OR stile_immagine = '')",
             (CATEGORIA_PROMOZIONI_DEFAULT_STILE, riga_promo_vecchia["id"]))
+        # Il vecchio stile di default (prima del template "promozione" a
+        # grafica intera, vedi images._prompt_promozione_completa) vietava
+        # esplicitamente il testo nell'immagine: se e' rimasto esattamente
+        # quel valore (mai personalizzato a mano), passa al nuovo default,
+        # che non lo vieta piu' — non tocca chi lo ha gia' modificato.
+        vecchio_stile_promozioni = (
+            "Modern glossy 3D/semi-3D illustration, premium SaaS/tech aesthetic, "
+            "soft rounded shapes with gentle shadows and highlights. Background: "
+            "smooth gradient from white to light lavender/blue. Accent colors: "
+            "purple #7C3AED and institutional blue #0B3D91 on the main "
+            "illustrated object, plus small decorative sparkles. Clean and "
+            "elegant, not flat vector, not photorealistic, no real people. No "
+            "text, no letters, no numbers, no words anywhere in the image. Leave "
+            "the bottom half of the composition visually calm and uncluttered, "
+            "suitable for overlaid text. Subject: "
+        )
+        conn.execute(
+            "UPDATE social_content_categories SET stile_immagine = ? "
+            "WHERE id = ? AND stile_immagine = ?",
+            (CATEGORIA_PROMOZIONI_DEFAULT_STILE, riga_promo_vecchia["id"], vecchio_stile_promozioni))
     else:
         crea_categoria(conn, "Promozioni", CATEGORIA_PROMOZIONI_DEFAULT_PROMPT,
                        strategia_fatti="promozioni_jobinpa",

@@ -198,12 +198,9 @@ _PNG_1X1_OPENAI = bytes.fromhex(
 
 @pytest.mark.parametrize("formato", list(images.FORMATI))
 def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, formato):
-    """Layout a card (badge/logo/illustrazione laterale/card dati/CTA, vedi
-    OpenAIImageProvider._genera_promozione): non deve mai far crashare il
-    rendering, nemmeno nei formati piu' bassi (linkedin, 1200x627) dove lo
-    spazio verticale disponibile per la card dati e' piu' stretto — al
-    limite la card viene omessa (vedi guardia 'if dati and y < y_limite_card'),
-    mai un'eccezione o un elemento sovrapposto."""
+    """Il template "promozione" fa comporre all'AI l'intera grafica (vedi
+    OpenAIImageProvider._genera_promozione): l'immagine ricevuta viene solo
+    ridimensionata "a copertura" sul formato target, mai un crash."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
     provider = images.OpenAIImageProvider(conn)
@@ -219,6 +216,50 @@ def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, form
     with Image.open(asset.percorso) as img:
         assert img.size == images.FORMATI[formato]
         assert img.format == "PNG"
+
+
+def test_prompt_promozione_completa_include_testo_esatto_tra_virgolette(conn):
+    """Il prompt deve contenere titolo/dati_chiave/CTA come stringhe esatte
+    tra virgolette (vedi images._prompt_promozione_completa): a differenza
+    di _STILE_OPENAI_IMAGES, qui il testo nell'immagine e' voluto, non
+    vietato — deve arrivare al modello parola per parola, non parafrasato."""
+    richiesta = images.ImageGenerationRequest(
+        template="promozione", formato="instagram_feed",
+        titolo="Piano Base: prova l'AI di JobInPA senza impegno",
+        sottotitolo="Promozione a tempo limitato",
+        dati_chiave=["Promozione: Base", "Valida fino al 31 agosto 2026"])
+    prompt = images._prompt_promozione_completa(richiesta)
+    assert '"Piano Base: prova l\'AI di JobInPA senza impegno"' in prompt
+    assert '"Promozione a tempo limitato"' in prompt
+    assert '"Promozione: Base"' in prompt
+    assert '"Valida fino al 31 agosto 2026"' in prompt
+    assert '"PROMOZIONE JOBINPA"' in prompt
+    assert '"Scopri di più su JobInPA"' in prompt
+
+
+def test_prompt_promozione_completa_senza_sottotitolo_non_lo_menziona(conn):
+    richiesta = images.ImageGenerationRequest(
+        template="promozione", formato="instagram_feed", titolo="Tema", dati_chiave=[])
+    prompt = images._prompt_promozione_completa(richiesta)
+    assert "subtitle" not in prompt.lower()
+
+
+def test_genera_promozione_invia_il_prompt_completo_a_openai(conn, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    catturato = {}
+
+    def _post_finto(url, **kwargs):
+        catturato["prompt"] = kwargs["json"]["prompt"]
+        return _RispostaFinta()
+
+    monkeypatch.setattr("requests.post", _post_finto)
+    provider = images.OpenAIImageProvider(conn)
+    richiesta = images.ImageGenerationRequest(
+        template="promozione", formato="instagram_feed",
+        titolo="Piano Base gratis", dati_chiave=["Valida fino al 31 agosto 2026"])
+    asyncio.run(provider.generate(richiesta))
+    assert '"Piano Base gratis"' in catturato["prompt"]
+    assert '"Valida fino al 31 agosto 2026"' in catturato["prompt"]
 
 
 def test_genera_promozione_usato_solo_per_il_template_promozione(conn, monkeypatch):
