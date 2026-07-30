@@ -41,6 +41,21 @@
       {% endif %}
     </div>
 
+    <div id="blocco-funzionalita" style="display:none">
+      <label>Funzionalità di JobInPA *</label>
+      {% if funzionalita_disponibili %}
+      <select name="funzionalita_selezionata" id="campo-funzionalita-selezionata">
+        <option value="">— seleziona —</option>
+        {% for f in funzionalita_disponibili %}
+        <option value="{{ f.chiave }}">{{ f.icona }} {{ f.nome }} ({{ f.categoria }})</option>
+        {% endfor %}
+      </select>
+      <p class="hint">Nome, descrizione, categoria e link vengono letti dal catalogo JobInPA in questo momento: il copywriter AI scrive il post a partire da questi dati reali (comprese le statistiche d'uso, quando disponibili).</p>
+      {% else %}
+      <div class="avviso giallo">⚠️ Nessuna funzionalità trovata su JobInPA in questo momento (o l'integrazione JOBINPA_API_URL/KEY non è configurata).</div>
+      {% endif %}
+    </div>
+
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <label>Pillar</label>
@@ -93,12 +108,17 @@ function aggiornaCategoria() {
   var opzione = select.options[select.selectedIndex];
   var strategia = opzione ? opzione.dataset.strategia : '';
   var promozione = strategia === 'promozioni_jobinpa';
+  var funzionalita = strategia === 'funzionalita_jobinpa';
+  var titoloLibero = !promozione && !funzionalita;
 
   document.getElementById('blocco-promozione').style.display = promozione ? 'block' : 'none';
-  document.getElementById('blocco-titolo').style.display = promozione ? 'none' : 'block';
-  document.getElementById('campo-titolo').disabled = promozione;
+  document.getElementById('blocco-funzionalita').style.display = funzionalita ? 'block' : 'none';
+  document.getElementById('blocco-titolo').style.display = titoloLibero ? 'block' : 'none';
+  document.getElementById('campo-titolo').disabled = !titoloLibero;
   var selectPromo = document.getElementById('campo-promo-selezionata');
   if (selectPromo) { selectPromo.disabled = !promozione; }
+  var selectFunzionalita = document.getElementById('campo-funzionalita-selezionata');
+  if (selectFunzionalita) { selectFunzionalita.disabled = !funzionalita; }
 
   document.getElementById('avviso-annullamento').style.display =
     strategia === 'bandi_jobinpa' ? 'block' : 'none';

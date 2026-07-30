@@ -65,6 +65,9 @@ class _ClientFinto:
     def promozioni(self):
         return self._promozioni
 
+    def funzionalita(self):
+        return {}
+
 
 @pytest.fixture
 def client(conn, tmp_db_path):

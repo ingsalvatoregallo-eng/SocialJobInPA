@@ -8,7 +8,7 @@
   </div>
 </div>
 
-<div class="avviso info">ℹ️ <strong>Strategia fatti</strong> decide come si procurano i dati: <em>Bandi JobInPA</em> cerca/filtra bandi reali dal brief, <em>Promozioni JobInPA</em> legge le promozioni attive in diretta (mai a mano), <em>Libera</em> lascia scrivere tutto all'AI dal solo brief (revisione umana sempre richiesta). <strong>Struttura del post</strong> guida il Copywriter (l'AI scrive comunque le parole sui fatti veri). <strong>Prompt immagine</strong> descrive SOLO il soggetto/l'illustrazione (stile e assenza di testo/numeri restano fissi) — lascialo vuoto per far scegliere liberamente il soggetto all'AI (es. per "Concorsi", dove varia da bando a bando). Placeholder: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>.</div>
+<div class="avviso info">ℹ️ <strong>Strategia fatti</strong> decide come si procurano i dati: <em>Bandi JobInPA</em> cerca/filtra bandi reali dal brief, <em>Promozioni JobInPA</em> legge le promozioni attive in diretta (mai a mano), <em>Funzionalità JobInPA</em> legge il catalogo funzionalità + statistiche d'uso reali, <em>Libera</em> lascia scrivere tutto all'AI dal solo brief (revisione umana sempre richiesta). <strong>Struttura del post</strong> guida il Copywriter (l'AI scrive comunque le parole sui fatti veri). <strong>Prompt immagine</strong> descrive SOLO il soggetto/l'illustrazione (stile e assenza di testo/numeri restano fissi) — lascialo vuoto per far scegliere liberamente il soggetto all'AI (es. per "Concorsi", dove varia da bando a bando). Placeholder: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>.</div>
 
 <div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
   <div class="card">
@@ -21,8 +21,10 @@
           <img src="/social/categorie/{{ c.id }}/immagine/{{ loop.index0 }}" alt="riferimento {{ c.nome }} {{ loop.index }}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">
           {% endfor %}
           <strong style="font-size:14px">{{ c.nome }}</strong>
-          <span class="badge {{ 'blu' if c.strategia_fatti == 'bandi_jobinpa' else 'viola' if c.strategia_fatti == 'promozioni_jobinpa' else 'grigio' }}">
-            {{ 'Bandi JobInPA' if c.strategia_fatti == 'bandi_jobinpa' else 'Promozioni JobInPA' if c.strategia_fatti == 'promozioni_jobinpa' else 'Libera' }}
+          {% set colore_strategia = {'bandi_jobinpa': 'blu', 'promozioni_jobinpa': 'viola', 'funzionalita_jobinpa': 'verde', 'libera': 'grigio'} %}
+          {% set etichetta_strategia = {'bandi_jobinpa': 'Bandi JobInPA', 'promozioni_jobinpa': 'Promozioni JobInPA', 'funzionalita_jobinpa': 'Funzionalità JobInPA', 'libera': 'Libera'} %}
+          <span class="badge {{ colore_strategia.get(c.strategia_fatti, 'grigio') }}">
+            {{ etichetta_strategia.get(c.strategia_fatti, c.strategia_fatti) }}
           </span>
         </div>
         <div style="display:flex;gap:8px;white-space:nowrap">
@@ -47,6 +49,7 @@
           <select name="strategia_fatti">
             <option value="bandi_jobinpa" {{ 'selected' if c.strategia_fatti == 'bandi_jobinpa' }}>Bandi JobInPA — cerca/filtra bandi dal brief</option>
             <option value="promozioni_jobinpa" {{ 'selected' if c.strategia_fatti == 'promozioni_jobinpa' }}>Promozioni JobInPA — legge le promozioni attive</option>
+            <option value="funzionalita_jobinpa" {{ 'selected' if c.strategia_fatti == 'funzionalita_jobinpa' }}>Funzionalità JobInPA — legge il catalogo funzionalità</option>
             <option value="libera" {{ 'selected' if c.strategia_fatti == 'libera' }}>Libera — l'AI scrive dal solo brief</option>
           </select>
 
@@ -95,6 +98,7 @@
       <select name="strategia_fatti" required>
         <option value="bandi_jobinpa">Bandi JobInPA — cerca/filtra bandi dal brief</option>
         <option value="promozioni_jobinpa">Promozioni JobInPA — legge le promozioni attive</option>
+        <option value="funzionalita_jobinpa">Funzionalità JobInPA — legge il catalogo funzionalità</option>
         <option value="libera" selected>Libera — l'AI scrive dal solo brief</option>
       </select>
 

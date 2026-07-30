@@ -529,17 +529,19 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
     return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
         request, sessione, conn, pillars=db_social.pillars(conn),
         categorie=db_social.lista_categorie(conn),
-        # Promozioni davvero attive lette in diretta da JobInPA (mai
-        # inserite a mano, vedi crea_contenuto sotto): [] se l'API non e'
-        # configurata o irraggiungibile, il form lo segnala.
-        promozioni_disponibili=jobinpa_client.client().promozioni()))
+        # Promozioni/funzionalita' davvero attive/reali lette in diretta da
+        # JobInPA (mai inserite a mano, vedi crea_contenuto sotto): [] se
+        # l'API non e' configurata o irraggiungibile, il form lo segnala.
+        promozioni_disponibili=jobinpa_client.client().promozioni(),
+        funzionalita_disponibili=jobinpa_client.client().funzionalita().get("funzionalita", [])))
 
 
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(None),
                    pillar: str = Form(None), obiettivo: str = Form(None),
                    brief: str = Form(None), categoria_id: str = Form(...),
-                   promo_selezionata: str = Form(None), csrf: str = Form(None),
+                   promo_selezionata: str = Form(None),
+                   funzionalita_selezionata: str = Form(None), csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
     "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
@@ -557,6 +559,7 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
         raise HTTPException(status_code=400, detail="Categoria non valida")
     scadenza_promo = None
     promo_dati = None
+    funzionalita_dati = None
     if categoria["strategia_fatti"] == "promozioni_jobinpa":
         # Titolo/prezzo/scadenza NON arrivano dal form (mai un claim
         # commerciale scritto a mano): si rilegge la promo in diretta da
@@ -573,13 +576,28 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
         titolo = promo["nome"]
         scadenza_promo = promo.get("scadenza")
         promo_dati = promo
+    elif categoria["strategia_fatti"] == "funzionalita_jobinpa":
+        # Nome/descrizione/URL NON arrivano dal form (mai un claim inventato
+        # su cosa fa JobInPA): si rilegge il catalogo in diretta, cosi' i
+        # dati (comprese le statistiche d'uso) sono sempre aggiornati.
+        if not funzionalita_selezionata:
+            raise HTTPException(status_code=400, detail="Seleziona una funzionalità")
+        risposta = jobinpa_client.client().funzionalita()
+        funz = next((f for f in risposta.get("funzionalita", [])
+                    if f["chiave"] == funzionalita_selezionata), None)
+        if funz is None:
+            raise HTTPException(
+                status_code=400, detail="Funzionalità non più disponibile: ricarica la pagina")
+        titolo = funz["nome"]
+        funzionalita_dati = {**funz, "statistiche": risposta.get("statistiche", {})}
     elif not titolo or not titolo.strip():
         raise HTTPException(status_code=400, detail="Titolo obbligatorio")
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
                                         obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
                                         scadenza_promo=scadenza_promo,
-                                        promo_dati=promo_dati, categoria_id=categoria_id,
+                                        promo_dati=promo_dati, funzionalita_dati=funzionalita_dati,
+                                        categoria_id=categoria_id,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
@@ -799,6 +817,8 @@ def approvazioni(request: Request, content_id: str = None,
             "fatti": db_social.fatti_di(conn, selezionata["content_id"]),
             "bandi_trovati": json.loads(content["bandi_trovati"] or "[]"),
             "promo_dati": json.loads(content["promo_dati"]) if content["promo_dati"] else None,
+            "funzionalita_dati": json.loads(content["funzionalita_dati"])
+                                if content["funzionalita_dati"] else None,
         }
     return templates.TemplateResponse(request, "approvazioni.html", _ctx(
         request, sessione, conn, approvazioni=coda, selezionata=selezionata, dettaglio=dettaglio))

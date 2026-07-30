@@ -103,10 +103,11 @@ TIPOLOGIE_CONTENUTO = ("concorso", "promozione", "generico")
 # Come una categoria (menu Categorie) procura/verifica i fatti di un
 # contenuto (vedi agents.research): bandi_jobinpa cerca/filtra bandi
 # come sempre fatto per "Concorsi"; promozioni_jobinpa legge le
-# promozioni attive da JobInPA (mai a mano); libera lascia scrivere
-# tutto all'AI dal solo brief (es. "Funzionalita'", finche' non esiste
-# un'API dedicata), forzando comunque la revisione umana.
-STRATEGIE_FATTI = ("bandi_jobinpa", "promozioni_jobinpa", "libera")
+# promozioni attive da JobInPA (mai a mano); funzionalita_jobinpa legge
+# il catalogo funzionalita' + statistiche d'uso reali da JobInPA; libera
+# lascia scrivere tutto all'AI dal solo brief, forzando comunque la
+# revisione umana.
+STRATEGIE_FATTI = ("bandi_jobinpa", "promozioni_jobinpa", "funzionalita_jobinpa", "libera")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS utenti (
@@ -230,6 +231,7 @@ CREATE TABLE IF NOT EXISTS social_content (
     tipologia     TEXT NOT NULL DEFAULT 'concorso',  -- concorso | promozione | generico
     scadenza_promo TEXT,              -- data (YYYY-MM-DD), solo tipologia 'promozione'
     promo_dati    TEXT,               -- JSON: dati reali della promo letti da JobInPA
+    funzionalita_dati TEXT,           -- JSON: dati reali della funzionalita' (+ statistiche) da JobInPA
     categoria_id  TEXT,               -- riferimento facoltativo a social_content_categories(id)
     is_demo       INTEGER NOT NULL DEFAULT 0,
     creato_da     INTEGER,            -- utenti.id
@@ -563,6 +565,9 @@ def _migra(conn):
     if "promo_dati" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN promo_dati TEXT")
         conn.commit()
+    if "funzionalita_dati" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN funzionalita_dati TEXT")
+        conn.commit()
     if "categoria_id" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN categoria_id TEXT")
         conn.commit()
@@ -627,7 +632,14 @@ def _migra(conn):
         crea_categoria(conn, "Concorsi", "", strategia_fatti="bandi_jobinpa")
     if not conn.execute(
             "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Funzionalità",)).fetchone():
-        crea_categoria(conn, "Funzionalità", "", strategia_fatti="libera")
+        crea_categoria(conn, "Funzionalità", "", strategia_fatti="funzionalita_jobinpa")
+    else:
+        # Prima dell'API dedicata "Funzionalità" era seminata 'libera':
+        # passa alla strategia vera solo se non e' gia' stata personalizzata
+        # a mano (mai sovrascrivere una scelta esplicita dell'utente).
+        conn.execute(
+            "UPDATE social_content_categories SET strategia_fatti = 'funzionalita_jobinpa' "
+            "WHERE nome = 'Funzionalità' AND strategia_fatti = 'libera'")
     # Contenuti creati prima di questa migrazione: collegati alla
     # categoria corrispondente alla vecchia tipologia, cosi' continuano a
     # comportarsi esattamente come prima (vedi agents.research/visual,
@@ -749,7 +761,7 @@ def audit_recenti(conn, limit=100):
 
 def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None, canali=None,
                  concorso_id=None, creato_da=None, is_demo=False, tipologia="concorso",
-                 scadenza_promo=None, promo_dati=None, categoria_id=None):
+                 scadenza_promo=None, promo_dati=None, funzionalita_dati=None, categoria_id=None):
     if tipologia not in TIPOLOGIE_CONTENUTO:
         raise ValueError(f"tipologia non valida: {tipologia}")
     pillar_id = None
@@ -764,6 +776,8 @@ def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None
         "concorso_id": concorso_id, "creato_da": creato_da, "tipologia": tipologia,
         "scadenza_promo": scadenza_promo,
         "promo_dati": json.dumps(promo_dati, ensure_ascii=False) if promo_dati else None,
+        "funzionalita_dati": json.dumps(funzionalita_dati, ensure_ascii=False)
+                             if funzionalita_dati else None,
         "categoria_id": categoria_id,
         "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()

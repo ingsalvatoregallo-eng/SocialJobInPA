@@ -44,6 +44,17 @@ class NessunBandoCorrispondente(Exception):
     scrivere un post su un risultato vuoto (vedi esegui_pipeline)."""
 
 
+# Quale statistica aggregata (da /api/internal/funzionalita, vedi
+# research()) citare per ciascuna funzionalita', quando pertinente: un
+# numero reale e verificabile invece di un generico "molto usata".
+_STAT_PER_FUNZIONALITA = {
+    "ricerca_intelligente": "ricerche_intelligenti_questo_mese",
+    "analisi_cv": "analisi_cv_questo_mese",
+    "bandi_consigliati": "analisi_cv_questo_mese",
+    "verifica_compatibilita_bando": "analisi_cv_questo_mese",
+}
+
+
 def _run_llm(conn, agente, prompt_nome, schema, user_prompt, *,
              content_id=None, provider=None):
     """Esegue una chiamata LLM tracciata in social_agent_runs."""
@@ -237,6 +248,35 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
                                   richiede_revisione=risultato.richiede_revisione)
         db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
         return risultato
+    if strategia == "funzionalita_jobinpa":
+        # Nessuna ricerca bandi/promo: il fatto e' la funzionalita' stessa,
+        # letta in diretta dal catalogo JobInPA (funzionalita_dati,
+        # popolato alla creazione da jobinpa_client.funzionalita() — vedi
+        # web.crea_contenuto), non un claim scritto a mano. Stesso motivo
+        # delle promozioni per forzare comunque la revisione umana.
+        funz = json.loads(content["funzionalita_dati"]) if content["funzionalita_dati"] else None
+        if funz:
+            fatto = (f"Funzionalità \"{funz['nome']}\" di JobInPA "
+                    f"({funz['categoria']}): {funz['descrizione_estesa']}")
+            stat_chiave = _STAT_PER_FUNZIONALITA.get(funz.get("chiave"))
+            valore_stat = (funz.get("statistiche") or {}).get(stat_chiave) if stat_chiave else None
+            if valore_stat is not None:
+                fatto += f". Dato reale di questo mese: {valore_stat} utilizzi."
+            fonte_url = funz.get("url_jobinpa")
+        else:
+            # Fallback per contenuti creati prima del fetch automatico (o
+            # se JobInPA non era raggiungibile alla creazione).
+            fatto = content["brief"] or content["titolo"]
+            fonte_url = None
+        risultato = models.RisultatoRicerca(
+            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0, fonte_url=fonte_url)],
+            sintesi=fatto, richiede_revisione=True, annuncio_funzionalita=True)
+        for f in risultato.fatti:
+            db_social.salva_fatto(conn, f.fatto, content_id=content_id,
+                                  fonte_url=f.fonte_url, confidenza=f.confidenza,
+                                  richiede_revisione=risultato.richiede_revisione)
+        db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
+        return risultato
     if strategia == "libera":
         # Nessuna ricerca (ne' bandi ne' promozioni): il brief stesso e'
         # il fatto, tipicamente un annuncio su una funzionalita' della
@@ -358,6 +398,11 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
         if promo_link:
             base += (f"\nLink JobInPA della promozione (fonte primaria, includilo nel "
                     f"testo): {promo_link}")
+    if content["funzionalita_dati"]:
+        funz_link = json.loads(content["funzionalita_dati"]).get("url_jobinpa")
+        if funz_link:
+            base += (f"\nLink JobInPA della funzionalità (fonte primaria, includilo nel "
+                    f"testo): {funz_link}")
     categoria = _categoria_per_content(conn, content)
     if categoria and categoria["struttura_post"]:
         # Guida di struttura per la categoria scelta (menu Categorie): il

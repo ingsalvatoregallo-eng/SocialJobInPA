@@ -31,7 +31,7 @@ def test_categorie_di_default_seminate(conn):
     categorie = {c["nome"]: c for c in db_social.lista_categorie(conn)}
     assert categorie["Concorsi"]["strategia_fatti"] == "bandi_jobinpa"
     assert categorie["Promozioni"]["strategia_fatti"] == "promozioni_jobinpa"
-    assert categorie["Funzionalità"]["strategia_fatti"] == "libera"
+    assert categorie["Funzionalità"]["strategia_fatti"] == "funzionalita_jobinpa"
 
 
 def test_crea_categoria_e_recupera(conn):

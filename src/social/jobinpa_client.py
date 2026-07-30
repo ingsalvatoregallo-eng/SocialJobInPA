@@ -129,6 +129,21 @@ class JobInPAClient:
             log.warning("lettura promozioni da JobInPA fallita: %s", errore)
             return []
 
+    def funzionalita(self):
+        """Catalogo delle funzionalita' del sito + statistiche d'uso
+        aggregate (mai per singolo utente): usate per creare contenuti
+        'funzionalita' senza inserire dati a mano (mai un claim inventato
+        su cosa fa JobInPA). Dict {"funzionalita": [...], "statistiche":
+        {...}}; {} se non configurato o in caso di errore di rete."""
+        if not self.configurato:
+            log.info("JobInPA API non configurata (JOBINPA_API_URL/KEY): nessuna funzionalità")
+            return {}
+        try:
+            return self._get("/api/internal/funzionalita")
+        except requests.RequestException as errore:
+            log.warning("lettura funzionalità da JobInPA fallita: %s", errore)
+            return {}
+
     def filtri_disponibili(self):
         """Vocabolari chiusi/valori realmente presenti per i filtri di
         bandi() (regioni, categorie, competenze, ecc.) — serve all'interprete

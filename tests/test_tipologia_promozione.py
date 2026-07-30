@@ -111,10 +111,12 @@ def test_esegui_pipeline_promozione_forza_approvazione_anche_a_classe_verde(conn
     assert stato_finale == "AWAITING_APPROVAL"
 
 
-def test_esegui_pipeline_categoria_libera_forza_approvazione_anche_a_classe_verde(conn):
-    """Stessa garanzia per la strategia 'libera' (categoria "Funzionalità",
-    seminata di default): mai pubblicazione automatica su un annuncio
-    senza fonte esterna verificabile, anche a classe verde."""
+def test_esegui_pipeline_categoria_funzionalita_forza_approvazione_anche_a_classe_verde(conn):
+    """Stessa garanzia per la strategia 'funzionalita_jobinpa' (categoria
+    "Funzionalità", seminata di default): mai pubblicazione automatica su
+    un annuncio, anche a classe verde — qui senza funzionalita_dati
+    (percorso di fallback, vedi test_funzionalita_auto_fetch.py per il
+    caso con dati reali)."""
     provider = llm.MockLLMProvider(conn)
     provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
         classe="verde", punteggio_accuratezza=0.95, punteggio_brand=0.95,
