@@ -541,7 +541,8 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
                    pillar: str = Form(None), obiettivo: str = Form(None),
                    brief: str = Form(None), categoria_id: str = Form(...),
                    promo_selezionata: str = Form(None),
-                   funzionalita_selezionata: str = Form(None), csrf: str = Form(None),
+                   funzionalita_selezionata: Optional[list[str]] = Form(None),
+                   csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
     "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
@@ -579,17 +580,27 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
     elif categoria["strategia_fatti"] == "funzionalita_jobinpa":
         # Nome/descrizione/URL NON arrivano dal form (mai un claim inventato
         # su cosa fa JobInPA): si rilegge il catalogo in diretta, cosi' i
-        # dati (comprese le statistiche d'uso) sono sempre aggiornati.
-        if not funzionalita_selezionata:
-            raise HTTPException(status_code=400, detail="Seleziona una funzionalità")
+        # dati (comprese le statistiche d'uso) sono sempre aggiornati. Una
+        # o piu' funzionalita' insieme (es. un post che ne combina piu' di
+        # una): il titolo/tema del post resta libero, a differenza delle
+        # promozioni non c'e' un singolo "nome" ovvio da cui derivarlo.
+        chiavi_selezionate = [c for c in (funzionalita_selezionata or []) if c]
+        if not chiavi_selezionate:
+            raise HTTPException(status_code=400, detail="Seleziona almeno una funzionalità")
         risposta = jobinpa_client.client().funzionalita()
-        funz = next((f for f in risposta.get("funzionalita", [])
-                    if f["chiave"] == funzionalita_selezionata), None)
-        if funz is None:
-            raise HTTPException(
-                status_code=400, detail="Funzionalità non più disponibile: ricarica la pagina")
-        titolo = funz["nome"]
-        funzionalita_dati = {**funz, "statistiche": risposta.get("statistiche", {})}
+        catalogo = {f["chiave"]: f for f in risposta.get("funzionalita", [])}
+        funzionalita_scelte = []
+        for chiave in chiavi_selezionate:
+            funz = catalogo.get(chiave)
+            if funz is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Funzionalità non più disponibile: ricarica la pagina")
+            funzionalita_scelte.append(funz)
+        funzionalita_dati = {"funzionalita": funzionalita_scelte,
+                             "statistiche": risposta.get("statistiche", {})}
+        if not titolo or not titolo.strip():
+            raise HTTPException(status_code=400, detail="Titolo obbligatorio")
     elif not titolo or not titolo.strip():
         raise HTTPException(status_code=400, detail="Titolo obbligatorio")
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,

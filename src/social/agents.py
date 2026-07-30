@@ -249,28 +249,37 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
         db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
         return risultato
     if strategia == "funzionalita_jobinpa":
-        # Nessuna ricerca bandi/promo: il fatto e' la funzionalita' stessa,
-        # letta in diretta dal catalogo JobInPA (funzionalita_dati,
-        # popolato alla creazione da jobinpa_client.funzionalita() — vedi
-        # web.crea_contenuto), non un claim scritto a mano. Stesso motivo
-        # delle promozioni per forzare comunque la revisione umana.
-        funz = json.loads(content["funzionalita_dati"]) if content["funzionalita_dati"] else None
-        if funz:
-            fatto = (f"Funzionalità \"{funz['nome']}\" di JobInPA "
-                    f"({funz['categoria']}): {funz['descrizione_estesa']}")
-            stat_chiave = _STAT_PER_FUNZIONALITA.get(funz.get("chiave"))
-            valore_stat = (funz.get("statistiche") or {}).get(stat_chiave) if stat_chiave else None
-            if valore_stat is not None:
-                fatto += f". Dato reale di questo mese: {valore_stat} utilizzi."
-            fonte_url = funz.get("url_jobinpa")
+        # Nessuna ricerca bandi/promo: i fatti sono le funzionalita' stesse
+        # (una o piu', vedi web.crea_contenuto), lette in diretta dal
+        # catalogo JobInPA (funzionalita_dati), non un claim scritto a
+        # mano. Stesso motivo delle promozioni per forzare comunque la
+        # revisione umana.
+        dati = json.loads(content["funzionalita_dati"]) if content["funzionalita_dati"] else None
+        funzionalita_lista = (dati or {}).get("funzionalita") or []
+        if funzionalita_lista:
+            # Le statistiche sono aggregate una volta sola (vedi
+            # web.crea_contenuto), non per singola funzionalita'.
+            statistiche = (dati or {}).get("statistiche") or {}
+            fatti_verificati = []
+            for funz in funzionalita_lista:
+                fatto = (f"Funzionalità \"{funz['nome']}\" di JobInPA "
+                        f"({funz['categoria']}): {funz['descrizione_estesa']}")
+                stat_chiave = _STAT_PER_FUNZIONALITA.get(funz.get("chiave"))
+                valore_stat = statistiche.get(stat_chiave) if stat_chiave else None
+                if valore_stat is not None:
+                    fatto += f". Dato reale di questo mese: {valore_stat} utilizzi."
+                fatti_verificati.append(models.FattoVerificato(
+                    fatto=fatto, confidenza=1.0, fonte_url=funz.get("url_jobinpa")))
+            sintesi = "; ".join(f.fatto for f in fatti_verificati)
         else:
             # Fallback per contenuti creati prima del fetch automatico (o
             # se JobInPA non era raggiungibile alla creazione).
             fatto = content["brief"] or content["titolo"]
-            fonte_url = None
+            fatti_verificati = [models.FattoVerificato(fatto=fatto, confidenza=1.0)]
+            sintesi = fatto
         risultato = models.RisultatoRicerca(
-            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0, fonte_url=fonte_url)],
-            sintesi=fatto, richiede_revisione=True, annuncio_funzionalita=True)
+            fatti=fatti_verificati, sintesi=sintesi, richiede_revisione=True,
+            annuncio_funzionalita=True)
         for f in risultato.fatti:
             db_social.salva_fatto(conn, f.fatto, content_id=content_id,
                                   fonte_url=f.fonte_url, confidenza=f.confidenza,
@@ -399,10 +408,13 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
             base += (f"\nLink JobInPA della promozione (fonte primaria, includilo nel "
                     f"testo): {promo_link}")
     if content["funzionalita_dati"]:
-        funz_link = json.loads(content["funzionalita_dati"]).get("url_jobinpa")
-        if funz_link:
-            base += (f"\nLink JobInPA della funzionalità (fonte primaria, includilo nel "
-                    f"testo): {funz_link}")
+        funzionalita_lista = json.loads(content["funzionalita_dati"]).get("funzionalita") or []
+        link_funzionalita = [(f["nome"], f["url_jobinpa"]) for f in funzionalita_lista
+                             if f.get("url_jobinpa")]
+        if link_funzionalita:
+            righe_link = "\n".join(f"- {nome}: {url}" for nome, url in link_funzionalita)
+            base += (f"\nLink JobInPA delle funzionalità citate (fonte primaria: includi "
+                    f"quello/i pertinente/i nel testo):\n{righe_link}")
     categoria = _categoria_per_content(conn, content)
     if categoria and categoria["struttura_post"]:
         # Guida di struttura per la categoria scelta (menu Categorie): il

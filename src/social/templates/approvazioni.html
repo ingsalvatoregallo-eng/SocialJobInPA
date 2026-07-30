@@ -79,25 +79,29 @@
     {% endif %}
 
     {% if dettaglio.categoria and dettaglio.categoria.strategia_fatti == 'funzionalita_jobinpa' %}
-    <h3 style="margin-top:18px">Funzionalità citata</h3>
-    {% if dettaglio.funzionalita_dati %}
-    <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:12px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
-        <strong style="font-size:13px">{{ dettaglio.funzionalita_dati.icona }} {{ dettaglio.funzionalita_dati.nome }}</strong>
-        <span class="badge verde" title="Letta in diretta da /api/internal/funzionalita al momento della creazione">✅ Verificata via API JobInPA</span>
+    <h3 style="margin-top:18px">Funzionalità citate</h3>
+    {% if dettaglio.funzionalita_dati and dettaglio.funzionalita_dati.funzionalita %}
+    {% set stat_map = {'ricerca_intelligente': 'ricerche_intelligenti_questo_mese', 'analisi_cv': 'analisi_cv_questo_mese', 'bandi_consigliati': 'analisi_cv_questo_mese', 'verifica_compatibilita_bando': 'analisi_cv_questo_mese'} %}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for funz in dettaglio.funzionalita_dati.funzionalita %}
+      <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+          <strong style="font-size:13px">{{ funz.icona }} {{ funz.nome }}</strong>
+          <span class="badge verde" title="Letta in diretta da /api/internal/funzionalita al momento della creazione">✅ Verificata via API JobInPA</span>
+        </div>
+        <p class="hint" style="margin:4px 0">{{ funz.descrizione_estesa }}</p>
+        <p class="hint" style="margin:4px 0">Categoria: {{ funz.categoria }}
+          {% set stat_chiave = stat_map.get(funz.chiave) %}
+          {% if stat_chiave and dettaglio.funzionalita_dati.statistiche.get(stat_chiave) is not none %}
+            · {{ dettaglio.funzionalita_dati.statistiche.get(stat_chiave) }} utilizzi questo mese
+          {% endif %}
+        </p>
+        {% if funz.url_jobinpa %}<a class="hint" href="{{ funz.url_jobinpa }}" target="_blank" rel="noopener">🔗 Verifica su JobInPA →</a>{% endif %}
       </div>
-      <p class="hint" style="margin:4px 0">{{ dettaglio.funzionalita_dati.descrizione_estesa }}</p>
-      <p class="hint" style="margin:4px 0">Categoria: {{ dettaglio.funzionalita_dati.categoria }}
-        {% set stat_map = {'ricerca_intelligente': 'ricerche_intelligenti_questo_mese', 'analisi_cv': 'analisi_cv_questo_mese', 'bandi_consigliati': 'analisi_cv_questo_mese', 'verifica_compatibilita_bando': 'analisi_cv_questo_mese'} %}
-        {% set stat_chiave = stat_map.get(dettaglio.funzionalita_dati.chiave) %}
-        {% if stat_chiave and dettaglio.funzionalita_dati.statistiche and dettaglio.funzionalita_dati.statistiche.get(stat_chiave) is not none %}
-          · {{ dettaglio.funzionalita_dati.statistiche.get(stat_chiave) }} utilizzi questo mese
-        {% endif %}
-      </p>
-      {% if dettaglio.funzionalita_dati.url_jobinpa %}<a class="hint" href="{{ dettaglio.funzionalita_dati.url_jobinpa }}" target="_blank" rel="noopener">🔗 Verifica su JobInPA →</a>{% endif %}
+      {% endfor %}
     </div>
     {% else %}
-    <div class="avviso giallo">⚠️ Contenuto creato senza lettura automatica da JobInPA (inserito a mano): verifica tu stesso che la funzionalità descritta sia ancora reale prima di approvare.</div>
+    <div class="avviso giallo">⚠️ Contenuto creato senza lettura automatica da JobInPA (inserito a mano): verifica tu stesso che le funzionalità descritte siano ancora reali prima di approvare.</div>
     {% endif %}
     {% endif %}
 
