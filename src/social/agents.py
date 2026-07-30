@@ -538,7 +538,9 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         brief.template = "presentazione"
     categoria = _categoria_per_content(conn, content)
     immagini_riferimento = []
+    stile_immagine = None
     if categoria:
+        stile_immagine = categoria["stile_immagine"]
         if categoria["prompt_ai"]:
             # Il "soggetto" dell'illustrazione non e' lasciato all'AI
             # (rischio di uno stile incoerente da un post all'altro):
@@ -576,7 +578,7 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             template=brief.template, formato=formato, titolo=brief.titolo,
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
             prompt_ai=brief.prompt_ai, content_id=content_id,
-            immagini_riferimento=immagini_riferimento)
+            immagini_riferimento=immagini_riferimento, stile_ai=stile_immagine)
         asset = asyncio.run(image_provider.generate(richiesta))
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,

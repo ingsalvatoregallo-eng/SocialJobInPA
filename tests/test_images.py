@@ -178,3 +178,57 @@ def test_factory_senza_openai_usa_template(conn, monkeypatch):
     monkeypatch.setenv("ENABLE_AI_IMAGES", "true")
     provider = images.provider_immagini(conn, mode="sandbox")
     assert isinstance(provider, images.TemplateImageProvider)
+
+
+class _RispostaFinta:
+    status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        import base64
+        return {"data": [{"b64_json": base64.b64encode(_PNG_1X1_OPENAI).decode()}]}
+
+
+_PNG_1X1_OPENAI = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
+
+
+def test_chiama_api_usa_lo_stile_fisso_se_nessuno_stile_categoria(conn, monkeypatch):
+    """Senza uno stile_ai (categoria senza stile_immagine, o nessuna
+    categoria): il comportamento storico non cambia, resta lo stile fisso
+    _STILE_OPENAI_IMAGES prepended al prompt del soggetto."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    provider = images.OpenAIImageProvider(conn)
+    catturato = {}
+
+    def _post_finto(url, **kwargs):
+        catturato["prompt"] = kwargs["json"]["prompt"]
+        return _RispostaFinta()
+
+    monkeypatch.setattr("requests.post", _post_finto)
+    provider._chiama_api("Un pacchetto regalo", "1024x1024")
+    assert catturato["prompt"] == images._STILE_OPENAI_IMAGES + "Un pacchetto regalo"
+
+
+def test_chiama_api_stile_categoria_sostituisce_del_tutto_lo_stile_fisso(conn, monkeypatch):
+    """Con uno stile_ai valorizzato (categoria.stile_immagine, es.
+    "Promozioni"): sostituisce COMPLETAMENTE _STILE_OPENAI_IMAGES, non si
+    somma ad esso — altrimenti resterebbe comunque piatto/istituzionale
+    (bug segnalato dall'utente: risultato 'pessimo' con edificio classico
+    anche quando il prompt/immagine di riferimento non lo richiedevano)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    provider = images.OpenAIImageProvider(conn)
+    catturato = {}
+
+    def _post_finto(url, **kwargs):
+        catturato["prompt"] = kwargs["json"]["prompt"]
+        return _RispostaFinta()
+
+    monkeypatch.setattr("requests.post", _post_finto)
+    stile_personalizzato = "Glossy 3D illustration, purple/blue gradient. Subject: "
+    provider._chiama_api("Un pacchetto regalo", "1024x1024", stile_ai=stile_personalizzato)
+    assert catturato["prompt"] == stile_personalizzato + "Un pacchetto regalo"
+    assert "Flat vector" not in catturato["prompt"]

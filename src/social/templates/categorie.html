@@ -8,7 +8,7 @@
   </div>
 </div>
 
-<div class="avviso info">ℹ️ <strong>Strategia fatti</strong> decide come si procurano i dati: <em>Bandi JobInPA</em> cerca/filtra bandi reali dal brief, <em>Promozioni JobInPA</em> legge le promozioni attive in diretta (mai a mano), <em>Funzionalità JobInPA</em> legge il catalogo funzionalità + statistiche d'uso reali, <em>Libera</em> lascia scrivere tutto all'AI dal solo brief (revisione umana sempre richiesta). <strong>Struttura del post</strong> guida il Copywriter (l'AI scrive comunque le parole sui fatti veri). <strong>Prompt immagine</strong> descrive SOLO il soggetto/l'illustrazione (stile e assenza di testo/numeri restano fissi) — lascialo vuoto per far scegliere liberamente il soggetto all'AI (es. per "Concorsi", dove varia da bando a bando). Placeholder: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>.</div>
+<div class="avviso info">ℹ️ <strong>Strategia fatti</strong> decide come si procurano i dati: <em>Bandi JobInPA</em> cerca/filtra bandi reali dal brief, <em>Promozioni JobInPA</em> legge le promozioni attive in diretta (mai a mano), <em>Funzionalità JobInPA</em> legge il catalogo funzionalità + statistiche d'uso reali, <em>Libera</em> lascia scrivere tutto all'AI dal solo brief (revisione umana sempre richiesta). <strong>Struttura del post</strong> guida il Copywriter (l'AI scrive comunque le parole sui fatti veri). <strong>Prompt immagine</strong> descrive SOLO il soggetto/l'illustrazione — lascialo vuoto per far scegliere liberamente il soggetto all'AI (es. per "Concorsi", dove varia da bando a bando). <strong>Stile immagine</strong> decide invece l'aspetto grafico (colori, tecnica, atmosfera): <em>vuoto</em> = usa lo stile fisso attuale (piatto, istituzionale, blu/verde); <em>compilato</em> = lo sostituisce del tutto per questa categoria, mentre il Prompt immagine continua a descrivere solo il soggetto. Placeholder: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>.</div>
 
 <div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
   <div class="card">
@@ -40,6 +40,7 @@
       <div id="vista-{{ c.id }}" style="margin-top:8px">
         {% if c.struttura_post %}<p style="font-size:13px;margin:0 0 6px"><strong>Struttura post:</strong> {{ c.struttura_post }}</p>{% endif %}
         <p style="white-space:pre-wrap;font-size:13px;color:var(--colore-testo);margin:0">{{ c.prompt_ai or '(nessun prompt immagine — soggetto scelto liberamente dall\'AI)' }}</p>
+        <p style="font-size:12px;color:var(--colore-testo-secondario);margin:6px 0 0">{{ 'Stile immagine personalizzato ✓' if c.stile_immagine else 'Stile immagine: fisso (default)' }}</p>
       </div>
 
       <div id="modifica-{{ c.id }}" style="display:none;margin-top:10px">
@@ -60,6 +61,11 @@
           <label>Prompt immagine (opzionale)</label>
           <textarea name="prompt_ai" rows="6" maxlength="2000"
                     placeholder="Lascia vuoto per far scegliere liberamente il soggetto all'AI">{{ c.prompt_ai }}</textarea>
+
+          <label>Stile immagine (opzionale)</label>
+          <textarea name="stile_immagine" rows="6" maxlength="2000"
+                    placeholder="Lascia vuoto per usare lo stile fisso attuale (piatto, istituzionale). Compilalo per sostituirlo del tutto per questa categoria, es. 'stile glossy 3D, sfondo sfumato viola/blu, no motivo istituzionale'.">{{ c.stile_immagine or '' }}</textarea>
+          <p class="hint">Vuoto = stile fisso di sempre. Compilato = lo rimpiazza interamente per questa categoria (il Prompt immagine sopra continua a descrivere solo il soggetto).</p>
 
           {% if c.immagini_riferimento %}
           <label>Immagini di riferimento attuali</label>
@@ -109,6 +115,11 @@
       <label>Prompt immagine (opzionale)</label>
       <textarea name="prompt_ai" rows="6" maxlength="2000"
                 placeholder="Descrivi SOLO il soggetto/l'illustrazione, es. 'Illustrazione 3D di ... Tema: {TITOLO}.' — lascia vuoto per far scegliere liberamente l'AI"></textarea>
+
+      <label>Stile immagine (opzionale)</label>
+      <textarea name="stile_immagine" rows="6" maxlength="2000"
+                placeholder="Lascia vuoto per usare lo stile fisso attuale (piatto, istituzionale). Compilalo per sostituirlo del tutto per questa categoria."></textarea>
+      <p class="hint">Vuoto = stile fisso di sempre. Compilato = lo rimpiazza interamente per questa categoria.</p>
 
       <label>Immagini di riferimento (opzionale, anche più di una)</label>
       <input type="file" name="immagini" accept="image/png,image/jpeg" multiple>

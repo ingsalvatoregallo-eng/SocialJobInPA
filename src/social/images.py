@@ -83,6 +83,7 @@ class ImageGenerationRequest:
     palette: dict = field(default_factory=dict)
     content_id: Optional[str] = None
     immagini_riferimento: list = field(default_factory=list)  # percorsi locali, guidano /v1/images/edits
+    stile_ai: Optional[str] = None  # sostituisce _STILE_OPENAI_IMAGES se valorizzato (da categoria.stile_immagine)
 
 
 @dataclass
@@ -547,7 +548,7 @@ class OpenAIImageProvider:
         taglia = _taglia_openai_per_formato(request.formato)
         sfondo_bytes = await asyncio.to_thread(
             self._chiama_api, request.prompt_ai or request.titolo, taglia,
-            request.immagini_riferimento)
+            request.immagini_riferimento, request.stile_ai)
         db_social.registra_costo(self.conn, "openai_images", prezzo,
                                  modello=config.openai_image_model(),
                                  content_id=request.content_id)
@@ -577,10 +578,14 @@ class OpenAIImageProvider:
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 
-    def _chiama_api(self, prompt, taglia, immagini_riferimento=None):
+    def _chiama_api(self, prompt, taglia, immagini_riferimento=None, stile_ai=None):
         import base64
         import requests
-        prompt_completo = _STILE_OPENAI_IMAGES + prompt
+        # .rstrip() + spazio esplicito: lo stile (fisso o da categoria,
+        # quest'ultimo salvato senza spazi finali da crea_categoria/
+        # aggiorna_categoria, vedi db_social.py) non deve mai attaccarsi al
+        # soggetto per mancanza di uno spazio di separazione.
+        prompt_completo = (stile_ai or _STILE_OPENAI_IMAGES).rstrip() + " " + prompt
         percorsi_validi = [p for p in (immagini_riferimento or []) if p and Path(p).is_file()]
         if percorsi_validi:
             # /v1/images/edits: le immagini di riferimento (categoria

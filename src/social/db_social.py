@@ -276,6 +276,7 @@ CREATE TABLE IF NOT EXISTS social_content_categories (
     id                      TEXT PRIMARY KEY,
     nome                    TEXT NOT NULL UNIQUE,
     prompt_ai               TEXT NOT NULL DEFAULT '',
+    stile_immagine          TEXT,  -- sostituisce lo stile fisso (images._STILE_OPENAI_IMAGES) se valorizzato
     immagini_riferimento    TEXT,  -- JSON lista di percorsi locali, [] o NULL se nessuna
     strategia_fatti         TEXT NOT NULL DEFAULT 'libera',
     struttura_post          TEXT,  -- guida di struttura per il Copywriter Agent, facoltativa
@@ -501,6 +502,24 @@ CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA = (
     "una call to action diretta (es. 'Registrati gratis')."
 )
 
+# Stile immagine di default per le promozioni: lo stile fisso di sempre
+# (images._STILE_OPENAI_IMAGES) e' pensato per contenuti istituzionali
+# (bandi/concorsi) — piatto, navy/verde, motivo architettonico — e
+# confligge con l'estetica commerciale/SaaS che una promozione richiede
+# (sfondo sfumato, look 3D lucido). Sostituisce del tutto lo stile fisso
+# per questa categoria (vedi social_content_categories.stile_immagine).
+CATEGORIA_PROMOZIONI_DEFAULT_STILE = (
+    "Modern glossy 3D/semi-3D illustration, premium SaaS/tech aesthetic, "
+    "soft rounded shapes with gentle shadows and highlights. Background: "
+    "smooth gradient from white to light lavender/blue. Accent colors: "
+    "purple #7C3AED and institutional blue #0B3D91 on the main "
+    "illustrated object, plus small decorative sparkles. Clean and "
+    "elegant, not flat vector, not photorealistic, no real people. No "
+    "text, no letters, no numbers, no words anywhere in the image. Leave "
+    "the bottom half of the composition visually calm and uncluttered, "
+    "suitable for overlaid text. Subject: "
+)
+
 
 def _adesso():
     return datetime.now(timezone.utc).isoformat()
@@ -596,6 +615,9 @@ def _migra(conn):
     if "struttura_post" not in colonne_categorie:
         conn.execute("ALTER TABLE social_content_categories ADD COLUMN struttura_post TEXT")
         conn.commit()
+    if "stile_immagine" not in colonne_categorie:
+        conn.execute("ALTER TABLE social_content_categories ADD COLUMN stile_immagine TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -619,14 +641,20 @@ def _migra(conn):
     if riga_promo_vecchia:
         # Rinomina la categoria "Promozione" (singolare, versione
         # precedente) mantenendo lo stesso id — i contenuti che la
-        # referenziano restano collegati.
+        # referenziano restano collegati. Applica anche lo stile immagine
+        # di default, ma solo se non e' gia' stato personalizzato a mano.
         conn.execute(
             "UPDATE social_content_categories SET nome = 'Promozioni', "
             "strategia_fatti = 'promozioni_jobinpa' WHERE id = ?", (riga_promo_vecchia["id"],))
+        conn.execute(
+            "UPDATE social_content_categories SET stile_immagine = ? "
+            "WHERE id = ? AND (stile_immagine IS NULL OR stile_immagine = '')",
+            (CATEGORIA_PROMOZIONI_DEFAULT_STILE, riga_promo_vecchia["id"]))
     else:
         crea_categoria(conn, "Promozioni", CATEGORIA_PROMOZIONI_DEFAULT_PROMPT,
                        strategia_fatti="promozioni_jobinpa",
-                       struttura_post=CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA)
+                       struttura_post=CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA,
+                       stile_immagine=CATEGORIA_PROMOZIONI_DEFAULT_STILE)
     if not conn.execute(
             "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Concorsi",)).fetchone():
         crea_categoria(conn, "Concorsi", "", strategia_fatti="bandi_jobinpa")
@@ -868,7 +896,7 @@ def _parse_categoria(riga):
 
 
 def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
-                   strategia_fatti="libera", struttura_post=None):
+                   strategia_fatti="libera", struttura_post=None, stile_immagine=None):
     """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE),
     ValueError se strategia_fatti non e' valida.
     prompt_ai: facoltativo, vuoto = l'AI sceglie liberamente il soggetto
@@ -876,7 +904,12 @@ def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
     bando a bando). immagini_riferimento: lista di percorsi locali (0 o
     piu' immagini), passate insieme a OpenAI /v1/images/edits (vedi
     images.py). struttura_post: guida di struttura per il Copywriter
-    Agent (vedi agents.copywriting), non un testo fisso."""
+    Agent (vedi agents.copywriting), non un testo fisso. stile_immagine:
+    facoltativo, vuoto = usa lo stile fisso di sempre
+    (images._STILE_OPENAI_IMAGES, condiviso da tutte le categorie senza
+    uno stile proprio); se valorizzato lo SOSTITUISCE del tutto per
+    questa categoria (es. per "Promozioni", che ha bisogno di un
+    linguaggio visivo diverso da quello istituzionale)."""
     if strategia_fatti not in STRATEGIE_FATTI:
         raise ValueError(f"strategia_fatti non valida: {strategia_fatti}")
     categoria_id = _nuovo_id()
@@ -885,6 +918,7 @@ def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
         "immagini_riferimento": json.dumps(immagini_riferimento) if immagini_riferimento else None,
         "strategia_fatti": strategia_fatti,
         "struttura_post": struttura_post.strip() if struttura_post else None,
+        "stile_immagine": stile_immagine.strip() if stile_immagine else None,
         "creato_at": _adesso()})
     conn.commit()
     return categoria_id
@@ -902,11 +936,11 @@ def get_categoria(conn, categoria_id):
 
 
 def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimento=None,
-                       strategia_fatti=None, struttura_post=None):
+                       strategia_fatti=None, struttura_post=None, stile_immagine=None):
     """Ogni parametro non passato (None) lascia il valore esistente
     invariato. Per svuotare davvero un campo facoltativo si passa una
-    stringa vuota "" (struttura_post) o una lista vuota [] (immagini_
-    riferimento) — non None, che significa "non toccare"."""
+    stringa vuota "" (struttura_post, stile_immagine) o una lista vuota []
+    (immagini_riferimento) — non None, che significa "non toccare"."""
     if strategia_fatti is not None and strategia_fatti not in STRATEGIE_FATTI:
         raise ValueError(f"strategia_fatti non valida: {strategia_fatti}")
     campi = {}
@@ -918,6 +952,8 @@ def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimen
         campi["strategia_fatti"] = strategia_fatti
     if struttura_post is not None:
         campi["struttura_post"] = struttura_post.strip() or None
+    if stile_immagine is not None:
+        campi["stile_immagine"] = stile_immagine.strip() or None
     if not campi:
         return
     campi["aggiornato_at"] = _adesso()

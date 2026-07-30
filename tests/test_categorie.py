@@ -34,6 +34,16 @@ def test_categorie_di_default_seminate(conn):
     assert categorie["Funzionalità"]["strategia_fatti"] == "funzionalita_jobinpa"
 
 
+def test_categoria_promozioni_seminata_con_stile_immagine_di_default(conn):
+    """Lo stile fisso globale (_STILE_OPENAI_IMAGES) e' pensato per bandi/
+    concorsi (istituzionale, piatto): "Promozioni" ha bisogno di uno stile
+    diverso (glossy/gradient) e deve averlo gia' pronto senza doverlo
+    configurare a mano (segnalato dall'utente dopo un risultato 'pessimo')."""
+    promozioni = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
+    assert promozioni["stile_immagine"]
+    assert "Flat vector" not in promozioni["stile_immagine"]
+
+
 def test_crea_categoria_e_recupera(conn):
     categoria_id = db_social.crea_categoria(conn, "Guida rapida", "Illustrazione di {TITOLO}")
     categoria = db_social.get_categoria(conn, categoria_id)
@@ -88,6 +98,36 @@ def test_aggiorna_categoria_immagini_lista_vuota_le_svuota(conn):
         conn, "Con immagini", "prompt", immagini_riferimento=["/a.png"])
     db_social.aggiorna_categoria(conn, categoria_id, immagini_riferimento=[])
     assert db_social.get_categoria(conn, categoria_id)["immagini_riferimento"] == []
+
+
+def test_crea_categoria_senza_stile_immagine_e_none(conn):
+    """Vuoto = usa lo stile fisso globale (default, comportamento invariato
+    per tutte le categorie che non lo personalizzano, es. Concorsi)."""
+    categoria_id = db_social.crea_categoria(conn, "Senza stile", "prompt")
+    assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] is None
+
+
+def test_crea_categoria_con_stile_immagine(conn):
+    """Salvato con .strip() (stessa convenzione di prompt_ai): eventuali
+    spazi finali non sono significativi qui, images._chiama_api aggiunge
+    esplicitamente lo spazio di separazione prima del soggetto."""
+    categoria_id = db_social.crea_categoria(
+        conn, "Con stile", "prompt", stile_immagine="Stile glossy 3D. Subject: ")
+    assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] == "Stile glossy 3D. Subject:"
+
+
+def test_aggiorna_categoria_stile_immagine_none_non_lo_tocca(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con stile 2", "prompt", stile_immagine="Stile originale")
+    db_social.aggiorna_categoria(conn, categoria_id, prompt_ai="nuovo prompt")
+    assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] == "Stile originale"
+
+
+def test_aggiorna_categoria_stile_immagine_stringa_vuota_lo_cancella(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con stile 3", "prompt", stile_immagine="Stile originale")
+    db_social.aggiorna_categoria(conn, categoria_id, stile_immagine="")
+    assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] is None
 
 
 # --- agents.visual: integrazione categoria -------------------------------
@@ -158,6 +198,30 @@ def test_visual_passa_piu_immagini_di_riferimento_alla_richiesta(conn):
 def test_visual_senza_categoria_non_passa_immagini_di_riferimento(conn):
     catturate = _content_con_richiesta_catturata(conn, titolo="Tema")
     assert catturate[0].immagini_riferimento == []
+
+
+def test_visual_categoria_con_stile_immagine_lo_passa_alla_richiesta(conn):
+    """Lo stile personalizzato della categoria (menu Categorie) deve
+    arrivare fino a ImageGenerationRequest.stile_ai, cosi' da sostituire
+    lo stile fisso globale (vedi images.OpenAIImageProvider._chiama_api)."""
+    categoria_id = db_social.crea_categoria(
+        conn, "Con stile personalizzato", "prompt qualsiasi",
+        stile_immagine="Stile glossy 3D, sfondo sfumato viola/blu. Subject: ")
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Tema", categoria_id=categoria_id)
+    assert catturate[0].stile_ai == "Stile glossy 3D, sfondo sfumato viola/blu. Subject:"
+
+
+def test_visual_categoria_senza_stile_immagine_non_passa_nulla(conn):
+    categoria_id = db_social.crea_categoria(conn, "Senza stile personalizzato", "prompt qualsiasi")
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Tema", categoria_id=categoria_id)
+    assert catturate[0].stile_ai is None
+
+
+def test_visual_senza_categoria_non_passa_stile_immagine(conn):
+    catturate = _content_con_richiesta_catturata(conn, titolo="Tema")
+    assert catturate[0].stile_ai is None
 
 
 # --- agents.copywriting: struttura del post per categoria -----------------
@@ -287,6 +351,38 @@ def test_crea_categoria_con_piu_immagini_di_riferimento_via_web(conn, client):
     assert risposta_1.status_code == 200
     assert risposta_0.content == _PNG_1X1
     assert risposta_1.content == _PNG_1X1 + b"\x00extra"
+
+
+def test_crea_categoria_con_stile_immagine_via_web(conn, client):
+    db_social.crea_utente(conn, "admin-cat11@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat11@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/categorie", data={
+        "nome": "Con stile via web", "prompt_ai": "x", "strategia_fatti": "libera",
+        "stile_immagine": "Stile glossy 3D personalizzato", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    categoria = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Con stile via web")
+    assert categoria["stile_immagine"] == "Stile glossy 3D personalizzato"
+
+
+def test_aggiorna_categoria_via_web_cambia_lo_stile_immagine(conn, client):
+    db_social.crea_utente(conn, "admin-cat12@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat12@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Da modificare stile", "x")
+
+    r = client.post(f"/social/categorie/{categoria_id}", data={
+        "prompt_ai": "x", "strategia_fatti": "libera",
+        "stile_immagine": "Nuovo stile", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] == "Nuovo stile"
 
 
 def test_aggiorna_categoria_via_web_cambia_il_prompt(conn, client):

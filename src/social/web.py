@@ -1124,7 +1124,7 @@ async def _salva_immagine_categoria(file: UploadFile) -> str:
 @router.post("/categorie")
 async def crea_categoria(request: Request, nome: str = Form(...),
                          strategia_fatti: str = Form(...), prompt_ai: str = Form(""),
-                         struttura_post: str = Form(""),
+                         struttura_post: str = Form(""), stile_immagine: str = Form(""),
                          immagini: Optional[list[UploadFile]] = File(None), csrf: str = Form(None),
                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
@@ -1135,7 +1135,8 @@ async def crea_categoria(request: Request, nome: str = Form(...),
     try:
         categoria_id = db_social.crea_categoria(
             conn, nome.strip(), prompt_ai, immagini_riferimento=percorsi,
-            strategia_fatti=strategia_fatti, struttura_post=struttura_post or None)
+            strategia_fatti=strategia_fatti, struttura_post=struttura_post or None,
+            stile_immagine=stile_immagine or None)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Esiste già una categoria con questo nome")
     db_social.audit(conn, "categoria_creata", utente_id=sessione["utente"]["id"],
@@ -1146,7 +1147,7 @@ async def crea_categoria(request: Request, nome: str = Form(...),
 @router.post("/categorie/{categoria_id}")
 async def aggiorna_categoria(request: Request, categoria_id: str,
                              strategia_fatti: str = Form(...), prompt_ai: str = Form(""),
-                             struttura_post: str = Form(""),
+                             struttura_post: str = Form(""), stile_immagine: str = Form(""),
                              immagini_nuove: Optional[list[UploadFile]] = File(None),
                              rimuovi_immagini: Optional[list[str]] = Form(None),
                              csrf: str = Form(None),
@@ -1168,7 +1169,8 @@ async def aggiorna_categoria(request: Request, categoria_id: str,
             percorsi.append(await _salva_immagine_categoria(file))
     db_social.aggiorna_categoria(conn, categoria_id, prompt_ai=prompt_ai,
                                  immagini_riferimento=percorsi, strategia_fatti=strategia_fatti,
-                                 struttura_post=struttura_post or "")
+                                 struttura_post=struttura_post or "",
+                                 stile_immagine=stile_immagine or "")
     db_social.audit(conn, "categoria_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="categoria", oggetto_id=categoria_id)
     return RedirectResponse("/social/categorie", status_code=303)
