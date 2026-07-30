@@ -120,13 +120,13 @@ def test_logo_completo_disegnato_in_alto_a_destra(tmp_path, monkeypatch):
         template="presentazione", formato="instagram_feed", titolo="JobInPA")
     zona_logo = (700, 70, 1000, 170)  # angolo in alto a destra
 
-    monkeypatch.setattr(provider, "_logo_completo", lambda altezza_max: None)
+    monkeypatch.setattr(images, "_logo_completo", lambda altezza_max: None)
     asset_senza_logo = provider.genera_sync(richiesta)
     with Image.open(asset_senza_logo.percorso) as img:
         pixel_senza_logo = list(img.crop(zona_logo).getdata())
 
     logo_finto = Image.new("RGBA", (280, 70), (255, 0, 0, 255))
-    monkeypatch.setattr(provider, "_logo_completo", lambda altezza_max: logo_finto)
+    monkeypatch.setattr(images, "_logo_completo", lambda altezza_max: logo_finto)
     asset_con_logo = provider.genera_sync(richiesta)
     with Image.open(asset_con_logo.percorso) as img:
         pixel_con_logo = list(img.crop(zona_logo).getdata())
@@ -194,6 +194,44 @@ class _RispostaFinta:
 _PNG_1X1_OPENAI = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
     "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
+
+
+@pytest.mark.parametrize("formato", list(images.FORMATI))
+def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, formato):
+    """Layout a card (badge/logo/illustrazione laterale/card dati/CTA, vedi
+    OpenAIImageProvider._genera_promozione): non deve mai far crashare il
+    rendering, nemmeno nei formati piu' bassi (linkedin, 1200x627) dove lo
+    spazio verticale disponibile per la card dati e' piu' stretto — al
+    limite la card viene omessa (vedi guardia 'if dati and y < y_limite_card'),
+    mai un'eccezione o un elemento sovrapposto."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
+    provider = images.OpenAIImageProvider(conn)
+    richiesta = images.ImageGenerationRequest(
+        template="promozione", formato=formato,
+        titolo="Piano Base: prova l'AI di JobInPA senza impegno",
+        sottotitolo="Promozione a tempo limitato",
+        dati_chiave=["Promozione: Base", "Prezzo promozionale: 0,00 EUR (invece di 3,00 EUR)",
+                    "Valida fino al 31 agosto 2026"],
+        prompt_ai="Un pacchetto regalo")
+    asset = asyncio.run(provider.generate(richiesta))
+    assert asset.percorso.exists()
+    with Image.open(asset.percorso) as img:
+        assert img.size == images.FORMATI[formato]
+        assert img.format == "PNG"
+
+
+def test_genera_promozione_usato_solo_per_il_template_promozione(conn, monkeypatch):
+    """Qualsiasi altro template continua a passare per il vecchio layout a
+    sfondo intero (invariato): nessuna regressione per Concorsi/Funzionalità/
+    generico, che non hanno chiesto il nuovo layout a card."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
+    provider = images.OpenAIImageProvider(conn)
+    richiesta = images.ImageGenerationRequest(
+        template="presentazione", formato="instagram_feed", titolo="Concorso pubblico")
+    asset = asyncio.run(provider.generate(richiesta))
+    assert asset.percorso.name.startswith("ai_") and not asset.percorso.name.startswith("ai_promo_")
 
 
 def test_chiama_api_usa_lo_stile_fisso_se_nessuno_stile_categoria(conn, monkeypatch):

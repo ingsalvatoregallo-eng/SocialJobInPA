@@ -541,6 +541,15 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
     stile_immagine = None
     if categoria:
         stile_immagine = categoria["stile_immagine"]
+        if categoria["strategia_fatti"] == "promozioni_jobinpa":
+            # Layout dedicato (badge/logo, illustrazione AI come elemento
+            # laterale invece che a tutto schermo, card dati con icone,
+            # bottone CTA — vedi images.OpenAIImageProvider): mai lasciato
+            # alla scelta libera del Visual Agent, che sceglierebbe uno dei
+            # template "a sfondo intero + fascia scura" pensati per bandi/
+            # concorsi (segnalato dall'utente: risultato troppo lontano dal
+            # mockup atteso anche con lo stile immagine corretto).
+            brief.template = "promozione"
         if categoria["prompt_ai"]:
             # Il "soggetto" dell'illustrazione non e' lasciato all'AI
             # (rischio di uno stile incoerente da un post all'altro):

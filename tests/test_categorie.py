@@ -224,6 +224,26 @@ def test_visual_senza_categoria_non_passa_stile_immagine(conn):
     assert catturate[0].stile_ai is None
 
 
+def test_visual_categoria_promozioni_forza_il_template_promozione(conn):
+    """Il layout a card (badge/logo/illustrazione laterale/CTA, vedi
+    images.OpenAIImageProvider._genera_promozione) non puo' dipendere dalla
+    scelta libera del Visual Agent, che sceglierebbe uno dei template "a
+    sfondo intero" pensati per bandi/concorsi (segnalato dall'utente: il
+    risultato restava troppo lontano dal mockup atteso anche con lo stile
+    immagine corretto)."""
+    promozioni_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Premium gratis", categoria_id=promozioni_id)
+    assert catturate[0].template == "promozione"
+
+
+def test_visual_categoria_concorsi_non_forza_il_template(conn):
+    concorsi_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Premium gratis", categoria_id=concorsi_id)
+    assert catturate[0].template != "promozione"
+
+
 # --- agents.copywriting: struttura del post per categoria -----------------
 
 def test_copywriting_inietta_la_struttura_della_categoria(conn):
