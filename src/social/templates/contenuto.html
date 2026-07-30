@@ -120,7 +120,7 @@
       <div id="{{ slider_id }}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;border-radius:var(--raggio);border:1px solid var(--colore-bordo)">
         {% for a in assets_piattaforma %}
         <div style="flex:0 0 100%;scroll-snap-align:center;position:relative">
-          <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}" style="width:100%;display:block">
+          <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}" style="width:100%;max-width:360px;margin:0 auto;display:block">
           {% if 'social.edit' in permessi and not in_corso and not rigenerazione_in_corso %}
           <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/elimina"
                 onsubmit="return confirm('Togliere questa immagine dal carosello? Se vuoi che la caption rifletta il carosello ridotto, usa poi \'Rigenera testo\'.');"
@@ -141,7 +141,7 @@
     <p class="hint" style="margin-top:6px">Scorri (trascina o usa le frecce) per vedere tutte le {{ assets_piattaforma|length }} immagini — template: {{ assets_piattaforma[0].template }} — provider: {{ assets_piattaforma[0].provider }}</p>
     {% elif assets_piattaforma %}
     {% set a = assets_piattaforma[0] %}
-    <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block">
+    <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block">
     <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
     {% endif %}
     {% if varianti.get(piattaforma) %}

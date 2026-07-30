@@ -196,11 +196,36 @@ _PNG_1X1_OPENAI = bytes.fromhex(
     "53de0000000c4944415408d763f8cfc0c00000030001a1b7b6210000000049454e44ae426082")
 
 
+def test_ridimensiona_a_contenimento_non_taglia_mai_i_bordi():
+    """A differenza di _ridimensiona_a_copertura (crop), _ridimensiona_a_
+    contenimento non deve mai perdere contenuto vicino ai bordi: usata per
+    il template "promozione" dove l'AI compone badge/logo in alto e
+    bottone CTA in fondo (bug segnalato dall'utente: con un crop "a
+    copertura" finivano tagliati fuori)."""
+    sorgente = Image.new("RGB", (100, 200), "white")
+    for x in range(20):
+        for y in range(20):
+            sorgente.putpixel((x, y), (255, 0, 0))
+            sorgente.putpixel((99 - x, 199 - y), (0, 0, 255))
+    risultato = images._ridimensiona_a_contenimento(sorgente, 300, 150, "#FFFFFF")
+    assert risultato.size == (300, 150)
+    pixel = list(risultato.getdata())
+    assert any(r > g + 50 and r > b + 50 for r, g, b in pixel)  # angolo rosso sopravvissuto
+    assert any(b > r + 50 and b > g + 50 for r, g, b in pixel)  # angolo blu sopravvissuto
+
+
+def test_ridimensiona_a_contenimento_riempie_il_bordo_col_colore_indicato():
+    sorgente = Image.new("RGB", (10, 10), "black")
+    risultato = images._ridimensiona_a_contenimento(sorgente, 100, 50, "#F5F7FB")
+    assert risultato.getpixel((0, 0)) == _hex_a_rgb("#F5F7FB")
+
+
 @pytest.mark.parametrize("formato", list(images.FORMATI))
 def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, formato):
     """Il template "promozione" fa comporre all'AI l'intera grafica (vedi
     OpenAIImageProvider._genera_promozione): l'immagine ricevuta viene solo
-    ridimensionata "a copertura" sul formato target, mai un crash."""
+    ridimensionata "a contenimento" (mai un crop) sul formato target, mai
+    un crash."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
     provider = images.OpenAIImageProvider(conn)

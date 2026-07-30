@@ -551,7 +551,10 @@ def _taglia_openai_per_formato(formato):
 
 def _ridimensiona_a_copertura(immagine, larghezza_target, altezza_target):
     """Resize 'cover' + crop centrale: riempie il canvas target senza
-    deformare l'immagine (a differenza di un resize diretto, che stira)."""
+    deformare l'immagine (a differenza di un resize diretto, che stira).
+    Adatta a uno sfondo/illustrazione qualsiasi, dove perdere un bordo non
+    ha conseguenze — MAI per una grafica gia' completa con testo/pulsanti
+    fino ai bordi (vedi _ridimensiona_a_contenimento)."""
     rapporto = max(larghezza_target / immagine.width, altezza_target / immagine.height)
     nuova_larghezza = round(immagine.width * rapporto)
     nuova_altezza = round(immagine.height * rapporto)
@@ -559,6 +562,26 @@ def _ridimensiona_a_copertura(immagine, larghezza_target, altezza_target):
     sinistra = (nuova_larghezza - larghezza_target) // 2
     alto = (nuova_altezza - altezza_target) // 2
     return ridimensionata.crop((sinistra, alto, sinistra + larghezza_target, alto + altezza_target))
+
+
+def _ridimensiona_a_contenimento(immagine, larghezza_target, altezza_target, colore_sfondo):
+    """Resize 'contain': mai un crop, l'immagine intera resta visibile e il
+    canvas target viene riempito con un bordo pieno del colore indicato se
+    le proporzioni non coincidono esattamente. Le taglie fisse di OpenAI
+    Images (_TAGLIE_OPENAI) non coincidono mai esattamente con i formati
+    social (es. verticale 1024x1536 = rapporto 0.667 contro 1080x1350 =
+    0.8): un crop "a copertura" tagliava via badge/logo in alto e il
+    bottone CTA in fondo del template "promozione", che l'AI compone fino
+    ai bordi (bug segnalato dall'utente: risultato 'tutto tagliato')."""
+    rapporto = min(larghezza_target / immagine.width, altezza_target / immagine.height)
+    nuova_larghezza = max(1, round(immagine.width * rapporto))
+    nuova_altezza = max(1, round(immagine.height * rapporto))
+    ridimensionata = immagine.resize((nuova_larghezza, nuova_altezza))
+    sfondo = Image.new("RGB", (larghezza_target, altezza_target), colore_sfondo)
+    x = (larghezza_target - nuova_larghezza) // 2
+    y = (altezza_target - nuova_altezza) // 2
+    sfondo.paste(ridimensionata, (x, y))
+    return sfondo
 
 
 class OpenAIImageProvider:
@@ -655,7 +678,11 @@ class OpenAIImageProvider:
                                  content_id=request.content_id)
         import io
         immagine = Image.open(io.BytesIO(immagine_bytes)).convert("RGB")
-        immagine = _ridimensiona_a_copertura(immagine, larghezza, altezza)
+        palette = {**PALETTE_DEFAULT, **(request.palette or {})}
+        # "Contenimento", non "copertura": la grafica intera composta
+        # dall'AI ha badge/logo in alto e bottone CTA in fondo, quindi non
+        # deve mai perdere un bordo (vedi _ridimensiona_a_contenimento).
+        immagine = _ridimensiona_a_contenimento(immagine, larghezza, altezza, palette["sfondo"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
         percorso = self.output_dir / f"ai_promo_{request.formato}_{uuid.uuid4().hex[:10]}.png"
         immagine.save(percorso, "PNG")
