@@ -63,9 +63,11 @@ def test_crea_contenuto_avvia_sempre_la_pipeline(conn, client):
                           auth.hash_password("Password123!"), ruolo="editor")
     _login(client, "editor-flusso@test.local")
     csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "titolo": "Tema di prova", "brief": "Brief di prova", "csrf": csrf,
+        "titolo": "Tema di prova", "brief": "Brief di prova", "categoria_id": categoria_id,
+        "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -82,8 +84,9 @@ def test_pagina_contenuto_non_mostra_bottone_avvia_se_appena_in_coda(conn, clien
                           auth.hash_password("Password123!"), ruolo="editor")
     _login(client, "editor-flusso2@test.local")
     csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
     r = client.post("/social/contenuti", data={
-        "titolo": "Tema due", "csrf": csrf,
+        "titolo": "Tema due", "categoria_id": categoria_id, "csrf": csrf,
     }, follow_redirects=False)
     location = r.headers["location"]
 

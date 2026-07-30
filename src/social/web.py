@@ -538,22 +538,26 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(None),
                    pillar: str = Form(None), obiettivo: str = Form(None),
-                   brief: str = Form(None), tipologia: str = Form("concorso"),
-                   promo_selezionata: str = Form(None), categoria_id: str = Form(None),
-                   csrf: str = Form(None),
+                   brief: str = Form(None), categoria_id: str = Form(...),
+                   promo_selezionata: str = Form(None), csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
     "salva come idea" e "avvia elaborazione AI" era un passaggio in piu'
     senza un vero bisogno dietro (segnalato dall'utente) — chi vuole
     davvero solo una bozza puo' comunque modificare/rilanciare in un
-    secondo momento dalla scheda del contenuto."""
+    secondo momento dalla scheda del contenuto.
+
+    La categoria (menu Categorie) e' l'unico selettore: decide da sola se
+    serve scegliere una promozione, cercare bandi dal brief, o scrivere
+    liberamente — non piu' una tipologia fissa separata."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
-    if tipologia not in db_social.TIPOLOGIE_CONTENUTO:
-        raise HTTPException(status_code=400, detail="tipologia non valida")
+    categoria = db_social.get_categoria(conn, categoria_id)
+    if categoria is None:
+        raise HTTPException(status_code=400, detail="Categoria non valida")
     scadenza_promo = None
     promo_dati = None
-    if tipologia == "promozione":
+    if categoria["strategia_fatti"] == "promozioni_jobinpa":
         # Titolo/prezzo/scadenza NON arrivano dal form (mai un claim
         # commerciale scritto a mano): si rilegge la promo in diretta da
         # JobInPA, cosi' e' sempre quella davvero attiva in questo momento,
@@ -571,13 +575,11 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
         promo_dati = promo
     elif not titolo or not titolo.strip():
         raise HTTPException(status_code=400, detail="Titolo obbligatorio")
-    if categoria_id and db_social.get_categoria(conn, categoria_id) is None:
-        raise HTTPException(status_code=400, detail="Categoria non valida")
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
                                         obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
-                                        tipologia=tipologia, scadenza_promo=scadenza_promo,
-                                        promo_dati=promo_dati, categoria_id=categoria_id or None,
+                                        scadenza_promo=scadenza_promo,
+                                        promo_dati=promo_dati, categoria_id=categoria_id,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
@@ -790,6 +792,8 @@ def approvazioni(request: Request, content_id: str = None,
         content = db_social.get_content(conn, selezionata["content_id"])
         dettaglio = {
             "content": content,
+            "categoria": db_social.get_categoria(conn, content["categoria_id"])
+                        if content["categoria_id"] else None,
             "punteggi": json.loads(content["punteggi_rischio"]) if content["punteggi_rischio"] else None,
             "varianti": {v["piattaforma"]: v for v in db_social.varianti_di(conn, selezionata["content_id"])},
             "fatti": db_social.fatti_di(conn, selezionata["content_id"]),
@@ -1087,15 +1091,20 @@ async def _salva_immagine_categoria(file: UploadFile) -> str:
 
 
 @router.post("/categorie")
-async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str = Form(...),
+async def crea_categoria(request: Request, nome: str = Form(...),
+                         strategia_fatti: str = Form(...), prompt_ai: str = Form(""),
+                         struttura_post: str = Form(""),
                          immagini: Optional[list[UploadFile]] = File(None), csrf: str = Form(None),
                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
     _verifica_csrf(sessione, csrf)
+    if strategia_fatti not in db_social.STRATEGIE_FATTI:
+        raise HTTPException(status_code=400, detail="strategia_fatti non valida")
     percorsi = [await _salva_immagine_categoria(f) for f in (immagini or []) if f and f.filename]
     try:
         categoria_id = db_social.crea_categoria(
-            conn, nome.strip(), prompt_ai, immagini_riferimento=percorsi)
+            conn, nome.strip(), prompt_ai, immagini_riferimento=percorsi,
+            strategia_fatti=strategia_fatti, struttura_post=struttura_post or None)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Esiste già una categoria con questo nome")
     db_social.audit(conn, "categoria_creata", utente_id=sessione["utente"]["id"],
@@ -1104,13 +1113,17 @@ async def crea_categoria(request: Request, nome: str = Form(...), prompt_ai: str
 
 
 @router.post("/categorie/{categoria_id}")
-async def aggiorna_categoria(request: Request, categoria_id: str, prompt_ai: str = Form(...),
+async def aggiorna_categoria(request: Request, categoria_id: str,
+                             strategia_fatti: str = Form(...), prompt_ai: str = Form(""),
+                             struttura_post: str = Form(""),
                              immagini_nuove: Optional[list[UploadFile]] = File(None),
                              rimuovi_immagini: Optional[list[str]] = Form(None),
                              csrf: str = Form(None),
                              sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
     _verifica_csrf(sessione, csrf)
+    if strategia_fatti not in db_social.STRATEGIE_FATTI:
+        raise HTTPException(status_code=400, detail="strategia_fatti non valida")
     categoria = db_social.get_categoria(conn, categoria_id)
     if categoria is None:
         raise HTTPException(status_code=404)
@@ -1123,7 +1136,8 @@ async def aggiorna_categoria(request: Request, categoria_id: str, prompt_ai: str
         if file and file.filename:
             percorsi.append(await _salva_immagine_categoria(file))
     db_social.aggiorna_categoria(conn, categoria_id, prompt_ai=prompt_ai,
-                                 immagini_riferimento=percorsi)
+                                 immagini_riferimento=percorsi, strategia_fatti=strategia_fatti,
+                                 struttura_post=struttura_post or "")
     db_social.audit(conn, "categoria_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="categoria", oggetto_id=categoria_id)
     return RedirectResponse("/social/categorie", status_code=303)

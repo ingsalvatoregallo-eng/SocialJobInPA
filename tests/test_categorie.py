@@ -1,11 +1,13 @@
-"""Categorie personalizzate (menu Categorie, richiesto dall'utente): un
-prompt immagine — e opzionalmente una o piu' immagini di riferimento che
-guidano davvero OpenAI (/v1/images/edits, che accetta piu' immagini nella
-stessa richiesta) — configurabile per QUALSIASI tipologia di contenuto,
-non solo 'promozione' come nella prima versione. La categoria
-'Promozione' e' seminata di default (vedi db_social._migra) e scelta
-automaticamente per la tipologia 'promozione' quando non se ne sceglie
-esplicitamente un'altra."""
+"""Categorie (menu Categorie): unico punto in cui si decide sia come
+procurare/verificare i fatti (strategia_fatti: bandi_jobinpa |
+promozioni_jobinpa | libera) sia come generare il post — struttura del
+testo (facoltativa, guida il Copywriter) e soggetto/immagini di
+riferimento per l'illustrazione AI (facoltativi: /v1/images/edits
+accetta piu' immagini nella stessa richiesta). Sostituisce la vecchia
+tipologia fissa (concorso | promozione | generico): tre categorie
+("Concorsi", "Promozioni", "Funzionalità") sono seminate di default
+(vedi db_social._migra) e i contenuti creati in precedenza vengono
+collegati automaticamente a quella corrispondente."""
 
 import re
 
@@ -22,12 +24,14 @@ _PNG_1X1 = bytes.fromhex(
 
 # --- db_social: CRUD -----------------------------------------------------
 
-def test_categoria_promozione_seminata_di_default(conn):
-    """init_social_db (chiamato dalla fixture conn) gira _migra: la
-    categoria 'Promozione' deve esistere sempre, senza doverla creare a
-    mano — prima viveva nel setting prompt_templates_immagine."""
-    nomi = [c["nome"] for c in db_social.lista_categorie(conn)]
-    assert "Promozione" in nomi
+def test_categorie_di_default_seminate(conn):
+    """init_social_db (chiamato dalla fixture conn) gira _migra: le tre
+    categorie di base devono esistere sempre, senza doverle creare a
+    mano — sostituiscono la vecchia tipologia fissa."""
+    categorie = {c["nome"]: c for c in db_social.lista_categorie(conn)}
+    assert categorie["Concorsi"]["strategia_fatti"] == "bandi_jobinpa"
+    assert categorie["Promozioni"]["strategia_fatti"] == "promozioni_jobinpa"
+    assert categorie["Funzionalità"]["strategia_fatti"] == "libera"
 
 
 def test_crea_categoria_e_recupera(conn):
@@ -119,27 +123,25 @@ def test_visual_usa_la_categoria_esplicita_per_qualsiasi_tipologia(conn):
     assert catturate[0].prompt_ai == "Illustrazione di Nuova funzione AI, entro il 1 settembre 2026."
 
 
-def test_visual_promozione_senza_categoria_esplicita_usa_promozione_di_default(conn):
-    db_social.aggiorna_categoria(
-        conn, next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione"),
-        prompt_ai="Regalo per {TITOLO}.")
+def test_visual_categoria_promozioni_applica_il_suo_prompt(conn):
+    promozioni_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
+    db_social.aggiorna_categoria(conn, promozioni_id, prompt_ai="Regalo per {TITOLO}.")
     catturate = _content_con_richiesta_catturata(
-        conn, titolo="Premium gratis", tipologia="promozione")
+        conn, titolo="Premium gratis", categoria_id=promozioni_id)
     assert catturate[0].prompt_ai == "Regalo per Premium gratis."
 
 
-def test_visual_promozione_senza_categoria_promozione_non_sovrascrive_nulla(conn):
-    """Se la categoria 'Promozione' non esiste (env ripulito a mano), il
-    prompt_ai resta quello del Visual Agent: mai un errore, mai una stringa
-    vuota al posto del giudizio dell'AI."""
-    promo_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione")
-    db_social.elimina_categoria(conn, promo_id)
+def test_visual_categoria_concorsi_ha_prompt_vuoto_non_sovrascrive_nulla(conn):
+    """"Concorsi" e' seminata con prompt_ai vuoto apposta: il soggetto
+    dell'illustrazione varia da bando a bando, deve restare il giudizio
+    del Visual Agent (mai un errore, mai una stringa vuota al posto)."""
+    concorsi_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
     catturate = _content_con_richiesta_catturata(
-        conn, titolo="Premium gratis", tipologia="promozione")
+        conn, titolo="Premium gratis", categoria_id=concorsi_id)
     assert catturate[0].prompt_ai is None  # quello (assente) del MockLLMProvider demo
 
 
-def test_visual_concorso_senza_categoria_non_viene_toccato(conn):
+def test_visual_senza_categoria_esplicita_non_viene_toccato(conn):
     catturate = _content_con_richiesta_catturata(conn, titolo="Concorso normale")
     assert catturate[0].prompt_ai is None
 
@@ -156,6 +158,54 @@ def test_visual_passa_piu_immagini_di_riferimento_alla_richiesta(conn):
 def test_visual_senza_categoria_non_passa_immagini_di_riferimento(conn):
     catturate = _content_con_richiesta_catturata(conn, titolo="Tema")
     assert catturate[0].immagini_riferimento == []
+
+
+# --- agents.copywriting: struttura del post per categoria -----------------
+
+def test_copywriting_inietta_la_struttura_della_categoria(conn):
+    categoria_id = db_social.crea_categoria(
+        conn, "Con struttura", "", struttura_post="Un titolo e una CTA.")
+    content_id = db_social.crea_content(conn, "Tema", categoria_id=categoria_id)
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_instagram = next(u for (_, u, schema) in provider.chiamate if "Instagram" in u)
+    assert "Un titolo e una CTA." in prompt_instagram
+    assert "Struttura richiesta per questo post" in prompt_instagram
+
+
+def test_copywriting_categoria_senza_struttura_non_aggiunge_nulla(conn):
+    categoria_id = db_social.crea_categoria(conn, "Senza struttura", "")
+    content_id = db_social.crea_content(conn, "Tema", categoria_id=categoria_id)
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_instagram = next(u for (_, u, schema) in provider.chiamate if "Instagram" in u)
+    assert "Struttura richiesta per questo post" not in prompt_instagram
+
+
+def test_copywriting_categoria_promozioni_usa_la_struttura_di_default(conn):
+    """La categoria "Promozioni" seminata di default ha gia' una
+    struttura (etichetta/titolo/punti/CTA, ispirata al mockup fornito
+    dall'utente): deve essere usata senza doverla configurare a mano."""
+    promozioni = db_social.get_categoria(conn, _categoria_id_helper(conn, "Promozioni"))
+    assert promozioni["struttura_post"]
+    content_id = db_social.crea_content(conn, "Premium promo", categoria_id=promozioni["id"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_instagram = next(u for (_, u, schema) in provider.chiamate if "Instagram" in u)
+    assert promozioni["struttura_post"] in prompt_instagram
+
+
+def _categoria_id_helper(conn, nome):
+    return next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == nome)
 
 
 # --- web: rotte CRUD -------------------------------------------------------
@@ -203,7 +253,8 @@ def test_crea_categoria_via_web(conn, client):
     csrf = _csrf(client)
 
     r = client.post("/social/categorie", data={
-        "nome": "Categoria via web", "prompt_ai": "Illustrazione di {TITOLO}", "csrf": csrf,
+        "nome": "Categoria via web", "prompt_ai": "Illustrazione di {TITOLO}",
+        "strategia_fatti": "libera", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -220,7 +271,8 @@ def test_crea_categoria_con_piu_immagini_di_riferimento_via_web(conn, client):
     csrf = _csrf(client)
 
     r = client.post("/social/categorie",
-                    data={"nome": "Con immagini", "prompt_ai": "x", "csrf": csrf},
+                    data={"nome": "Con immagini", "prompt_ai": "x",
+                          "strategia_fatti": "libera", "csrf": csrf},
                     files=[("immagini", ("uno.png", _PNG_1X1, "image/png")),
                           ("immagini", ("due.png", _PNG_1X1 + b"\x00extra", "image/png"))],
                     follow_redirects=False)
@@ -245,7 +297,7 @@ def test_aggiorna_categoria_via_web_cambia_il_prompt(conn, client):
     categoria_id = db_social.crea_categoria(conn, "Da modificare", "vecchio prompt")
 
     r = client.post(f"/social/categorie/{categoria_id}", data={
-        "prompt_ai": "nuovo prompt per {TITOLO}", "csrf": csrf,
+        "prompt_ai": "nuovo prompt per {TITOLO}", "strategia_fatti": "libera", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -258,10 +310,10 @@ def test_aggiorna_categoria_aggiunge_nuove_immagini_mantenendo_le_vecchie(conn, 
     _login(client, "admin-cat7@test.local")
     csrf = _csrf(client)
     categoria_id = db_social.crea_categoria(conn, "Con vecchia immagine", "x")
-    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf},
                 files={"immagini_nuove": ("prima.png", _PNG_1X1, "image/png")})
 
-    r = client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+    r = client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf},
                     files={"immagini_nuove": ("seconda.png", _PNG_1X1 + b"\x00extra", "image/png")},
                     follow_redirects=False)
 
@@ -277,13 +329,14 @@ def test_aggiorna_categoria_rimuove_una_singola_immagine(conn, client):
     _login(client, "admin-cat8@test.local")
     csrf = _csrf(client)
     categoria_id = db_social.crea_categoria(conn, "Da spogliare", "x")
-    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "csrf": csrf},
+    client.post(f"/social/categorie/{categoria_id}", data={"prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf},
                 files=[("immagini_nuove", ("prima.png", _PNG_1X1, "image/png")),
                       ("immagini_nuove", ("seconda.png", _PNG_1X1 + b"\x00extra", "image/png"))])
     percorso_da_rimuovere = db_social.get_categoria(conn, categoria_id)["immagini_riferimento"][0]
 
     r = client.post(f"/social/categorie/{categoria_id}",
-                    data={"prompt_ai": "x", "rimuovi_immagini": percorso_da_rimuovere, "csrf": csrf},
+                    data={"prompt_ai": "x", "strategia_fatti": "libera",
+                          "rimuovi_immagini": percorso_da_rimuovere, "csrf": csrf},
                     follow_redirects=False)
 
     assert r.status_code == 303
@@ -299,7 +352,7 @@ def test_aggiorna_categoria_inesistente_404(conn, client):
     csrf = _csrf(client)
 
     r = client.post("/social/categorie/non-esiste",
-                    data={"prompt_ai": "x", "csrf": csrf}, follow_redirects=False)
+                    data={"prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf}, follow_redirects=False)
     assert r.status_code == 404
 
 
@@ -311,7 +364,8 @@ def test_aggiorna_categoria_richiede_admin(conn, client):
     csrf = _csrf(client, "/social/contenuti/nuovo")
 
     r = client.post(f"/social/categorie/{categoria_id}",
-                    data={"prompt_ai": "y", "csrf": csrf}, follow_redirects=False)
+                    data={"prompt_ai": "y", "strategia_fatti": "libera", "csrf": csrf},
+                    follow_redirects=False)
     assert r.status_code == 403
 
 
@@ -332,10 +386,11 @@ def test_crea_categoria_nome_duplicato_via_web_400(conn, client):
     _login(client, "admin-cat2@test.local")
     csrf = _csrf(client)
     client.post("/social/categorie",
-                data={"nome": "Doppione", "prompt_ai": "x", "csrf": csrf})
+                data={"nome": "Doppione", "prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf})
 
     r = client.post("/social/categorie",
-                    data={"nome": "Doppione", "prompt_ai": "y", "csrf": csrf})
+                    data={"nome": "Doppione", "prompt_ai": "y",
+                          "strategia_fatti": "libera", "csrf": csrf})
     assert r.status_code == 400
 
 

@@ -4,11 +4,11 @@
 <div class="header-pagina">
   <div>
     <h1>Categorie</h1>
-    <p class="sottotitolo">Template di prompt (e, opzionalmente, una o più immagini di riferimento) per l'illustrazione AI di ogni tipo di post.</p>
+    <p class="sottotitolo">Per ogni tipo di post: come procurare/verificare i fatti, la struttura del testo e il soggetto/le immagini di riferimento per l'illustrazione AI.</p>
   </div>
 </div>
 
-<div class="avviso info">ℹ️ Ogni categoria descrive SOLO il soggetto/l'illustrazione: stile, palette e assenza di testo/numeri restano fissi per tutte le immagini. Placeholder disponibili nel prompt: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>. Con una o più immagini di riferimento (es. gli elementi grafici separati: pacchetto, calendario, scintille...), l'AI le usa davvero come guida di stile nella stessa richiesta (non solo come nota testuale).</div>
+<div class="avviso info">ℹ️ <strong>Strategia fatti</strong> decide come si procurano i dati: <em>Bandi JobInPA</em> cerca/filtra bandi reali dal brief, <em>Promozioni JobInPA</em> legge le promozioni attive in diretta (mai a mano), <em>Libera</em> lascia scrivere tutto all'AI dal solo brief (revisione umana sempre richiesta). <strong>Struttura del post</strong> guida il Copywriter (l'AI scrive comunque le parole sui fatti veri). <strong>Prompt immagine</strong> descrive SOLO il soggetto/l'illustrazione (stile e assenza di testo/numeri restano fissi) — lascialo vuoto per far scegliere liberamente il soggetto all'AI (es. per "Concorsi", dove varia da bando a bando). Placeholder: <code>{{ '{TITOLO}' }}</code>, <code>{{ '{SCADENZA}' }}</code>.</div>
 
 <div class="griglia" style="grid-template-columns:1fr 380px;align-items:start">
   <div class="card">
@@ -16,11 +16,14 @@
     {% for c in categorie %}
     <div style="border-top:1px solid var(--colore-bordo);padding:14px 0">
       <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
-        <div style="display:flex;gap:6px;align-items:start;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           {% for _ in c.immagini_riferimento %}
           <img src="/social/categorie/{{ c.id }}/immagine/{{ loop.index0 }}" alt="riferimento {{ c.nome }} {{ loop.index }}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--colore-bordo)">
           {% endfor %}
-          <strong style="font-size:14px;align-self:center">{{ c.nome }}</strong>
+          <strong style="font-size:14px">{{ c.nome }}</strong>
+          <span class="badge {{ 'blu' if c.strategia_fatti == 'bandi_jobinpa' else 'viola' if c.strategia_fatti == 'promozioni_jobinpa' else 'grigio' }}">
+            {{ 'Bandi JobInPA' if c.strategia_fatti == 'bandi_jobinpa' else 'Promozioni JobInPA' if c.strategia_fatti == 'promozioni_jobinpa' else 'Libera' }}
+          </span>
         </div>
         <div style="display:flex;gap:8px;white-space:nowrap">
           <button type="button" class="btn piccolo secondario" onclick="mostraModificaCategoria('{{ c.id }}')">✏️ Modifica</button>
@@ -33,14 +36,27 @@
       </div>
 
       <div id="vista-{{ c.id }}" style="margin-top:8px">
-        <p style="white-space:pre-wrap;font-size:13px;color:var(--colore-testo);margin:0">{{ c.prompt_ai }}</p>
+        {% if c.struttura_post %}<p style="font-size:13px;margin:0 0 6px"><strong>Struttura post:</strong> {{ c.struttura_post }}</p>{% endif %}
+        <p style="white-space:pre-wrap;font-size:13px;color:var(--colore-testo);margin:0">{{ c.prompt_ai or '(nessun prompt immagine — soggetto scelto liberamente dall\'AI)' }}</p>
       </div>
 
       <div id="modifica-{{ c.id }}" style="display:none;margin-top:10px">
         <form method="post" action="/social/categorie/{{ c.id }}" enctype="multipart/form-data">
           <input type="hidden" name="csrf" value="{{ csrf }}">
-          <label>Prompt immagine</label>
-          <textarea name="prompt_ai" rows="6" required maxlength="2000">{{ c.prompt_ai }}</textarea>
+          <label>Strategia fatti</label>
+          <select name="strategia_fatti">
+            <option value="bandi_jobinpa" {{ 'selected' if c.strategia_fatti == 'bandi_jobinpa' }}>Bandi JobInPA — cerca/filtra bandi dal brief</option>
+            <option value="promozioni_jobinpa" {{ 'selected' if c.strategia_fatti == 'promozioni_jobinpa' }}>Promozioni JobInPA — legge le promozioni attive</option>
+            <option value="libera" {{ 'selected' if c.strategia_fatti == 'libera' }}>Libera — l'AI scrive dal solo brief</option>
+          </select>
+
+          <label>Struttura del post (opzionale)</label>
+          <textarea name="struttura_post" rows="3" maxlength="1000"
+                    placeholder="Es. Un'etichetta breve, un titolo, un sottotitolo, 3 punti vantaggio, una call to action.">{{ c.struttura_post or '' }}</textarea>
+
+          <label>Prompt immagine (opzionale)</label>
+          <textarea name="prompt_ai" rows="6" maxlength="2000"
+                    placeholder="Lascia vuoto per far scegliere liberamente il soggetto all'AI">{{ c.prompt_ai }}</textarea>
 
           {% if c.immagini_riferimento %}
           <label>Immagini di riferimento attuali</label>
@@ -74,9 +90,22 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Nome *</label>
       <input type="text" name="nome" required placeholder="Es. Guida rapida, Novità prodotto">
-      <label>Prompt immagine *</label>
-      <textarea name="prompt_ai" rows="6" required maxlength="2000"
-                placeholder="Descrivi SOLO il soggetto/l'illustrazione, es. 'Illustrazione 3D di ... Tema: {TITOLO}.'"></textarea>
+
+      <label>Strategia fatti *</label>
+      <select name="strategia_fatti" required>
+        <option value="bandi_jobinpa">Bandi JobInPA — cerca/filtra bandi dal brief</option>
+        <option value="promozioni_jobinpa">Promozioni JobInPA — legge le promozioni attive</option>
+        <option value="libera" selected>Libera — l'AI scrive dal solo brief</option>
+      </select>
+
+      <label>Struttura del post (opzionale)</label>
+      <textarea name="struttura_post" rows="3" maxlength="1000"
+                placeholder="Es. Un'etichetta breve, un titolo, un sottotitolo, 3 punti vantaggio, una call to action."></textarea>
+
+      <label>Prompt immagine (opzionale)</label>
+      <textarea name="prompt_ai" rows="6" maxlength="2000"
+                placeholder="Descrivi SOLO il soggetto/l'illustrazione, es. 'Illustrazione 3D di ... Tema: {TITOLO}.' — lascia vuoto per far scegliere liberamente l'AI"></textarea>
+
       <label>Immagini di riferimento (opzionale, anche più di una)</label>
       <input type="file" name="immagini" accept="image/png,image/jpeg" multiple>
       <p class="hint">Se presenti, guidano davvero la generazione (OpenAI le usa come riferimento di stile nella stessa richiesta) — utile per combinare più elementi grafici separati.</p>

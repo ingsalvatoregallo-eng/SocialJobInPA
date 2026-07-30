@@ -58,7 +58,7 @@
       {% endfor %}
     </div>
 
-    {% if dettaglio.content.tipologia == 'promozione' %}
+    {% if dettaglio.categoria and dettaglio.categoria.strategia_fatti == 'promozioni_jobinpa' %}
     <h3 style="margin-top:18px">Promozione citata</h3>
     {% if dettaglio.promo_dati %}
     <div style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:12px 14px">

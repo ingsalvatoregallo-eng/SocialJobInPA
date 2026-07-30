@@ -84,7 +84,8 @@ def test_promozione_con_promo_dati_mostra_card_verificata(conn, client):
              "descrizione": "Accesso completo", "prezzo_eur": 9.99,
              "prezzo_promozionale_eur": 0.0, "scadenza": "2026-08-31",
              "url_jobinpa": "https://jobinpa.it/premium"}
-    content_id = _content_in_attesa_approvazione(conn, "Premium promo", tipologia="promozione",
+    promozioni_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
+    content_id = _content_in_attesa_approvazione(conn, "Premium promo", categoria_id=promozioni_id,
                                                  promo_dati=promo)
     db_social.crea_utente(conn, "revisore-ux3@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
@@ -99,8 +100,9 @@ def test_promozione_con_promo_dati_mostra_card_verificata(conn, client):
 
 
 def test_promozione_senza_promo_dati_avvisa_di_verificare_a_mano(conn, client):
+    promozioni_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
     content_id = _content_in_attesa_approvazione(conn, "Promo inserita a mano",
-                                                 tipologia="promozione")
+                                                 categoria_id=promozioni_id)
     db_social.crea_utente(conn, "revisore-ux4@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     _login(client, "revisore-ux4@test.local")

@@ -195,7 +195,8 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     non annulla mai, anche se la ricerca semantica non trova nulla: non
     c'era una richiesta precisa da soddisfare."""
     content = db_social.get_content(conn, content_id)
-    if content["tipologia"] == "promozione":
+    strategia = _strategia_fatti_per_content(conn, content)
+    if strategia == "promozioni_jobinpa":
         # Nessun bando da cercare: il fatto e' la promozione stessa, letta
         # in diretta da JobInPA (promo_dati, popolato alla creazione da
         # jobinpa_client.promozioni() — vedi web.crea_contenuto), non un
@@ -233,6 +234,22 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
         for f in risultato.fatti:
             db_social.salva_fatto(conn, f.fatto, content_id=content_id,
                                   fonte_url=f.fonte_url, confidenza=f.confidenza,
+                                  richiede_revisione=risultato.richiede_revisione)
+        db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
+        return risultato
+    if strategia == "libera":
+        # Nessuna ricerca (ne' bandi ne' promozioni): il brief stesso e'
+        # il fatto, tipicamente un annuncio su una funzionalita' della
+        # piattaforma senza ancora un'API dedicata da interrogare. Stessa
+        # garanzia delle promozioni: revisione umana sempre richiesta,
+        # mai un claim non verificabile pubblicato in automatico.
+        fatto = content["brief"] or content["titolo"]
+        risultato = models.RisultatoRicerca(
+            fatti=[models.FattoVerificato(fatto=fatto, confidenza=1.0)],
+            sintesi=fatto, richiede_revisione=True, annuncio_funzionalita=True)
+        for f in risultato.fatti:
+            db_social.salva_fatto(conn, f.fatto, content_id=content_id,
+                                  confidenza=f.confidenza,
                                   richiede_revisione=risultato.richiede_revisione)
         db_social.aggiorna_content(conn, content_id, bandi_trovati="[]")
         return risultato
@@ -336,11 +353,19 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
                                for titolo, url in link_bandi[:images.MASSIMO_IMMAGINI_CAROSELLO])
         base += (f"\nLink JobInPA dei bandi citati (fonte primaria: includi quello pertinente "
                 f"nel testo, mai un generico invito a visitare il sito):\n{righe_link}")
-    if content["tipologia"] == "promozione" and content["promo_dati"]:
+    if content["promo_dati"]:
         promo_link = json.loads(content["promo_dati"]).get("url_jobinpa")
         if promo_link:
             base += (f"\nLink JobInPA della promozione (fonte primaria, includilo nel "
                     f"testo): {promo_link}")
+    categoria = _categoria_per_content(conn, content)
+    if categoria and categoria["struttura_post"]:
+        # Guida di struttura per la categoria scelta (menu Categorie): il
+        # Copywriter scrive comunque le parole vere sui fatti sopra, ma
+        # segue sempre questa forma per questa categoria (es. etichetta +
+        # titolo + punti + CTA per le promozioni).
+        base += (f"\nStruttura richiesta per questo post (segui questo schema, "
+                f"scrivendo tu le parole sui fatti sopra):\n{categoria['struttura_post']}")
     if note_revisore:
         # Ripartenza da CHANGES_REQUESTED (vedi esegui_pipeline): questa e'
         # la correzione esplicita chiesta dal revisore, va applicata al testo.
@@ -422,16 +447,23 @@ def _richiesta_immagine_da_bando(bando, formato, content_id):
 
 
 def _categoria_per_content(conn, content):
-    """Categoria da usare per l'illustrazione (menu Categorie): quella
-    scelta esplicitamente alla creazione, oppure — solo per tipologia
-    'promozione' senza scelta esplicita — la categoria 'Promozione'
-    seminata di default (vedi db_social._migra), cosi' una promozione ha
-    sempre un'illustrazione coerente anche senza passare dal menu."""
+    """Categoria scelta alla creazione (menu Categorie): decide sia come
+    procurare/verificare i fatti (strategia_fatti, vedi
+    _strategia_fatti_per_content/research) sia il soggetto
+    dell'illustrazione e la struttura del post (vedi visual/copywriting).
+    None per contenuti creati prima del backfill di categoria_id (mai un
+    errore: si comportano come nessuna categoria selezionata)."""
     if content["categoria_id"]:
         return db_social.get_categoria(conn, content["categoria_id"])
-    if content["tipologia"] == "promozione":
-        return next((c for c in db_social.lista_categorie(conn) if c["nome"] == "Promozione"), None)
     return None
+
+
+def _strategia_fatti_per_content(conn, content):
+    """Default 'bandi_jobinpa' senza categoria (contenuti creati fuori dal
+    form web, es. nei test, o prima del backfill): e' il comportamento
+    storico quando la tipologia non era 'promozione'."""
+    categoria = _categoria_per_content(conn, content)
+    return categoria["strategia_fatti"] if categoria else "bandi_jobinpa"
 
 
 def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider=None):
@@ -450,15 +482,20 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
     categoria = _categoria_per_content(conn, content)
     immagini_riferimento = []
     if categoria:
-        # Il "soggetto" dell'illustrazione non e' lasciato all'AI (rischio
-        # di uno stile incoerente da un post all'altro): viene dalla
-        # categoria scelta (menu Categorie), con titolo/scadenza come
-        # unici dati variabili (niente testo/numeri richiesti all'AI). Se
-        # la categoria ha immagini di riferimento, guidano davvero la
-        # generazione (endpoint /v1/images/edits, vedi images.py).
-        scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
-        brief.prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", content["titolo"]).replace(
-            "{SCADENZA}", scadenza_leggibile)
+        if categoria["prompt_ai"]:
+            # Il "soggetto" dell'illustrazione non e' lasciato all'AI
+            # (rischio di uno stile incoerente da un post all'altro):
+            # viene dalla categoria scelta (menu Categorie), con
+            # titolo/scadenza come unici dati variabili (niente
+            # testo/numeri richiesti all'AI). Vuoto (es. "Concorsi", dove
+            # il soggetto varia da bando a bando) = nessuna sostituzione,
+            # resta il giudizio del Visual Agent come sempre.
+            scadenza_leggibile = _formatta_scadenza(content["scadenza_promo"]) or ""
+            brief.prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", content["titolo"]).replace(
+                "{SCADENZA}", scadenza_leggibile)
+        # Le immagini di riferimento guidano davvero la generazione
+        # (endpoint /v1/images/edits, vedi images.py) indipendentemente
+        # dal prompt_ai testuale.
         immagini_riferimento = categoria["immagini_riferimento"]
     image_provider = image_provider or images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")

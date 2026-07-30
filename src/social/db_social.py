@@ -94,12 +94,19 @@ PILLARS_SEED = (
 )
 
 PIATTAFORME = ("instagram", "linkedin")
-# concorso: ricerca bandi su JobInPA dal brief (comportamento storico).
-# promozione: niente ricerca bandi, prompt_ai dell'immagine preso dal
-# template configurabile in Impostazioni (vedi agents.research/visual).
-# generico: post libero, stesso comportamento dinamico di 'concorso' per
-# copy/immagine ma senza ricerca bandi (es. annunci di funzionalita').
+# Storico, sostituito dalla categoria scelta alla creazione (vedi
+# STRATEGIE_FATTI/social_content_categories): la colonna resta in schema
+# per compatibilita' con contenuti gia' creati, ma non guida piu' alcuna
+# logica — agents.research/visual leggono solo content.categoria_id.
 TIPOLOGIE_CONTENUTO = ("concorso", "promozione", "generico")
+
+# Come una categoria (menu Categorie) procura/verifica i fatti di un
+# contenuto (vedi agents.research): bandi_jobinpa cerca/filtra bandi
+# come sempre fatto per "Concorsi"; promozioni_jobinpa legge le
+# promozioni attive da JobInPA (mai a mano); libera lascia scrivere
+# tutto all'AI dal solo brief (es. "Funzionalita'", finche' non esiste
+# un'API dedicata), forzando comunque la revisione umana.
+STRATEGIE_FATTI = ("bandi_jobinpa", "promozioni_jobinpa", "libera")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS utenti (
@@ -254,17 +261,22 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
     creato_at   TEXT NOT NULL
 );
 
--- Categorie personalizzate di prompt immagine (menu "Categorie"): ogni
--- categoria descrive SOLO il soggetto/l'illustrazione (stile e palette
--- restano fissi in codice, vedi images._STILE_OPENAI_IMAGES) e puo'
--- opzionalmente avere una o piu' immagini di riferimento che guidano
--- davvero OpenAI (endpoint /v1/images/edits, che accetta piu' immagini
--- nella stessa richiesta, invece di /v1/images/generations).
+-- Categorie (menu "Categorie"): unico punto in cui si decide sia come
+-- procurare/verificare i fatti (strategia_fatti) sia come generare il
+-- post — struttura del testo (struttura_post, guida per il Copywriter
+-- Agent, non un testo fisso: l'AI scrive comunque le parole sui fatti
+-- veri) e soggetto dell'illustrazione (prompt_ai, facoltativo: vuoto =
+-- l'AI sceglie liberamente, utile per "Concorsi" dove il soggetto varia
+-- da bando a bando). Una o piu' immagini di riferimento guidano davvero
+-- OpenAI (endpoint /v1/images/edits, che accetta piu' immagini nella
+-- stessa richiesta, invece di /v1/images/generations).
 CREATE TABLE IF NOT EXISTS social_content_categories (
     id                      TEXT PRIMARY KEY,
     nome                    TEXT NOT NULL UNIQUE,
-    prompt_ai               TEXT NOT NULL,
+    prompt_ai               TEXT NOT NULL DEFAULT '',
     immagini_riferimento    TEXT,  -- JSON lista di percorsi locali, [] o NULL se nessuna
+    strategia_fatti         TEXT NOT NULL DEFAULT 'libera',
+    struttura_post          TEXT,  -- guida di struttura per il Copywriter Agent, facoltativa
     creato_at               TEXT NOT NULL,
     aggiornato_at           TEXT
 );
@@ -467,13 +479,24 @@ SETTINGS_DEFAULT = {
 # solo il soggetto/l'illustrazione (stile, palette e assenza di testo
 # restano fissi lato codice, vedi images._STILE_OPENAI_IMAGES). Placeholder
 # disponibili: {TITOLO}, {SCADENZA} (vedi agents.visual).
-CATEGORIA_PROMOZIONE_DEFAULT_PROMPT = (
+CATEGORIA_PROMOZIONI_DEFAULT_PROMPT = (
     "Illustrazione 3D moderna ed elegante di un pacchetto regalo nei "
     "colori del brand, accanto a un calendario stilizzato (senza numeri "
     "ne' testo) che richiama una scadenza imminente. Piccoli elementi "
     "decorativi coerenti: scintille, forme morbide, onde leggere sullo "
     "sfondo. Composizione calda e promozionale. Tema della promozione: "
     "{TITOLO}."
+)
+
+# Struttura suggerita al Copywriter Agent per le promozioni (l'AI scrive
+# comunque le parole vere sui fatti letti da JobInPA, questa e' solo la
+# forma): rispecchia il layout tipico di un post promozionale JobInPA.
+CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA = (
+    "Un'etichetta breve in cima (es. 'Cosa fa JobInPA' o simile), un "
+    "titolo principale che comunica chiaramente l'offerta, un "
+    "sottotitolo con la scadenza, un elenco di 2-3 punti/vantaggi "
+    "concreti (es. cosa include, per chi e' valida, fino a quando), e "
+    "una call to action diretta (es. 'Registrati gratis')."
 )
 
 
@@ -560,6 +583,14 @@ def _migra(conn):
                     "UPDATE social_content_categories SET immagini_riferimento = ? WHERE id = ?",
                     (json.dumps([riga["immagine_riferimento_path"]]), riga["id"]))
             conn.commit()
+    if "strategia_fatti" not in colonne_categorie:
+        conn.execute(
+            "ALTER TABLE social_content_categories ADD COLUMN strategia_fatti "
+            "TEXT NOT NULL DEFAULT 'libera'")
+        conn.commit()
+    if "struttura_post" not in colonne_categorie:
+        conn.execute("ALTER TABLE social_content_categories ADD COLUMN struttura_post TEXT")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -572,14 +603,48 @@ def _migra(conn):
         conn.execute(
             "INSERT OR IGNORE INTO social_system_settings (chiave, valore, aggiornato_at) "
             "VALUES (?, ?, ?)", (chiave, json.dumps(valore), adesso))
-    # Categoria "Promozione" sempre presente (seed idempotente, come i
-    # pillar/le fonti sopra): prima di questa migrazione lo stesso testo
-    # viveva nel setting prompt_templates_immagine, ora sostituito dal
-    # menu Categorie (vedi crea_categoria) — qualunque tipologia puo'
-    # sceglierla, non solo 'promozione'.
+    # Tre categorie sempre presenti (seed idempotente, come i pillar/le
+    # fonti sopra): unificano la vecchia tipologia fissa (concorso |
+    # promozione | generico) in un menu aperto che l'utente puo' estendere
+    # da "Categorie" — ogni categoria decide da sola come procurare i
+    # fatti (strategia_fatti) e con che struttura scrivere il post.
+    riga_promo_vecchia = conn.execute(
+        "SELECT id FROM social_content_categories WHERE nome IN ('Promozione', 'Promozioni')"
+    ).fetchone()
+    if riga_promo_vecchia:
+        # Rinomina la categoria "Promozione" (singolare, versione
+        # precedente) mantenendo lo stesso id — i contenuti che la
+        # referenziano restano collegati.
+        conn.execute(
+            "UPDATE social_content_categories SET nome = 'Promozioni', "
+            "strategia_fatti = 'promozioni_jobinpa' WHERE id = ?", (riga_promo_vecchia["id"],))
+    else:
+        crea_categoria(conn, "Promozioni", CATEGORIA_PROMOZIONI_DEFAULT_PROMPT,
+                       strategia_fatti="promozioni_jobinpa",
+                       struttura_post=CATEGORIA_PROMOZIONI_DEFAULT_STRUTTURA)
     if not conn.execute(
-            "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Promozione",)).fetchone():
-        crea_categoria(conn, "Promozione", CATEGORIA_PROMOZIONE_DEFAULT_PROMPT)
+            "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Concorsi",)).fetchone():
+        crea_categoria(conn, "Concorsi", "", strategia_fatti="bandi_jobinpa")
+    if not conn.execute(
+            "SELECT 1 FROM social_content_categories WHERE nome = ?", ("Funzionalità",)).fetchone():
+        crea_categoria(conn, "Funzionalità", "", strategia_fatti="libera")
+    # Contenuti creati prima di questa migrazione: collegati alla
+    # categoria corrispondente alla vecchia tipologia, cosi' continuano a
+    # comportarsi esattamente come prima (vedi agents.research/visual,
+    # che ora leggono solo categoria_id).
+    if conn.execute(
+            "SELECT 1 FROM social_content WHERE categoria_id IS NULL LIMIT 1").fetchone():
+        mappa_categorie = {r["nome"]: r["id"] for r in conn.execute(
+            "SELECT id, nome FROM social_content_categories "
+            "WHERE nome IN ('Concorsi', 'Promozioni', 'Funzionalità')")}
+        mappa_tipologia = {"concorso": mappa_categorie.get("Concorsi"),
+                          "promozione": mappa_categorie.get("Promozioni"),
+                          "generico": mappa_categorie.get("Funzionalità")}
+        for tipologia, categoria_id in mappa_tipologia.items():
+            if categoria_id:
+                conn.execute(
+                    "UPDATE social_content SET categoria_id = ? "
+                    "WHERE tipologia = ? AND categoria_id IS NULL", (categoria_id, tipologia))
     # I due account gestiti (uno per piattaforma): creati subito in stato
     # non_configurato, la checklist in dashboard guida il completamento.
     for piattaforma, nome in (("instagram", "JobInPA (Instagram)"), ("linkedin", "JobInPA (LinkedIn)")):
@@ -788,14 +853,24 @@ def _parse_categoria(riga):
     return d
 
 
-def crea_categoria(conn, nome, prompt_ai, *, immagini_riferimento=None):
-    """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE).
-    immagini_riferimento: lista di percorsi locali (0 o piu' immagini),
-    passate insieme a OpenAI /v1/images/edits (vedi images.py)."""
+def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
+                   strategia_fatti="libera", struttura_post=None):
+    """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE),
+    ValueError se strategia_fatti non e' valida.
+    prompt_ai: facoltativo, vuoto = l'AI sceglie liberamente il soggetto
+    dell'illustrazione (utile per categorie come "Concorsi" dove varia da
+    bando a bando). immagini_riferimento: lista di percorsi locali (0 o
+    piu' immagini), passate insieme a OpenAI /v1/images/edits (vedi
+    images.py). struttura_post: guida di struttura per il Copywriter
+    Agent (vedi agents.copywriting), non un testo fisso."""
+    if strategia_fatti not in STRATEGIE_FATTI:
+        raise ValueError(f"strategia_fatti non valida: {strategia_fatti}")
     categoria_id = _nuovo_id()
     _insert(conn, "social_content_categories", {
         "id": categoria_id, "nome": nome.strip(), "prompt_ai": prompt_ai.strip(),
         "immagini_riferimento": json.dumps(immagini_riferimento) if immagini_riferimento else None,
+        "strategia_fatti": strategia_fatti,
+        "struttura_post": struttura_post.strip() if struttura_post else None,
         "creato_at": _adesso()})
     conn.commit()
     return categoria_id
@@ -812,15 +887,23 @@ def get_categoria(conn, categoria_id):
     return _parse_categoria(riga) if riga is not None else None
 
 
-def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimento=None):
-    """immagini_riferimento: passare esplicitamente None lascia la lista
-    esistente invariata — per svuotarla davvero si passa una lista vuota
-    [] (vedi web.py)."""
+def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimento=None,
+                       strategia_fatti=None, struttura_post=None):
+    """Ogni parametro non passato (None) lascia il valore esistente
+    invariato. Per svuotare davvero un campo facoltativo si passa una
+    stringa vuota "" (struttura_post) o una lista vuota [] (immagini_
+    riferimento) — non None, che significa "non toccare"."""
+    if strategia_fatti is not None and strategia_fatti not in STRATEGIE_FATTI:
+        raise ValueError(f"strategia_fatti non valida: {strategia_fatti}")
     campi = {}
     if prompt_ai is not None:
         campi["prompt_ai"] = prompt_ai.strip()
     if immagini_riferimento is not None:
         campi["immagini_riferimento"] = json.dumps(immagini_riferimento) if immagini_riferimento else None
+    if strategia_fatti is not None:
+        campi["strategia_fatti"] = strategia_fatti
+    if struttura_post is not None:
+        campi["struttura_post"] = struttura_post.strip() or None
     if not campi:
         return
     campi["aggiornato_at"] = _adesso()

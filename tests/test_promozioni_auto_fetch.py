@@ -115,6 +115,10 @@ def test_form_nuovo_contenuto_senza_promo_attive_mostra_avviso(conn, client, mon
     assert "Nessuna promozione attiva" in pagina
 
 
+def _categoria_id(conn, nome):
+    return next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == nome)
+
+
 def test_crea_contenuto_promozione_rilegge_i_dati_da_jobinpa(conn, client, monkeypatch):
     monkeypatch.setattr("social.web.jobinpa_client.client", lambda: _ClientFinto())
     db_social.crea_utente(conn, "editor-autofetch3@test.local",
@@ -123,7 +127,8 @@ def test_crea_contenuto_promozione_rilegge_i_dati_da_jobinpa(conn, client, monke
     csrf = _csrf(client)
 
     r = client.post("/social/contenuti", data={
-        "tipologia": "promozione", "promo_selezionata": "piano|premium-promo", "csrf": csrf,
+        "categoria_id": _categoria_id(conn, "Promozioni"),
+        "promo_selezionata": "piano|premium-promo", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -142,8 +147,9 @@ def test_crea_contenuto_promozione_senza_selezione_400(conn, client, monkeypatch
     _login(client, "editor-autofetch4@test.local")
     csrf = _csrf(client)
 
-    r = client.post("/social/contenuti", data={"tipologia": "promozione", "csrf": csrf},
-                    follow_redirects=False)
+    r = client.post("/social/contenuti", data={
+        "categoria_id": _categoria_id(conn, "Promozioni"), "csrf": csrf,
+    }, follow_redirects=False)
     assert r.status_code == 400
 
 
@@ -158,7 +164,8 @@ def test_crea_contenuto_promozione_non_piu_attiva_400(conn, client, monkeypatch)
     csrf = _csrf(client)
 
     r = client.post("/social/contenuti", data={
-        "tipologia": "promozione", "promo_selezionata": "piano|premium-promo", "csrf": csrf,
+        "categoria_id": _categoria_id(conn, "Promozioni"),
+        "promo_selezionata": "piano|premium-promo", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400
 
@@ -170,6 +177,7 @@ def test_crea_contenuto_concorso_senza_titolo_400(conn, client, monkeypatch):
     _login(client, "editor-autofetch6@test.local")
     csrf = _csrf(client)
 
-    r = client.post("/social/contenuti", data={"tipologia": "concorso", "csrf": csrf},
-                    follow_redirects=False)
+    r = client.post("/social/contenuti", data={
+        "categoria_id": _categoria_id(conn, "Concorsi"), "csrf": csrf,
+    }, follow_redirects=False)
     assert r.status_code == 400

@@ -1,7 +1,8 @@
-"""Tipologia 'promozione' (richiesta dall'utente): niente ricerca bandi. La
-promozione forza sempre la revisione umana (stesso motivo di
-annuncio_funzionalita: un dato commerciale, anche se letto in diretta da
-JobInPA, va sempre controllato da un umano prima di pubblicare).
+"""Strategia fatti 'promozioni_jobinpa' (categoria "Promozioni", seminata
+di default — vedi test_categorie.py): niente ricerca bandi. La promozione
+forza sempre la revisione umana (stesso motivo di annuncio_funzionalita:
+un dato commerciale, anche se letto in diretta da JobInPA, va sempre
+controllato da un umano prima di pubblicare).
 
 Il "cosa disegna l'AI" (categorie, prompt, immagine di riferimento) e il
 "da dove vengono i dati della promo" (fetch automatico da JobInPA) sono
@@ -11,6 +12,10 @@ import pytest
 
 from social import agents, db_social, llm, models
 from social.images import MockImageProvider
+
+
+def _categoria_id(conn, nome):
+    return next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == nome)
 
 
 def test_crea_content_tipologia_default_concorso(conn):
@@ -48,7 +53,7 @@ def test_research_promozione_non_interroga_jobinpa(conn):
     del fetch automatico): usa comunque solo titolo/scadenza/brief gia'
     salvati, mai una nuova ricerca su JobInPA."""
     content_id = db_social.crea_content(
-        conn, "Premium gratis fino al 31 agosto", tipologia="promozione",
+        conn, "Premium gratis fino al 31 agosto", categoria_id=_categoria_id(conn, "Promozioni"),
         scadenza_promo="2026-08-31", brief="Piano Premium senza costi")
     risultato = agents.research(conn, content_id, provider=llm.MockLLMProvider(conn),
                                 jobinpa_client_=_ClientJobinpaVietato())
@@ -63,7 +68,8 @@ def test_research_promozione_non_interroga_jobinpa(conn):
 
 
 def test_research_promozione_senza_scadenza_non_rompe(conn):
-    content_id = db_social.crea_content(conn, "Promo senza data", tipologia="promozione")
+    content_id = db_social.crea_content(conn, "Promo senza data",
+                                        categoria_id=_categoria_id(conn, "Promozioni"))
     risultato = agents.research(conn, content_id, provider=llm.MockLLMProvider(conn),
                                 jobinpa_client_=_ClientJobinpaVietato())
     assert "Promo senza data" in risultato.fatti[0].fatto
@@ -78,7 +84,8 @@ def test_research_promozione_usa_promo_dati_quando_presenti(conn):
              "descrizione": "Accesso completo per un mese", "prezzo_eur": 9.99,
              "prezzo_promozionale_eur": 0.0, "scadenza": "2026-08-31",
              "url_jobinpa": "https://jobinpa.it/premium"}
-    content_id = db_social.crea_content(conn, "Premium promo", tipologia="promozione",
+    content_id = db_social.crea_content(conn, "Premium promo",
+                                        categoria_id=_categoria_id(conn, "Promozioni"),
                                         promo_dati=promo)
     risultato = agents.research(conn, content_id, provider=llm.MockLLMProvider(conn),
                                 jobinpa_client_=_ClientJobinpaVietato())
@@ -97,8 +104,25 @@ def test_esegui_pipeline_promozione_forza_approvazione_anche_a_classe_verde(conn
         classe="verde", punteggio_accuratezza=0.95, punteggio_brand=0.95,
         punteggio_conformita=0.95, motivi=[]))
     content_id = db_social.crea_content(
-        conn, "Premium gratis fino al 31 agosto", tipologia="promozione",
+        conn, "Premium gratis fino al 31 agosto", categoria_id=_categoria_id(conn, "Promozioni"),
         scadenza_promo="2026-08-31", canali=["instagram"])
+    stato_finale = agents.esegui_pipeline(conn, content_id, provider=provider,
+                                          image_provider=MockImageProvider())
+    assert stato_finale == "AWAITING_APPROVAL"
+
+
+def test_esegui_pipeline_categoria_libera_forza_approvazione_anche_a_classe_verde(conn):
+    """Stessa garanzia per la strategia 'libera' (categoria "Funzionalità",
+    seminata di default): mai pubblicazione automatica su un annuncio
+    senza fonte esterna verificabile, anche a classe verde."""
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="verde", punteggio_accuratezza=0.95, punteggio_brand=0.95,
+        punteggio_conformita=0.95, motivi=[]))
+    content_id = db_social.crea_content(
+        conn, "Nuova funzionalità: bandi consigliati per te",
+        categoria_id=_categoria_id(conn, "Funzionalità"),
+        brief="Il CV viene analizzato per suggerire i bandi più adatti", canali=["instagram"])
     stato_finale = agents.esegui_pipeline(conn, content_id, provider=provider,
                                           image_provider=MockImageProvider())
     assert stato_finale == "AWAITING_APPROVAL"
