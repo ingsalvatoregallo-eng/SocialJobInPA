@@ -483,12 +483,20 @@ def _formatta_scadenza(scadenza):
         return str(scadenza)
 
 
-def _richiesta_immagine_da_bando(bando, formato, content_id):
+def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
+                                 immagini_riferimento=None, stile_immagine=None):
     """Immagine 'nuovo_concorso' per un singolo bando di un carosello, con
     dati SEMPRE presi dal record JobInPA (mai dal modello) — stesso
     principio dei dati_chiave del VisualBrief, qui applicato quando i
     bandi sono piu' di uno e ognuno ha diritto alla propria immagine
-    invece che il modello ne scelga solo uno."""
+    invece che il modello ne scelga solo uno.
+    prompt_ai/immagini_riferimento/stile_immagine della categoria vanno
+    applicati anche qui (bug segnalato dall'utente: una categoria "Concorsi"
+    personalizzata con prompt/immagini/stile restava completamente
+    ignorata nei caroselli, che passavano sempre e solo per lo stile fisso
+    di default) — {TITOLO}/{SCADENZA} nel prompt_ai vengono sostituiti coi
+    dati del SINGOLO bando, non del content, perche' ogni slide del
+    carosello ha il proprio bando."""
     dati_chiave = [f"Ente: {_formatta_ente(bando.get('enti'))}"]
     if bando.get("num_posti"):
         dati_chiave.append(f"Posti: {bando['num_posti']}")
@@ -497,10 +505,16 @@ def _richiesta_immagine_da_bando(bando, formato, content_id):
         dati_chiave.append(f"Scadenza: {scadenza_leggibile}")
     if bando.get("titolo_studio_richiesto"):
         dati_chiave.append(f"Titolo di studio: {bando['titolo_studio_richiesto']}")
+    titolo_bando = bando.get("titolo") or "Concorso pubblico"
+    prompt_ai = None
+    if categoria and categoria["prompt_ai"]:
+        prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", titolo_bando).replace(
+            "{SCADENZA}", scadenza_leggibile or "")
     return images.ImageGenerationRequest(
-        template="nuovo_concorso", formato=formato,
-        titolo=bando.get("titolo") or "Concorso pubblico",
-        sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id)
+        template="nuovo_concorso", formato=formato, titolo=titolo_bando,
+        sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id,
+        prompt_ai=prompt_ai, immagini_riferimento=immagini_riferimento or [],
+        stile_ai=stile_immagine)
 
 
 def _categoria_per_content(conn, content):
@@ -575,7 +589,9 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             # che ne sceglie uno e relega gli altri a nota testuale nella
             # caption (comportamento precedente, segnalato dall'utente).
             for bando in bandi_carosello:
-                richiesta = _richiesta_immagine_da_bando(bando, formato, content_id)
+                richiesta = _richiesta_immagine_da_bando(
+                    bando, formato, content_id, categoria=categoria,
+                    immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
                 asset = asyncio.run(image_provider.generate(richiesta))
                 db_social.salva_asset(conn, content_id, asset.percorso,
                                       piattaforma=piattaforma, template=asset.template,

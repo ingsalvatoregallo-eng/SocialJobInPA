@@ -68,6 +68,64 @@ def test_richiesta_immagine_da_bando_non_mostra_la_lista_python_grezza():
     assert not any("[" in dato for dato in richiesta.dati_chiave)
 
 
+def test_richiesta_immagine_da_bando_applica_il_prompt_della_categoria_per_bando():
+    """Regressione: una categoria "Concorsi" personalizzata (prompt/
+    immagini/stile) restava completamente ignorata nel carosello, che
+    passava sempre per lo stile fisso di default indipendentemente dalla
+    configurazione (segnalato dall'utente: la grafica non cambiava mai
+    nonostante la categoria fosse stata modificata). {TITOLO}/{SCADENZA}
+    vanno sostituiti coi dati del bando specifico, non del content, perche'
+    ogni slide del carosello ha il proprio bando."""
+    bando = {"id": "CONC-1", "titolo": "Concorso pubblico Comune di Trieste",
+             "enti": ["Comune di Trieste"], "num_posti": 5,
+             "scadenza": "2026-08-07T12:00:00Z", "sintesi": "Sintesi."}
+    categoria = {"prompt_ai": "Mockup per {TITOLO}, scadenza {SCADENZA}.",
+                "immagini_riferimento": ["/a.png", "/b.png"]}
+    richiesta = agents._richiesta_immagine_da_bando(
+        bando, "instagram_feed", "content-1", categoria=categoria,
+        immagini_riferimento=categoria["immagini_riferimento"], stile_immagine="Stile x")
+    assert richiesta.prompt_ai == "Mockup per Concorso pubblico Comune di Trieste, scadenza 7 agosto 2026."
+    assert richiesta.immagini_riferimento == ["/a.png", "/b.png"]
+    assert richiesta.stile_ai == "Stile x"
+
+
+def test_richiesta_immagine_da_bando_senza_categoria_non_passa_nulla():
+    bando = {"id": "CONC-1", "titolo": "Concorso"}
+    richiesta = agents._richiesta_immagine_da_bando(bando, "instagram_feed", "content-1")
+    assert richiesta.prompt_ai is None
+    assert richiesta.immagini_riferimento == []
+    assert richiesta.stile_ai is None
+
+
+def test_richiesta_immagine_da_bando_categoria_con_prompt_vuoto_non_lo_sostituisce():
+    bando = {"id": "CONC-1", "titolo": "Concorso"}
+    categoria = {"prompt_ai": "", "immagini_riferimento": []}
+    richiesta = agents._richiesta_immagine_da_bando(bando, "instagram_feed", "content-1", categoria=categoria)
+    assert richiesta.prompt_ai is None
+
+
+def test_visual_carosello_applica_prompt_e_immagini_della_categoria_a_ogni_bando(conn):
+    """End-to-end: agents.visual() deve propagare prompt_ai/immagini_
+    riferimento/stile_immagine della categoria a CIASCUNA immagine del
+    carosello, non solo al caso a immagine singola."""
+    from social.images import MockImageProvider
+
+    categoria_id = db_social.crea_categoria(
+        conn, "Concorsi personalizzati", "Mockup per {TITOLO}.",
+        immagini_riferimento=["/campanella.png"], strategia_fatti="bandi_jobinpa",
+        stile_immagine="Stile schede concorso")
+    content_id = db_social.crea_content(conn, "Tre concorsi amministrativi",
+                                        canali=["instagram"], categoria_id=categoria_id)
+    provider = llm.MockLLMProvider(conn)
+    spia = MockImageProvider()
+    agents.visual(conn, content_id, _risultato_con_bandi(3), provider=provider, image_provider=spia)
+    assert len(spia.richieste) == 3
+    for richiesta, bando in zip(spia.richieste, _BANDI_ESEMPIO):
+        assert richiesta.prompt_ai == f"Mockup per {bando['titolo']}."
+        assert richiesta.immagini_riferimento == ["/campanella.png"]
+        assert richiesta.stile_ai == "Stile schede concorso"
+
+
 def test_visual_genera_un_immagine_per_bando_su_instagram(conn):
     content_id = db_social.crea_content(conn, "Tre concorsi amministrativi",
                                         canali=["instagram", "linkedin"])
