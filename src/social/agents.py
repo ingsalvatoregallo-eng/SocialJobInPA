@@ -881,12 +881,19 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
                                 motivo=str(errore))
         return "CANCELLED"
     except Exception as errore:
-        # RESEARCH_FAILED e' lo stato di recupero della pipeline: raggiungibile
-        # da RESEARCHING e DRAFTING; negli stati successivi il contenuto resta
-        # dov'e' (l'errore e' comunque salvato e il job fara' retry/backoff).
+        # RESEARCH_FAILED e' lo stato di recupero della pipeline, raggiungibile
+        # da ogni stato che il blocco try qui sopra attraversa (RESEARCHING,
+        # DRAFTING, GENERATING_VISUAL, QUALITY_CHECK — vedi state_machine.
+        # TRANSIZIONI): un errore che capita durante generazione immagini o
+        # controllo rischio (es. un guasto di rete transitorio verso OpenAI)
+        # deve poter essere riprovato come qualsiasi altro, non lasciare il
+        # contenuto bloccato per sempre senza alcun bottone in dashboard per
+        # farlo ripartire (bug reale riprodotto: un SSLError durante il
+        # carosello immagini).
         contenuto = db_social.get_content(conn, content_id)
         db_social.aggiorna_content(conn, content_id, errore=str(errore))
-        if contenuto and contenuto["stato"] in {"RESEARCHING", "DRAFTING"}:
+        if contenuto and contenuto["stato"] in {
+                "RESEARCHING", "DRAFTING", "GENERATING_VISUAL", "QUALITY_CHECK"}:
             state_machine.transisci(conn, content_id, "RESEARCH_FAILED",
                                     agente="supervisor", motivo=str(errore))
         raise

@@ -50,6 +50,25 @@ def test_cancelled_puo_tornare_in_bozza(conn):
     assert riga["stato"] == "IDEA"
 
 
+@pytest.mark.parametrize("stato_bloccato", ["GENERATING_VISUAL", "QUALITY_CHECK"])
+def test_generazione_visual_e_controllo_rischio_possono_tornare_riprovabili(conn, stato_bloccato):
+    """Un errore durante generazione immagini o controllo rischio (es. un
+    guasto di rete transitorio) deve poter tornare in RESEARCH_FAILED,
+    riprovabile — non restare bloccato per sempre (segnalato dall'utente,
+    vedi agents.esegui_pipeline)."""
+    content_id = db_social.crea_content(conn, "Test")
+    state_machine.transisci(conn, content_id, "RESEARCHING")
+    state_machine.transisci(conn, content_id, "DRAFTING")
+    state_machine.transisci(conn, content_id, "DRAFT_READY")
+    if stato_bloccato == "GENERATING_VISUAL":
+        state_machine.transisci(conn, content_id, "GENERATING_VISUAL")
+    else:
+        state_machine.transisci(conn, content_id, "GENERATING_VISUAL")
+        state_machine.transisci(conn, content_id, "QUALITY_CHECK")
+    riga = state_machine.transisci(conn, content_id, "RESEARCH_FAILED")
+    assert riga["stato"] == "RESEARCH_FAILED"
+
+
 def test_archived_e_terminale(conn):
     content_id = db_social.crea_content(conn, "Test")
     state_machine.transisci(conn, content_id, "CANCELLED")

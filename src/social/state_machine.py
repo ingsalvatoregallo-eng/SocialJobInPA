@@ -24,8 +24,15 @@ TRANSIZIONI = {
     "RESEARCH_FAILED": {"RESEARCHING", "CANCELLED", "ARCHIVED"},
     "DRAFTING": {"DRAFT_READY", "RESEARCH_FAILED", "CANCELLED"},
     "DRAFT_READY": {"GENERATING_VISUAL", "QUALITY_CHECK", "CANCELLED"},
-    "GENERATING_VISUAL": {"QUALITY_CHECK", "DRAFT_READY", "CANCELLED"},
-    "QUALITY_CHECK": {"BLOCKED", "AWAITING_APPROVAL", "APPROVED", "CANCELLED"},
+    # RESEARCH_FAILED: un errore durante la generazione immagini (es. un
+    # guasto di rete transitorio verso OpenAI) lasciava il contenuto bloccato
+    # qui per sempre — nessun bottone in dashboard lo recuperava, perche'
+    # GENERATING_VISUAL conta come "pipeline in corso" (nasconde "Avvia
+    # pipeline"/"Rigenera immagine") anche quando nessun job e' davvero in
+    # esecuzione (segnalato dall'utente, riprodotto: un vero SSLError di
+    # OpenAI durante il carosello immagini).
+    "GENERATING_VISUAL": {"QUALITY_CHECK", "DRAFT_READY", "RESEARCH_FAILED", "CANCELLED"},
+    "QUALITY_CHECK": {"BLOCKED", "AWAITING_APPROVAL", "APPROVED", "RESEARCH_FAILED", "CANCELLED"},
     "BLOCKED": {"DRAFTING", "CANCELLED", "ARCHIVED"},
     "AWAITING_APPROVAL": {"APPROVED", "CHANGES_REQUESTED", "CANCELLED"},
     # RESEARCHING: senza, esegui_pipeline() non puo' mai ripartire da qui

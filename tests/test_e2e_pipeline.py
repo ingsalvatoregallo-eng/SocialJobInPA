@@ -3,6 +3,8 @@ approvazione -> programmazione -> pubblicazione -> metriche -> audit."""
 
 import json
 
+import pytest
+
 from social import agents, approvals, db_social, llm, models, publishing, scheduler
 from social.images import MockImageProvider
 
@@ -72,6 +74,36 @@ def test_e2e_percorso_verde_automatico(conn, monkeypatch):
     # audit completo
     azioni = {a["azione"] for a in db_social.audit_recenti(conn, limit=200)}
     assert {"transizione_stato", "pubblicazione"} <= azioni
+
+
+class _ImageProviderCheFallisce:
+    """Riproduce un guasto di rete transitorio verso il provider immagini
+    (es. l'SSLError reale verso OpenAI che ha innescato questo bug)."""
+
+    async def generate(self, request):
+        raise ConnectionError("guasto di rete simulato verso il provider immagini")
+
+
+def test_pipeline_fallita_durante_generazione_immagini_torna_riprovabile(conn, monkeypatch):
+    """Regressione: un errore durante visual() (es. un guasto di rete verso
+    il provider immagini) lasciava il contenuto bloccato in GENERATING_VISUAL
+    per sempre. Quello stato conta come "pipeline in corso" in dashboard
+    (nasconde "Avvia pipeline"/"Rigenera immagine") anche se il job e' ormai
+    morto: nessun modo di farlo ripartire dall'interfaccia, solo eliminarlo
+    (segnalato dall'utente, riprodotto con un vero SSLError verso OpenAI a
+    meta' di un carosello immagini)."""
+    monkeypatch.setattr(agents.jobinpa_client, "client", lambda: _ClienteJobInPAFinto(1))
+    content_id = db_social.crea_content(conn, "Guasto durante le immagini")
+    provider = llm.MockLLMProvider(conn)
+    with pytest.raises(ConnectionError):
+        agents.esegui_pipeline(conn, content_id, provider=provider,
+                              image_provider=_ImageProviderCheFallisce())
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "RESEARCH_FAILED"
+    assert "guasto di rete simulato" in content["errore"]
+    # RESEARCH_FAILED e' in STATI_PIPELINE_AVVIABILE: "Avvia pipeline" torna
+    # visibile in dashboard, il contenuto non resta bloccato per sempre.
+    assert content["stato"] in agents.STATI_PIPELINE_AVVIABILE
 
 
 def test_pipeline_duplicata_e_no_op(conn, monkeypatch):
