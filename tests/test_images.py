@@ -220,17 +220,18 @@ def test_ridimensiona_a_contenimento_riempie_il_bordo_col_colore_indicato():
     assert risultato.getpixel((0, 0)) == _hex_a_rgb("#F5F7FB")
 
 
+@pytest.mark.parametrize("template", sorted(images._TEMPLATE_GRAFICA_INTERA))
 @pytest.mark.parametrize("formato", list(images.FORMATI))
-def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, formato):
-    """Il template "promozione" fa comporre all'AI l'intera grafica (vedi
-    OpenAIImageProvider._genera_promozione): l'immagine ricevuta viene solo
-    ridimensionata "a contenimento" (mai un crop) sul formato target, mai
-    un crash."""
+def test_genera_grafica_intera_renderizza_in_tutti_i_formati(conn, monkeypatch, formato, template):
+    """"promozione" e "nuovo_concorso" (carosello concorsi) fanno comporre
+    all'AI l'intera grafica (vedi OpenAIImageProvider._genera_grafica_
+    intera): l'immagine ricevuta viene solo ridimensionata "a contenimento"
+    (mai un crop) sul formato target, mai un crash."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
     provider = images.OpenAIImageProvider(conn)
     richiesta = images.ImageGenerationRequest(
-        template="promozione", formato=formato,
+        template=template, formato=formato,
         titolo="Piano Base: prova l'AI di JobInPA senza impegno",
         sottotitolo="Promozione a tempo limitato",
         dati_chiave=["Promozione: Base", "Prezzo promozionale: 0,00 EUR (invece di 3,00 EUR)",
@@ -243,17 +244,17 @@ def test_genera_promozione_renderizza_in_tutti_i_formati(conn, monkeypatch, form
         assert img.format == "PNG"
 
 
-def test_prompt_promozione_completa_include_testo_esatto_tra_virgolette(conn):
+def test_prompt_grafica_intera_include_testo_esatto_tra_virgolette(conn):
     """Il prompt deve contenere titolo/dati_chiave/CTA come stringhe esatte
-    tra virgolette (vedi images._prompt_promozione_completa): a differenza
-    di _STILE_OPENAI_IMAGES, qui il testo nell'immagine e' voluto, non
+    tra virgolette (vedi images._prompt_grafica_intera): a differenza di
+    _STILE_OPENAI_IMAGES, qui il testo nell'immagine e' voluto, non
     vietato — deve arrivare al modello parola per parola, non parafrasato."""
     richiesta = images.ImageGenerationRequest(
         template="promozione", formato="instagram_feed",
         titolo="Piano Base: prova l'AI di JobInPA senza impegno",
         sottotitolo="Promozione a tempo limitato",
         dati_chiave=["Promozione: Base", "Valida fino al 31 agosto 2026"])
-    prompt = images._prompt_promozione_completa(richiesta)
+    prompt = images._prompt_grafica_intera(richiesta)
     assert '"Piano Base: prova l\'AI di JobInPA senza impegno"' in prompt
     assert '"Promozione a tempo limitato"' in prompt
     assert '"Promozione: Base"' in prompt
@@ -262,14 +263,39 @@ def test_prompt_promozione_completa_include_testo_esatto_tra_virgolette(conn):
     assert '"Scopri di più su JobInPA"' in prompt
 
 
-def test_prompt_promozione_completa_senza_sottotitolo_non_lo_menziona(conn):
+def test_prompt_grafica_intera_usa_badge_e_cta_del_template_nuovo_concorso(conn):
+    """Badge e CTA non sono un testo fisso unico: "nuovo_concorso" (usato
+    dal carosello dei concorsi) deve avere i propri, diversi da quelli di
+    "promozione"."""
+    richiesta = images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed",
+        titolo="Concorso pubblico Comune di Trieste", dati_chiave=["Posti: 5"])
+    prompt = images._prompt_grafica_intera(richiesta)
+    assert '"NUOVO CONCORSO"' in prompt
+    assert '"Scopri il concorso su JobInPA"' in prompt
+    assert "PROMOZIONE JOBINPA" not in prompt
+
+
+def test_prompt_grafica_intera_senza_sottotitolo_non_lo_menziona(conn):
     richiesta = images.ImageGenerationRequest(
         template="promozione", formato="instagram_feed", titolo="Tema", dati_chiave=[])
-    prompt = images._prompt_promozione_completa(richiesta)
+    prompt = images._prompt_grafica_intera(richiesta)
     assert "subtitle" not in prompt.lower()
 
 
-def test_genera_promozione_invia_il_prompt_completo_a_openai(conn, monkeypatch):
+def test_prompt_grafica_intera_senza_soggetto_usa_il_titolo_non_il_pacchetto_regalo(conn):
+    """"Concorsi" e' seminata con prompt_ai vuoto apposta (il soggetto
+    varia da bando a bando): il fallback non deve essere un pacchetto
+    regalo (pensato per le promozioni) per qualsiasi template."""
+    richiesta = images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed",
+        titolo="Concorso pubblico AIFA", dati_chiave=[])
+    prompt = images._prompt_grafica_intera(richiesta)
+    assert "gift box" not in prompt.lower()
+    assert "Concorso pubblico AIFA" in prompt
+
+
+def test_genera_grafica_intera_invia_il_prompt_completo_a_openai(conn, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     catturato = {}
 
@@ -287,9 +313,9 @@ def test_genera_promozione_invia_il_prompt_completo_a_openai(conn, monkeypatch):
     assert '"Valida fino al 31 agosto 2026"' in catturato["prompt"]
 
 
-def test_genera_promozione_usato_solo_per_il_template_promozione(conn, monkeypatch):
+def test_genera_grafica_intera_usato_solo_per_i_template_dedicati(conn, monkeypatch):
     """Qualsiasi altro template continua a passare per il vecchio layout a
-    sfondo intero (invariato): nessuna regressione per Concorsi/Funzionalità/
+    sfondo intero (invariato): nessuna regressione per Funzionalità/
     generico, che non hanno chiesto il nuovo layout a card."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
@@ -297,7 +323,7 @@ def test_genera_promozione_usato_solo_per_il_template_promozione(conn, monkeypat
     richiesta = images.ImageGenerationRequest(
         template="presentazione", formato="instagram_feed", titolo="Concorso pubblico")
     asset = asyncio.run(provider.generate(richiesta))
-    assert asset.percorso.name.startswith("ai_") and not asset.percorso.name.startswith("ai_promo_")
+    assert asset.percorso.name.startswith("ai_") and not asset.percorso.name.startswith("ai_grafica_")
 
 
 def test_chiama_api_usa_lo_stile_fisso_se_nessuno_stile_categoria(conn, monkeypatch):

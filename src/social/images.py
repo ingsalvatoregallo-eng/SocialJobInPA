@@ -492,23 +492,45 @@ _STILE_OPENAI_IMAGES = (
     "uncluttered, suitable for overlaid text. Subject: "
 )
 
-def _prompt_promozione_completa(request):
-    """Prompt per il template "promozione" (vedi OpenAIImageProvider.
-    _genera_promozione): a differenza di _STILE_OPENAI_IMAGES, qui il testo
-    NON e' vietato — al contrario, ogni stringa e' messa tra virgolette ed
-    esplicitamente marcata come testo esatto da riprodurre, per aiutare il
-    modello a non storpiarla/inventarne altra. dati_chiave/titolo/
-    sottotitolo arrivano gia' verificati dal resto della pipeline (mai
-    testo libero dell'LLM), qui vengono solo inseriti nella descrizione
-    della composizione."""
+# Template per cui l'AI compone l'INTERA grafica (testo incluso), invece
+# di generare solo un'illustrazione/sfondo su cui poi sovrapporre un
+# layout disegnato con Pillow (vedi OpenAIImageProvider._genera_grafica_
+# intera). "nuovo_concorso" ci e' entrato dopo "promozione": lo stesso
+# problema (layout disegnato a mano troppo lontano dal mockup atteso)
+# segnalato per le promozioni valeva identico per il carosello dei
+# concorsi, che usa sempre questo template.
+_TEMPLATE_GRAFICA_INTERA = {"promozione", "nuovo_concorso"}
+
+# CTA di fondo per template a grafica intera: nessun default generico,
+# ognuno ha un invito all'azione pertinente al proprio contenuto.
+_CTA_GRAFICA_INTERA = {
+    "promozione": "Scopri di più su JobInPA",
+    "nuovo_concorso": "Scopri il concorso su JobInPA",
+}
+
+
+def _prompt_grafica_intera(request):
+    """Prompt per i template in _TEMPLATE_GRAFICA_INTERA: a differenza di
+    _STILE_OPENAI_IMAGES, qui il testo NON e' vietato — al contrario, ogni
+    stringa e' messa tra virgolette ed esplicitamente marcata come testo
+    esatto da riprodurre, per aiutare il modello a non storpiarla/
+    inventarne altra. dati_chiave/titolo/sottotitolo arrivano gia'
+    verificati dal resto della pipeline (mai testo libero dell'LLM), qui
+    vengono solo inseriti nella descrizione della composizione. Badge e
+    CTA cambiano per template (_ETICHETTA_TEMPLATE/_CTA_GRAFICA_INTERA),
+    non sono un testo fisso unico per tutti."""
     dati = request.dati_chiave[:4]
-    righe_dati = "\n".join(f'   - "{dato}"' for dato in dati) or '   - "Scopri i vantaggi su JobInPA"'
+    righe_dati = "\n".join(f'   - "{dato}"' for dato in dati) or '   - "Scopri di più su JobInPA"'
     riga_sottotitolo = (
         f'3. Below the headline, a short subtitle line with this exact text: "{request.sottotitolo}".\n'
         if request.sottotitolo else "")
-    soggetto = request.prompt_ai or (
-        "a glossy 3D gift box with a ribbon, next to a stylized desk "
-        "calendar, small sparkles around them")
+    # Fallback generico (nessun soggetto specifico dalla categoria, es.
+    # "Concorsi" seminata apposta con prompt_ai vuoto perche' il soggetto
+    # varia da bando a bando): non "un pacchetto regalo" per qualsiasi
+    # template, ma un'illustrazione legata al tema reale del post.
+    soggetto = request.prompt_ai or f'an illustration relevant to the theme "{request.titolo}"'
+    badge_testo = _ETICHETTA_TEMPLATE.get(request.template, "JOBINPA")
+    cta_testo = _CTA_GRAFICA_INTERA.get(request.template, "Scopri di più su JobInPA")
     return (
         "Design a single complete Instagram promotional graphic for JobInPA "
         "(an AI-powered job search assistant for Italian public "
@@ -518,17 +540,15 @@ def _prompt_promozione_completa(request):
         "below. No other text, no placeholder lorem ipsum, no invented "
         "numbers or words beyond what is quoted here.\n\n"
         "Composition, top to bottom:\n"
-        "1. Top-left: a small rounded pill badge with a sparkle icon and "
-        "this exact bold white text: \"PROMOZIONE JOBINPA\".\n"
+        f'1. Top-left: a small rounded pill badge with a sparkle icon and this exact bold white text: "{badge_testo}".\n'
         "2. Top-right: the brand wordmark \"JobInPA\" in bold navy blue.\n"
         f'3. A large bold headline with this exact text: "{request.titolo}".\n'
         f"{riga_sottotitolo}"
         f"4. On the right side of the composition, {soggetto}.\n"
         "5. A white rounded card listing exactly these lines, each with a "
-        f"small relevant icon (calendar, lock, or people):\n{righe_dati}\n"
+        f"small relevant icon:\n{righe_dati}\n"
         "6. At the bottom, a full-width rounded button with a purple-to-navy "
-        "gradient, a white circular arrow icon, and this exact bold white "
-        "text: \"Scopri di più su JobInPA\".\n"
+        f'gradient, a white circular arrow icon, and this exact bold white text: "{cta_testo}".\n'
     )
 
 
@@ -608,15 +628,15 @@ class OpenAIImageProvider:
         return prezzo
 
     async def generate(self, request: ImageGenerationRequest) -> GeneratedAsset:
-        # "promozione" (categoria Promozioni, vedi agents.visual): layout a
-        # card chiaro con illustrazione laterale + CTA, non l'immagine a
-        # tutto schermo qui sotto — quel formato "foto con didascalia" e'
-        # troppo lontano dal mockup atteso (segnalato dall'utente) per
-        # qualsiasi post promozionale, indipendentemente dallo stile
+        # "promozione"/"nuovo_concorso" (vedi _TEMPLATE_GRAFICA_INTERA):
+        # l'AI compone l'intera grafica, non solo lo sfondo qui sotto — quel
+        # formato "foto con didascalia" e' rimasto troppo lontano dal
+        # mockup atteso (segnalato dall'utente, sia per le promozioni sia
+        # per il carosello dei concorsi) indipendentemente dallo stile
         # dell'illustrazione AI (gia' corretto separatamente, vedi
         # stile_ai/_STILE_OPENAI_IMAGES).
-        if request.template == "promozione":
-            return await self._genera_promozione(request)
+        if request.template in _TEMPLATE_GRAFICA_INTERA:
+            return await self._genera_grafica_intera(request)
         import asyncio
         prezzo = self._verifica_budget()
         larghezza, altezza = FORMATI[request.formato]
@@ -653,23 +673,25 @@ class OpenAIImageProvider:
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 
-    async def _genera_promozione(self, request: ImageGenerationRequest) -> GeneratedAsset:
-        """A differenza di ogni altro template, qui l'AI compone l'INTERA
-        grafica — badge, titolo, elenco punti, bottone CTA, testo incluso —
-        invece di generare solo un'illustrazione su cui poi sovrapporre un
-        layout disegnato con Pillow. Deroga esplicita al principio "mai
-        testo generato dall'AI nell'immagine" seguito nel resto del modulo:
-        un layout composto a mano (badge+logo+card+bottone via Pillow +
-        illustrazione AI laterale) e' rimasto troppo lontano dal mockup
-        atteso dall'utente anche dopo piu' iterazioni sullo stile.
-        Rischio noto e accettato: il testo nell'immagine generata non e'
-        garantito corretto al 100% — il testo esatto e verificato resta
-        comunque nella didascalia del post, mai solo nell'immagine."""
+    async def _genera_grafica_intera(self, request: ImageGenerationRequest) -> GeneratedAsset:
+        """Per i template in _TEMPLATE_GRAFICA_INTERA, a differenza di ogni
+        altro template, l'AI compone l'INTERA grafica — badge, titolo,
+        elenco punti, bottone CTA, testo incluso — invece di generare solo
+        un'illustrazione su cui poi sovrapporre un layout disegnato con
+        Pillow. Deroga esplicita al principio "mai testo generato dall'AI
+        nell'immagine" seguito nel resto del modulo: un layout composto a
+        mano (badge+logo+card+bottone via Pillow + illustrazione AI
+        laterale) e' rimasto troppo lontano dal mockup atteso dall'utente
+        anche dopo piu' iterazioni sullo stile — sia per le promozioni sia
+        per il carosello dei concorsi. Rischio noto e accettato: il testo
+        nell'immagine generata non e' garantito corretto al 100% — il
+        testo esatto e verificato resta comunque nella didascalia del
+        post, mai solo nell'immagine."""
         import asyncio
         prezzo = self._verifica_budget()
         larghezza, altezza = FORMATI[request.formato]
         taglia = _taglia_openai_per_formato(request.formato)
-        prompt_composto = _prompt_promozione_completa(request)
+        prompt_composto = _prompt_grafica_intera(request)
         immagine_bytes = await asyncio.to_thread(
             self._chiama_api, prompt_composto, taglia,
             request.immagini_riferimento, request.stile_ai)
@@ -684,7 +706,7 @@ class OpenAIImageProvider:
         # deve mai perdere un bordo (vedi _ridimensiona_a_contenimento).
         immagine = _ridimensiona_a_contenimento(immagine, larghezza, altezza, palette["sfondo"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        percorso = self.output_dir / f"ai_promo_{request.formato}_{uuid.uuid4().hex[:10]}.png"
+        percorso = self.output_dir / f"ai_grafica_{request.template}_{request.formato}_{uuid.uuid4().hex[:10]}.png"
         immagine.save(percorso, "PNG")
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
