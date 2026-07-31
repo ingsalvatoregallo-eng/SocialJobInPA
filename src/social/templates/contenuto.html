@@ -15,17 +15,31 @@
 
 {% if in_corso %}
 <div class="avviso info">⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
-<script>setTimeout(function () { location.reload(); }, 4000);</script>
+<script>setTimeout(riavviaConScrollSalvato, 4000);</script>
 {% elif rigenerazione_in_corso %}
 <div class="avviso info">⏳ <strong>Rigenerazione immagine in corso</strong> — il testo resta invariato. Questa pagina si aggiorna automaticamente.</div>
-<script>setTimeout(function () { location.reload(); }, 4000);</script>
+<script>setTimeout(riavviaConScrollSalvato, 4000);</script>
 {% elif rigenerazione_testo_in_corso %}
 <div class="avviso info">⏳ <strong>Rigenerazione testo in corso</strong> — le immagini restano invariate. Questa pagina si aggiorna automaticamente.</div>
-<script>setTimeout(function () { location.reload(); }, 4000);</script>
+<script>setTimeout(riavviaConScrollSalvato, 4000);</script>
 {% elif appena_in_coda %}
 <div class="avviso info">⏳ <strong>Pipeline in coda</strong> — un worker la prenderà in carico entro pochi secondi. Questa pagina si aggiorna automaticamente.</div>
-<script>setTimeout(function () { location.reload(); }, 3000);</script>
+<script>setTimeout(riavviaConScrollSalvato, 3000);</script>
 {% endif %}
+<script>
+// Il refresh automatico qui sopra e' un location.reload() vero e proprio:
+// senza salvare/ripristinare lo scroll orizzontale dei caroselli, ogni
+// ricarica riportava la vista alla prima immagine, rendendo impossibile
+// scorrere un carosello mentre la pipeline e' ancora in corso (segnalato
+// dall'utente). Il refresh automatico resta (serve per vedere l'avanzamento
+// senza ricaricare a mano), solo la posizione dello scroll sopravvive.
+function riavviaConScrollSalvato() {
+  document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
+    sessionStorage.setItem('scroll-' + el.id, el.scrollLeft);
+  });
+  location.reload();
+}
+</script>
 {% if errore_leggibile %}<div class="avviso rosso">⚠️ {{ errore_leggibile }}</div>{% endif %}
 {% if approvazione and approvazione.stato == 'modifiche_richieste' %}
 <div class="avviso giallo">✎ <strong>Modifiche richieste dal revisore:</strong> {{ approvazione.motivo }}
@@ -205,4 +219,20 @@
   {% endfor %}</table>
 </div>
 {% endif %}
+<script>
+// Ripristina lo scroll orizzontale dei caroselli salvato da
+// riavviaConScrollSalvato() prima dell'ultimo refresh automatico (vedi
+// sopra): va DOPO che i div dei caroselli esistono nel DOM.
+document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
+  var salvato = sessionStorage.getItem('scroll-' + el.id);
+  if (salvato === null) { return; }
+  // Il div ha "scroll-behavior:smooth" inline: un'assegnazione diretta a
+  // scrollLeft parte come animazione asincrona invece di applicarsi subito
+  // (verificato: senza disattivarlo qui, il ripristino non si vedeva mai).
+  var precedente = el.style.scrollBehavior;
+  el.style.scrollBehavior = 'auto';
+  el.scrollLeft = parseInt(salvato, 10);
+  el.style.scrollBehavior = precedente;
+});
+</script>
 {% endblock %}
