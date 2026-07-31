@@ -7,6 +7,7 @@ dopo aver usato la dashboard end-to-end:
 5. il Calendario mostra anche i contenuti programmati/pubblicati creati
    fuori dal piano editoriale AI, non solo i suggerimenti."""
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -75,6 +76,67 @@ def test_crea_contenuto_avvia_sempre_la_pipeline(conn, client):
     assert location.endswith("?avviata=1")
     content_id = location.split("/")[-1].split("?")[0]
     assert db_social.job_in_corso(conn, "pipeline", content_id)
+
+
+# --- Canali: niente spreco AI per un canale non abilitato in Impostazioni ----
+
+def test_nuovo_contenuto_precompila_solo_i_canali_abilitati(conn, client):
+    """LinkedIn non ancora abilitato in Impostazioni (kill switch per
+    account, vedi social_accounts.publishing_enabled): il checkbox parte
+    deselezionato, cosi' un nuovo contenuto non genera per sbaglio testo/
+    immagine (e relativo costo AI) per un canale su cui non si puo'
+    comunque pubblicare (segnalato dall'utente per LinkedIn)."""
+    db_social.crea_utente(conn, "editor-canali@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    account_instagram = db_social.account_per_piattaforma(conn, "instagram")
+    db_social.aggiorna_account(conn, account_instagram["id"], publishing_enabled=1)
+    _login(client, "editor-canali@test.local")
+
+    pagina = client.get("/social/contenuti/nuovo").text
+
+    checkbox_instagram = re.search(
+        r'<input type="checkbox" name="canali" value="instagram"[^>]*>', pagina).group(0)
+    checkbox_linkedin = re.search(
+        r'<input type="checkbox" name="canali" value="linkedin"[^>]*>', pagina).group(0)
+    assert "checked" in checkbox_instagram
+    assert "checked" not in checkbox_linkedin
+
+
+def test_crea_contenuto_con_solo_instagram_selezionato(conn, client):
+    db_social.crea_utente(conn, "editor-canali2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-canali2@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "titolo": "Solo Instagram", "categoria_id": categoria_id,
+        "canali": ["instagram"], "csrf": csrf,
+    }, follow_redirects=False)
+
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    content = db_social.get_content(conn, content_id)
+    assert json.loads(content["canali"]) == ["instagram"]
+
+
+def test_crea_contenuto_senza_campo_canali_usa_il_default_di_sempre(conn, client):
+    """Retrocompatibilita': se il form non invia affatto il campo "canali"
+    (chiamata diretta, o form non aggiornato), il comportamento resta
+    quello di sempre (entrambe le piattaforme) — nessuna rottura per chi
+    non passa mai da questo campo."""
+    db_social.crea_utente(conn, "editor-canali3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-canali3@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "titolo": "Nessun campo canali", "categoria_id": categoria_id, "csrf": csrf,
+    }, follow_redirects=False)
+
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    content = db_social.get_content(conn, content_id)
+    assert set(json.loads(content["canali"])) == {"instagram", "linkedin"}
 
 
 # --- 2. "Avvia pipeline" non compare col banner "in coda" -------------------

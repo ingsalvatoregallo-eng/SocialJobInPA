@@ -95,6 +95,37 @@ def test_copywriting_senza_bandi_non_menziona_link(conn):
     assert "Link ufficiali" not in prompt_instagram
 
 
+# --- copywriting genera solo i canali selezionati sul contenuto --------------
+
+def _risultato_semplice():
+    return models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="Fatto di prova.", confidenza=0.9)], sintesi="Sintesi.")
+
+
+def test_copywriting_con_solo_instagram_non_chiama_l_llm_per_linkedin(conn):
+    """Regressione: prima veniva sempre generata (e salvata) anche la
+    variante LinkedIn, anche per un contenuto con solo Instagram tra i
+    canali — uno spreco di una chiamata AI per un canale mai scelto
+    (segnalato dall'utente per LinkedIn, non ancora abilitato)."""
+    content_id = db_social.crea_content(conn, "Solo Instagram", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    agents.copywriting(conn, content_id, _risultato_semplice(), provider=provider)
+    assert not any("LinkedIn" in u for (_, u, schema) in provider.chiamate)
+    assert any("Instagram" in u for (_, u, schema) in provider.chiamate)
+    piattaforme_salvate = {v["piattaforma"] for v in db_social.varianti_di(conn, content_id)}
+    assert piattaforme_salvate == {"instagram"}
+
+
+def test_copywriting_con_entrambi_i_canali_genera_entrambe_le_varianti(conn):
+    content_id = db_social.crea_content(conn, "Entrambi", canali=["instagram", "linkedin"])
+    provider = llm.MockLLMProvider(conn)
+    agents.copywriting(conn, content_id, _risultato_semplice(), provider=provider)
+    assert any("Instagram" in u for (_, u, schema) in provider.chiamate)
+    assert any("LinkedIn" in u for (_, u, schema) in provider.chiamate)
+    piattaforme_salvate = {v["piattaforma"] for v in db_social.varianti_di(conn, content_id)}
+    assert piattaforme_salvate == {"instagram", "linkedin"}
+
+
 # --- Modifica manuale del testo in revisione (nessuna AI) --------------------
 
 def test_aggiorna_testo_variante_non_tocca_hashtag_e_cta(conn):

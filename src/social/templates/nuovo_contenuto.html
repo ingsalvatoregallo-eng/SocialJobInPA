@@ -79,6 +79,19 @@
     <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
               placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
     <p class="hint">Più il brief è specifico (regione, competenza, posti minimi...), più la ricerca sui bandi sarà mirata. Per categorie senza ricerca bandi è un dettaglio facoltativo in più.</p>
+
+    <label>Canali</label>
+    <div style="display:flex;gap:16px">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="canali" value="instagram" style="width:auto"
+               {{ 'checked' if 'instagram' in canali_abilitati }}>📷 Instagram
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="canali" value="linkedin" style="width:auto"
+               {{ 'checked' if 'linkedin' in canali_abilitati }}>💼 LinkedIn
+      </label>
+    </div>
+    <p class="hint">Un canale il cui account non è ancora abilitato in <a href="/social/impostazioni">Impostazioni</a> parte deselezionato: niente testo/immagine generati (e nessun costo AI) per un canale su cui non si può comunque pubblicare. Puoi comunque selezionarlo a mano se vuoi preparare un contenuto in anticipo.</p>
     <div class="avviso giallo" style="margin-top:14px" id="avviso-annullamento">
       ⚠️ Se la categoria cerca bandi reali e nessuno corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
     </div>
@@ -93,7 +106,7 @@
     <h3>Cosa succede dopo</h3>
     <div style="display:flex;flex-direction:column;gap:12px;font-size:12.5px">
       <div><strong>1. Ricerca fonti</strong><div class="hint">Bandi reali su JobInPA, la promozione selezionata, o il solo brief — secondo la categoria scelta.</div></div>
-      <div><strong>2. Copywriting</strong><div class="hint">Genera i testi per Instagram e LinkedIn, seguendo la struttura della categoria se ne ha una.</div></div>
+      <div><strong>2. Copywriting</strong><div class="hint">Genera il testo per i canali selezionati, seguendo la struttura della categoria se ne ha una.</div></div>
       <div><strong>3. Visual</strong><div class="hint">Crea l'immagine con il soggetto/le immagini di riferimento della categoria (o a scelta libera dell'AI).</div></div>
       <div><strong>4. Controllo rischio</strong><div class="hint">Classifica il contenuto (verde/giallo/rosso) prima della revisione.</div></div>
     </div>

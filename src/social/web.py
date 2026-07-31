@@ -526,9 +526,21 @@ def contenuti(request: Request, gruppo: str = "idee",
 def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
                          conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.edit")
+    # Precompilato in base a cosa e' davvero abilitato in Impostazioni (non
+    # sempre entrambi): un canale il cui account non e' ancora abilitato
+    # resta deselezionato di default, cosi' non si spreca una generazione
+    # (testo + immagine) per un canale su cui non si puo' comunque
+    # pubblicare (segnalato dall'utente per LinkedIn, in attesa di
+    # approvazione Community Management API).
+    canali_abilitati = []
+    for _piattaforma in db_social.PIATTAFORME:
+        _account = db_social.account_per_piattaforma(conn, _piattaforma)
+        if _account and _account["publishing_enabled"]:
+            canali_abilitati.append(_piattaforma)
     return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
         request, sessione, conn, pillars=db_social.pillars(conn),
         categorie=db_social.lista_categorie(conn),
+        canali_abilitati=canali_abilitati,
         # Promozioni/funzionalita' davvero attive/reali lette in diretta da
         # JobInPA (mai inserite a mano, vedi crea_contenuto sotto): [] se
         # l'API non e' configurata o irraggiungibile, il form lo segnala.
@@ -542,6 +554,7 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
                    brief: str = Form(None), categoria_id: str = Form(...),
                    promo_selezionata: str = Form(None),
                    funzionalita_selezionata: Optional[list[str]] = Form(None),
+                   canali: Optional[list[str]] = Form(None),
                    csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
@@ -603,12 +616,18 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
             raise HTTPException(status_code=400, detail="Titolo obbligatorio")
     elif not titolo or not titolo.strip():
         raise HTTPException(status_code=400, detail="Titolo obbligatorio")
+    # None (nessun campo "canali" inviato, es. form non aggiornato o
+    # chiamata diretta) lascia il default di crea_content invariato
+    # (entrambe le piattaforme) — solo se il campo e' presente ma svuotato
+    # dall'utente il filtro puo' risultare in lista vuota, gestita a valle
+    # dalla pipeline (nessuna variante/immagine generata per nessun canale).
+    canali_scelti = [c for c in canali if c in db_social.PIATTAFORME] if canali is not None else None
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
                                         obiettivo=obiettivo or None,
                                         brief=(brief or "").strip() or None,
                                         scadenza_promo=scadenza_promo,
                                         promo_dati=promo_dati, funzionalita_dati=funzionalita_dati,
-                                        categoria_id=categoria_id,
+                                        categoria_id=categoria_id, canali=canali_scelti,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)

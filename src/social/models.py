@@ -82,8 +82,11 @@ class VarianteCopy(BaseModel):
 
 
 class CopyMultiPiattaforma(BaseModel):
-    instagram: VarianteCopy
-    linkedin: VarianteCopy
+    # Opzionali: generati solo per i canali selezionati sul contenuto
+    # (content.canali) — niente chiamata LLM sprecata per un canale non
+    # scelto (es. LinkedIn quando l'account non e' ancora abilitato).
+    instagram: Optional[VarianteCopy] = None
+    linkedin: Optional[VarianteCopy] = None
 
 
 class VisualBrief(BaseModel):

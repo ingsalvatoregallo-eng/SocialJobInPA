@@ -437,18 +437,25 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
             f"\nQuesto post avra' un carosello di {min(n_bandi, images.MASSIMO_IMMAGINI_CAROSELLO)} "
             "immagini, una per bando trovato: invita chi legge a scorrerle tutte "
             "invece di descriverne una sola.")
-    # Due prompt distinti (sez. 29), un'unica risposta strutturata per
-    # piattaforma: si passa dal prompt Instagram e si chiede la coppia.
-    ig = _run_llm(conn, "copywriting", "copy_instagram", models.VarianteCopy,
-                  prompt_instagram, content_id=content_id,
-                  provider=provider)
-    li = _run_llm(conn, "copywriting", "copy_linkedin", models.VarianteCopy,
-                  base + "\nScrivi il post LinkedIn.", content_id=content_id,
-                  provider=provider)
-    db_social.salva_variante(conn, content_id, "instagram", ig.testo,
-                             hashtags=ig.hashtags, call_to_action=ig.call_to_action)
-    db_social.salva_variante(conn, content_id, "linkedin", li.testo,
-                             hashtags=li.hashtags, call_to_action=li.call_to_action)
+    # Due prompt distinti (sez. 29): un canale genera una chiamata LLM (e un
+    # costo) solo se e' stato scelto per questo contenuto (content.canali) —
+    # prima veniva sempre generata anche la variante per un canale non
+    # selezionato, sprecando una chiamata inutile (segnalato dall'utente:
+    # niente testo/immagini per LinkedIn finche' non e' abilitato).
+    canali = json.loads(content["canali"] or "[]")
+    ig = li = None
+    if "instagram" in canali:
+        ig = _run_llm(conn, "copywriting", "copy_instagram", models.VarianteCopy,
+                      prompt_instagram, content_id=content_id,
+                      provider=provider)
+        db_social.salva_variante(conn, content_id, "instagram", ig.testo,
+                                 hashtags=ig.hashtags, call_to_action=ig.call_to_action)
+    if "linkedin" in canali:
+        li = _run_llm(conn, "copywriting", "copy_linkedin", models.VarianteCopy,
+                      base + "\nScrivi il post LinkedIn.", content_id=content_id,
+                      provider=provider)
+        db_social.salva_variante(conn, content_id, "linkedin", li.testo,
+                                 hashtags=li.hashtags, call_to_action=li.call_to_action)
     return models.CopyMultiPiattaforma(instagram=ig, linkedin=li)
 
 
