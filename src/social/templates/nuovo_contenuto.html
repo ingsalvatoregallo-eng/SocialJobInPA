@@ -55,6 +55,13 @@
       {% endif %}
     </div>
 
+    <div id="blocco-bando-specifico" style="display:none">
+      <label>Bando specifico (opzionale)</label>
+      <input type="text" name="bando_specifico" id="campo-bando-specifico" oninput="aggiornaCategoria()"
+             placeholder="Incolla l'URL della scheda bando su JobInPA (es. jobinpa.it/bandi/gu:26E04294) o il suo id">
+      <p class="hint">Se compilato, salta del tutto la ricerca (brief/ricerca semantica) e usa esattamente questo bando — utile se sai già quale bando vuoi ma la ricerca semantica non lo trova ancora (es. appena pubblicato: l'indicizzazione per la ricerca gira circa un'ora dopo la classificazione). Titolo/dati vengono letti dal bando stesso, non serve compilare "Titolo / tema" qui sopra.</p>
+    </div>
+
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <label>Pillar</label>
@@ -121,21 +128,26 @@ function aggiornaCategoria() {
   var strategia = opzione ? opzione.dataset.strategia : '';
   var promozione = strategia === 'promozioni_jobinpa';
   var funzionalita = strategia === 'funzionalita_jobinpa';
+  var bandi = strategia === 'bandi_jobinpa';
+  var bandoSpecifico = bandi && document.getElementById('campo-bando-specifico').value.trim() !== '';
 
   document.getElementById('blocco-promozione').style.display = promozione ? 'block' : 'none';
   document.getElementById('blocco-funzionalita').style.display = funzionalita ? 'block' : 'none';
+  document.getElementById('blocco-bando-specifico').style.display = bandi ? 'block' : 'none';
   // Il titolo/tema resta libero per le funzionalità (possono essere piu'
-  // di una: niente "nome" singolo ovvio da cui derivarlo), solo la
-  // promozione lo nasconde e lo deriva dal nome della promo scelta.
-  document.getElementById('blocco-titolo').style.display = promozione ? 'none' : 'block';
-  document.getElementById('campo-titolo').disabled = promozione;
+  // di una: niente "nome" singolo ovvio da cui derivarlo) e per i bandi
+  // quando non e' stato incollato un bando specifico; la promozione o un
+  // bando specifico lo nascondono e lo derivano dai dati reali.
+  var titoloDerivato = promozione || bandoSpecifico;
+  document.getElementById('blocco-titolo').style.display = titoloDerivato ? 'none' : 'block';
+  document.getElementById('campo-titolo').disabled = titoloDerivato;
   var selectPromo = document.getElementById('campo-promo-selezionata');
   if (selectPromo) { selectPromo.disabled = !promozione; }
   var selectFunzionalita = document.getElementById('campo-funzionalita-selezionata');
   if (selectFunzionalita) { selectFunzionalita.disabled = !funzionalita; }
 
   document.getElementById('avviso-annullamento').style.display =
-    strategia === 'bandi_jobinpa' ? 'block' : 'none';
+    bandi && !bandoSpecifico ? 'block' : 'none';
 }
 aggiornaCategoria();
 </script>

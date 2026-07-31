@@ -548,12 +548,23 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
         funzionalita_disponibili=jobinpa_client.client().funzionalita().get("funzionalita", [])))
 
 
+def _estrai_concorso_id(testo):
+    """Accetta sia l'URL della scheda bando su JobInPA (.../bandi/<id>) sia
+    l'id nudo incollato direttamente: l'utente non deve sapere qual e' il
+    formato interno, incolla quello che ha sott'occhio nel browser."""
+    testo = testo.strip()
+    if "/bandi/" in testo:
+        return testo.rsplit("/bandi/", 1)[1].split("?")[0].split("#")[0].strip("/")
+    return testo
+
+
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(None),
                    pillar: str = Form(None), obiettivo: str = Form(None),
                    brief: str = Form(None), categoria_id: str = Form(...),
                    promo_selezionata: str = Form(None),
                    funzionalita_selezionata: Optional[list[str]] = Form(None),
+                   bando_specifico: str = Form(None),
                    canali: Optional[list[str]] = Form(None),
                    csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
@@ -574,7 +585,25 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
     scadenza_promo = None
     promo_dati = None
     funzionalita_dati = None
-    if categoria["strategia_fatti"] == "promozioni_jobinpa":
+    concorso_id = None
+    if (categoria["strategia_fatti"] == "bandi_jobinpa" and bando_specifico
+            and bando_specifico.strip()):
+        # Bypassa del tutto interpretazione del brief + ricerca semantica
+        # (vedi agents.research: content.concorso_id, se impostato, fa
+        # recuperare esattamente questo bando): utile quando la ricerca
+        # semantica non trova un bando che esiste davvero su JobInPA, per
+        # esempio perche' l'embedding non e' ancora stato calcolato (gira
+        # con un ritardo orario rispetto alla classificazione). Titolo
+        # derivato dal bando stesso, mai scritto a mano (stesso principio
+        # di promo_selezionata/funzionalita_selezionata sopra).
+        concorso_id = _estrai_concorso_id(bando_specifico)
+        bando = jobinpa_client.client().bando(concorso_id)
+        if bando is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Bando non trovato su JobInPA: controlla l'id o l'URL incollato")
+        titolo = bando["titolo"]
+    elif categoria["strategia_fatti"] == "promozioni_jobinpa":
         # Titolo/prezzo/scadenza NON arrivano dal form (mai un claim
         # commerciale scritto a mano): si rilegge la promo in diretta da
         # JobInPA, cosi' e' sempre quella davvero attiva in questo momento,
@@ -628,6 +657,7 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
                                         scadenza_promo=scadenza_promo,
                                         promo_dati=promo_dati, funzionalita_dati=funzionalita_dati,
                                         categoria_id=categoria_id, canali=canali_scelti,
+                                        concorso_id=concorso_id,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)

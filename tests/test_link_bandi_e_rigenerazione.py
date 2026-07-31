@@ -299,3 +299,95 @@ def test_route_rigenera_immagine_contenuto_inesistente_404(conn, client):
     r = client.post("/social/contenuti/non-esiste/rigenera-immagine",
                     data={"csrf": csrf}, follow_redirects=False)
     assert r.status_code == 404
+
+
+# --- Bando specifico: bypassa ricerca semantica/brief (segnalato dall'utente:
+# un bando che esiste davvero su JobInPA non trovato dalla ricerca semantica,
+# es. embedding non ancora calcolato) --------------------------------------
+
+def test_estrai_concorso_id_da_url():
+    from social.web import _estrai_concorso_id
+    assert _estrai_concorso_id("https://jobinpa.it/bandi/gu:26E04294") == "gu:26E04294"
+    assert _estrai_concorso_id("https://jobinpa.it/bandi/gu:26E04294?ref=share") == "gu:26E04294"
+    assert _estrai_concorso_id("https://jobinpa.it/bandi/gu:26E04294/") == "gu:26E04294"
+
+
+def test_estrai_concorso_id_da_id_nudo():
+    from social.web import _estrai_concorso_id
+    assert _estrai_concorso_id("  gu:26E04294  ") == "gu:26E04294"
+
+
+_BANDO_SEGRETARIO = {
+    "id": "gu:26E04294", "titolo": "Concorso pubblico, per esami, a trenta posti di Segretario parlamentare",
+    "enti": ["Senato della Repubblica"], "num_posti": 30, "scadenza": "2026-08-27",
+    "sintesi": "Concorso per 30 posti di Segretario parlamentare.",
+    "url_dettaglio": "https://jobinpa.it/bandi/gu:26E04294",
+}
+
+
+class _ClientConBando:
+    def __init__(self, bando=None):
+        self._bando = bando
+
+    def promozioni(self):
+        return []
+
+    def funzionalita(self):
+        return {}
+
+    def bando(self, concorso_id):
+        return self._bando if self._bando and self._bando["id"] == concorso_id else None
+
+
+def test_crea_contenuto_con_bando_specifico_deriva_titolo_e_salta_la_ricerca(conn, client, monkeypatch):
+    monkeypatch.setattr("social.web.jobinpa_client.client",
+                        lambda: _ClientConBando(_BANDO_SEGRETARIO))
+    db_social.crea_utente(conn, "editor-bando1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-bando1@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "categoria_id": categoria_id,
+        "bando_specifico": "https://jobinpa.it/bandi/gu:26E04294",
+        "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    content = db_social.get_content(conn, content_id)
+    assert content["concorso_id"] == "gu:26E04294"
+    assert content["titolo"] == _BANDO_SEGRETARIO["titolo"]
+
+
+def test_crea_contenuto_bando_specifico_non_trovato_400(conn, client, monkeypatch):
+    monkeypatch.setattr("social.web.jobinpa_client.client", lambda: _ClientConBando(None))
+    db_social.crea_utente(conn, "editor-bando2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-bando2@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "categoria_id": categoria_id, "bando_specifico": "id-inesistente", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 400
+
+
+def test_crea_contenuto_concorsi_senza_bando_specifico_richiede_titolo(conn, client, monkeypatch):
+    """Il flusso normale (brief + ricerca semantica) resta invariato quando
+    "bando_specifico" non viene compilato."""
+    monkeypatch.setattr("social.web.jobinpa_client.client", lambda: _ClientConBando())
+    db_social.crea_utente(conn, "editor-bando3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-bando3@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "categoria_id": categoria_id, "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 400
