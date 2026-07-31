@@ -124,6 +124,16 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
     (embedding_filtrati non lo prevede): applicato qui come post-filtro sui
     risultati, cosi' il vincolo resta rispettato comunque.
 
+    Se la ricerca CON filtri non trova nulla, si riprova SENZA (fallback):
+    interpreta_brief puo' scegliere in modo non deterministico fra due
+    valori del vocabolario chiuso genuinamente ambigui per lo stesso brief
+    (es. inquadramento "Dirigente" vs "Personale sanitario" per un medico
+    dirigente) — un valore "sbagliato" (comunque valido, non inventato)
+    escluderebbe bandi realmente pertinenti PRIMA che la ricerca semantica
+    possa giudicarli, annullando un contenuto che invece ha fonti reali
+    (bug riprodotto: stesso identico brief, 3 chiamate, 2 volte filtri che
+    funzionano e trovano 10 bandi, 1 volta un filtro che ne trova zero).
+
     Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
     se la ricerca ha trovato qualcosa (vedi research(), annullamento se la
     ricerca semantica non trova nulla di pertinente). Senza JOBINPA_API_URL/
@@ -138,6 +148,8 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
         filtri_semantici.pop("query", None)  # la query e' query_semantica, non un sotto-filtro
         posti_minimi = filtri_semantici.pop("posti_minimi", None)
         righe = client.bandi_semantici(query_semantica, limit=limite, **filtri_semantici)
+        if not righe and filtri_semantici:
+            righe = client.bandi_semantici(query_semantica, limit=limite)
         if posti_minimi:
             righe = [r for r in righe if (r.get("num_posti") or 0) >= posti_minimi]
     elif filtri:

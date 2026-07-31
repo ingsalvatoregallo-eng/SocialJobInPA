@@ -16,9 +16,12 @@ _BANDO_ESEMPIO = {
 
 
 class _ClientFinto:
-    def __init__(self, bandi=None, bando_singolo=None):
+    def __init__(self, bandi=None, bando_singolo=None,
+                bandi_semantici_con_filtri=None, bandi_semantici_senza_filtri=None):
         self._bandi = bandi or []
         self._bando_singolo = bando_singolo
+        self._bandi_semantici_con_filtri = bandi_semantici_con_filtri
+        self._bandi_semantici_senza_filtri = bandi_semantici_senza_filtri
         self.chiamate = []
 
     @property
@@ -32,6 +35,12 @@ class _ClientFinto:
     def bando(self, concorso_id):
         self.chiamate.append(("bando", concorso_id))
         return self._bando_singolo
+
+    def bandi_semantici(self, query, *, limit=5, **filtri):
+        self.chiamate.append(("bandi_semantici", query, limit, dict(filtri)))
+        if filtri:
+            return self._bandi_semantici_con_filtri or []
+        return self._bandi_semantici_senza_filtri or []
 
 
 def test_contesto_jobinpa_con_bandi_dalla_api(conn):
@@ -69,6 +78,50 @@ def test_contesto_jobinpa_client_non_configurato(conn, monkeypatch):
     contesto, righe = agents._contesto_jobinpa(None, limite=3, client=client_non_configurato)
     assert contesto == ""
     assert righe == []
+
+
+# --- Fallback: filtri estratti dal brief ambigui -> riprova senza --------
+# Bug riprodotto: interpreta_brief puo' scegliere in modo non deterministico
+# fra due valori del vocabolario chiuso genuinamente ambigui per lo stesso
+# brief (es. inquadramento "Dirigente" vs "Personale sanitario" per un
+# medico dirigente) — un valore "sbagliato" (comunque valido) escludeva
+# bandi realmente pertinenti PRIMA che la ricerca semantica li giudicasse,
+# annullando un contenuto che aveva fonti reali.
+
+def test_contesto_jobinpa_ripete_senza_filtri_se_filtrati_non_trovano_nulla(conn):
+    client = _ClientFinto(bandi_semantici_con_filtri=[], bandi_semantici_senza_filtri=[_BANDO_ESEMPIO])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client, filtri={"inquadramento": "Personale sanitario"},
+        query_semantica="dirigenti medici")
+    assert righe == [_BANDO_ESEMPIO]
+    chiamate_semantiche = [c for c in client.chiamate if c[0] == "bandi_semantici"]
+    assert len(chiamate_semantiche) == 2
+    assert chiamate_semantiche[0][3] == {"inquadramento": "Personale sanitario"}  # primo tentativo, coi filtri
+    assert chiamate_semantiche[1][3] == {}  # secondo tentativo, senza
+
+
+def test_contesto_jobinpa_non_ripete_se_i_filtri_trovano_gia_qualcosa(conn):
+    """Nessuna chiamata sprecata quando il primo tentativo (coi filtri) ha
+    gia' successo: il fallback scatta solo quando serve davvero."""
+    client = _ClientFinto(bandi_semantici_con_filtri=[_BANDO_ESEMPIO])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client, filtri={"inquadramento": "Dirigente"},
+        query_semantica="dirigenti medici")
+    assert righe == [_BANDO_ESEMPIO]
+    chiamate_semantiche = [c for c in client.chiamate if c[0] == "bandi_semantici"]
+    assert len(chiamate_semantiche) == 1
+
+
+def test_contesto_jobinpa_senza_filtri_non_ripete_una_seconda_volta_a_vuoto(conn):
+    """Senza filtri da togliere (brief senza criteri specifici, o gia'
+    nessun filtro), un risultato vuoto resta vuoto — niente chiamata
+    duplicata e identica alla prima."""
+    client = _ClientFinto(bandi_semantici_senza_filtri=[])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client, filtri=None, query_semantica="query qualsiasi")
+    assert righe == []
+    chiamate_semantiche = [c for c in client.chiamate if c[0] == "bandi_semantici"]
+    assert len(chiamate_semantiche) == 1
 
 
 def test_research_agent_non_esplode_con_bandi_dalla_api(conn, monkeypatch):
