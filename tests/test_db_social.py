@@ -140,3 +140,26 @@ def test_costo_periodo(conn):
     db_social.registra_costo(conn, "openai_images", 0.04)
     assert db_social.costo_periodo(conn, "anthropic") == 2.0
     assert db_social.costo_periodo(conn, "openai_images") == 0.04
+
+
+def test_get_asset_e_aggiorna_asset(conn):
+    content_id = db_social.crea_content(conn, "Test asset")
+    asset_id = db_social.salva_asset(conn, content_id, "/vecchio.png", piattaforma="instagram",
+                                     template="nuovo_concorso", formato="instagram_feed",
+                                     provider="mock", bando_id="CONC-1")
+    db_social.aggiorna_asset(conn, asset_id, percorso="/nuovo.png", provider="openai_images",
+                             url_pubblico="https://cdn.example/nuovo.png")
+    riga = db_social.get_asset(conn, content_id, asset_id)
+    assert riga["percorso"] == "/nuovo.png"
+    assert riga["provider"] == "openai_images"
+    assert riga["url_pubblico"] == "https://cdn.example/nuovo.png"
+    # Campi non passati restano invariati (stesso principio di aggiorna_content).
+    assert riga["template"] == "nuovo_concorso"
+    assert riga["bando_id"] == "CONC-1"
+
+
+def test_get_asset_di_altro_contenuto_ritorna_none(conn):
+    content_a = db_social.crea_content(conn, "A")
+    content_b = db_social.crea_content(conn, "B")
+    asset_id = db_social.salva_asset(conn, content_a, "/x.png")
+    assert db_social.get_asset(conn, content_b, asset_id) is None

@@ -653,6 +653,45 @@ def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
     return visual(conn, content_id, risultato, provider=provider, image_provider=image_provider)
 
 
+def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None):
+    """Rigenera SOLO l'immagine indicata di un carosello Instagram, senza
+    toccare le altre — a differenza di rigenera_visual, che le rifà tutte
+    (segnalato dall'utente: correggere una singola immagine del carosello
+    non deve costare/rifare anche le altre, gia' andate bene).
+
+    Serve solo per immagini legate a un bando (asset.bando_id, sempre
+    presente per un'immagine di carosello, vedi visual()): non ha senso per
+    l'unica immagine di una piattaforma senza carosello, dove "rigenera
+    questa" e "rigenera tutte" coincidono gia' (usa rigenera_visual)."""
+    asset = db_social.get_asset(conn, content_id, asset_id)
+    if asset is None:
+        raise ValueError(f"asset inesistente: {asset_id}")
+    if not asset["bando_id"]:
+        raise ValueError("questa immagine non e' collegata a un bando di un carosello")
+    content = db_social.get_content(conn, content_id)
+    bandi = json.loads(content["bandi_trovati"] or "[]")
+    bando = next((b for b in bandi if b.get("id") == asset["bando_id"]), None)
+    if bando is None:
+        raise ValueError(f"bando non piu' presente tra quelli trovati: {asset['bando_id']}")
+    categoria = _categoria_per_content(conn, content)
+    immagini_riferimento = categoria["immagini_riferimento"] if categoria else []
+    stile_immagine = categoria["stile_immagine"] if categoria else None
+    richiesta = _richiesta_immagine_da_bando(
+        bando, asset["formato"], content_id, categoria=categoria,
+        immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
+    image_provider = image_provider or images.provider_immagini(conn)
+    nuovo = asyncio.run(image_provider.generate(richiesta))
+    vecchio_percorso = Path(asset["percorso"])
+    db_social.aggiorna_asset(conn, asset_id, percorso=nuovo.percorso, template=nuovo.template,
+                             formato=nuovo.formato, provider=nuovo.provider,
+                             url_pubblico=asset_storage.carica_pubblico(nuovo.percorso))
+    try:
+        vecchio_percorso.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return nuovo
+
+
 def rigenera_copy(conn, content_id, *, provider=None, note_revisore=None):
     """Rigenera SOLO il testo (non le immagini): usato dopo aver tolto
     una o piu' immagini dal carosello (vedi db_social.elimina_asset), per

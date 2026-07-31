@@ -37,6 +37,8 @@ def esegui_job(conn, job):
                                       urls_extra=payload.get("urls_extra"))
     if tipo == "rigenera_visual":
         return agents.rigenera_visual(conn, payload["content_id"])
+    if tipo == "rigenera_asset_singolo":
+        return agents.rigenera_immagine_singola(conn, payload["content_id"], payload["asset_id"])
     if tipo == "rigenera_copy":
         return agents.rigenera_copy(conn, payload["content_id"])
     if tipo == "generate_week_plan":

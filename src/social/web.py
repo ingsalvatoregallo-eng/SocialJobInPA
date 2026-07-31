@@ -703,6 +703,7 @@ def contenuto(request: Request, content_id: str, avviata: bool = False,
         appena_in_coda=(avviata and not in_corso and not content["errore"]
                         and content["stato"] in agents.STATI_PIPELINE_AVVIABILE),
         rigenerazione_in_corso=db_social.job_in_corso(conn, "rigenera_visual", content_id),
+        rigenerazione_asset_in_corso=db_social.job_in_corso(conn, "rigenera_asset_singolo", content_id),
         rigenerazione_testo_in_corso=db_social.job_in_corso(conn, "rigenera_copy", content_id),
         varianti={v["piattaforma"]: v for v in db_social.varianti_di(conn, content_id)},
         assets=db_social.asset_di(conn, content_id),
@@ -827,6 +828,26 @@ def elimina_asset(request: Request, content_id: str, asset_id: str,
     if not db_social.elimina_asset(conn, content_id, asset_id):
         raise HTTPException(status_code=404, detail="Immagine non trovata")
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+
+
+@router.post("/contenuti/{content_id}/asset/{asset_id}/rigenera")
+def rigenera_asset_singolo(request: Request, content_id: str, asset_id: str,
+                           csrf: str = Form(None),
+                           sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Rigenera SOLO questa immagine del carosello, in coda come gli altri
+    agenti (stesso possibile costo AI di 'Rigenera immagine'): le altre
+    immagini del carosello non vengono toccate (segnalato dall'utente)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    asset = db_social.get_asset(conn, content_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Immagine non trovata")
+    if not asset["bando_id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Questa immagine non fa parte di un carosello: usa 'Rigenera immagine'")
+    db_social.crea_job(conn, "rigenera_asset_singolo", {"content_id": content_id, "asset_id": asset_id})
+    return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
 @router.post("/contenuti/{content_id}/pubblica")

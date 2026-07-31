@@ -13,7 +13,7 @@ from pathlib import Path
 import auth
 import pytest
 
-from social import agents, db_social, llm, models
+from social import agents, db_social, llm, models, scheduler
 from social.images import MockImageProvider
 
 _BANDI = [
@@ -110,6 +110,52 @@ def test_elimina_asset_di_altro_contenuto_ritorna_false(conn):
     asset_di_a = db_social.asset_di(conn, content_a)[0]
     assert db_social.elimina_asset(conn, content_b, asset_di_a["id"]) is False
     assert len(db_social.asset_di(conn, content_a)) == 3
+
+
+# --- Rigenera SOLO una singola immagine del carosello -----------------------
+# Segnalato dall'utente: correggere una immagine del carosello non deve
+# costare/rifare anche le altre, gia' andate bene.
+
+def test_rigenera_immagine_singola_sostituisce_solo_quella(conn):
+    content_id = _contenuto_con_carosello(conn)
+    asset_prima = db_social.asset_di(conn, content_id)
+    target = next(a for a in asset_prima if a["bando_id"] == "CONC-1")
+    percorso_vecchio = Path(target["percorso"])
+    altri_percorsi_prima = {a["id"]: a["percorso"] for a in asset_prima if a["id"] != target["id"]}
+
+    agents.rigenera_immagine_singola(conn, content_id, target["id"],
+                                     image_provider=MockImageProvider())
+
+    asset_dopo = db_social.asset_di(conn, content_id)
+    assert len(asset_dopo) == 3  # ne' aggiunto ne' tolto nessun asset
+    aggiornato = next(a for a in asset_dopo if a["id"] == target["id"])
+    assert aggiornato["percorso"] != target["percorso"]  # file nuovo
+    assert aggiornato["bando_id"] == "CONC-1"  # stesso bando di prima
+    assert not percorso_vecchio.exists()  # vecchio file ripulito
+    altri_percorsi_dopo = {a["id"]: a["percorso"] for a in asset_dopo if a["id"] != target["id"]}
+    assert altri_percorsi_dopo == altri_percorsi_prima  # le altre due invariate
+
+
+def test_rigenera_immagine_singola_asset_inesistente(conn):
+    content_id = db_social.crea_content(conn, "Senza asset")
+    with pytest.raises(ValueError, match="inesistente"):
+        agents.rigenera_immagine_singola(conn, content_id, "non-esiste",
+                                         image_provider=MockImageProvider())
+
+
+def test_rigenera_immagine_singola_senza_bando_id_rifiutata(conn):
+    """L'unica immagine di un contenuto senza carosello non ha bando_id:
+    "rigenera solo questa" non ha senso li' (coincide con "rigenera tutte",
+    vedi rigenera_visual)."""
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    with pytest.raises(ValueError, match="carosello"):
+        agents.rigenera_immagine_singola(conn, content_id, asset_id,
+                                         image_provider=MockImageProvider())
 
 
 # --- Rigenera solo il testo, coerente col carosello ridotto -----------------
@@ -240,3 +286,70 @@ def test_route_rigenera_testo_mette_in_coda_il_job(conn, client):
 
     assert r.status_code == 303
     assert db_social.job_in_corso(conn, "rigenera_copy", content_id)
+
+
+def test_route_rigenera_asset_singolo_mette_in_coda_il_job(conn, client):
+    content_id = _contenuto_con_carosello(conn)
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    db_social.crea_utente(conn, "editor-asset1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset1@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "rigenera_asset_singolo", content_id)
+
+
+def test_route_rigenera_asset_singolo_inesistente_404(conn, client):
+    content_id = _contenuto_con_carosello(conn)
+    db_social.crea_utente(conn, "editor-asset2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset2@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/asset/non-esiste/rigenera",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 404
+
+
+def test_route_rigenera_asset_singolo_il_worker_esegue_davvero(conn, client):
+    """Catena completa rotta -> coda -> worker -> agents.rigenera_immagine_
+    singola: non solo che la rotta accodi il job giusto (gia' testato
+    sopra), ma che il dispatch in scheduler.esegui_job sia cablato."""
+    content_id = _contenuto_con_carosello(conn)
+    asset_prima = db_social.asset_di(conn, content_id)
+    target = next(a for a in asset_prima if a["bando_id"] == "CONC-1")
+    db_social.crea_utente(conn, "editor-asset4@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset4@test.local")
+    csrf = _csrf(client)
+
+    client.post(f"/social/contenuti/{content_id}/asset/{target['id']}/rigenera",
+               data={"csrf": csrf}, follow_redirects=False)
+    scheduler.ciclo_worker(conn, una_volta=True)
+
+    assert not db_social.job_in_corso(conn, "rigenera_asset_singolo", content_id)
+    aggiornato = db_social.get_asset(conn, content_id, target["id"])
+    assert aggiornato["percorso"] != target["percorso"]
+
+
+def test_route_rigenera_asset_singolo_senza_bando_id_400(conn, client):
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    db_social.crea_utente(conn, "editor-asset3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset3@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 400

@@ -1084,6 +1084,30 @@ def asset_di(conn, content_id):
         (content_id,)).fetchall()
 
 
+def get_asset(conn, content_id, asset_id):
+    return conn.execute(
+        "SELECT * FROM social_media_assets WHERE id = ? AND content_id = ?",
+        (asset_id, content_id)).fetchone()
+
+
+def aggiorna_asset(conn, asset_id, **campi):
+    """Sostituisce i campi di UN asset esistente (stessa riga, nuovo file):
+    a differenza di elimina_asset_di + salva_asset, non cambia l'id ne' la
+    posizione nell'ordine del carosello (vedi agents.rigenera_immagine_
+    singola — rigenerare una sola immagine del carosello senza toccare le
+    altre, ne' la loro sequenza)."""
+    consentiti = {"percorso", "template", "formato", "provider", "url_pubblico"}
+    campi = {k: v for k, v in campi.items() if k in consentiti}
+    if not campi:
+        return
+    if "percorso" in campi:
+        campi["percorso"] = str(campi["percorso"])
+    assegnazioni = ", ".join(f"{k} = ?" for k in campi)
+    conn.execute(f"UPDATE social_media_assets SET {assegnazioni} WHERE id = ?",
+                 (*campi.values(), asset_id))
+    conn.commit()
+
+
 # --- Fonti e fatti ------------------------------------------------------------
 
 def source_domains(conn, solo_attivi=True):
