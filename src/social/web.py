@@ -721,13 +721,46 @@ def avvia_pipeline(request: Request, content_id: str, csrf: str = Form(None),
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
+@router.post("/contenuti/{content_id}/riporta-in-bozza")
+def riporta_in_bozza(request: Request, content_id: str, csrf: str = Form(None),
+                     sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Un contenuto annullato (es. "nessun bando pertinente" dalla ricerca
+    semantica) puo' avere una causa rimediabile — un brief da correggere,
+    o adesso un bando specifico da indicare — invece di poter solo essere
+    eliminato definitivamente (segnalato dall'utente). Torna a IDEA,
+    l'unico altro stato raggiungibile da CANCELLED oltre ad ARCHIVED (vedi
+    state_machine.TRANSIZIONI): da li' si modifica il brief e si rilancia
+    la pipeline come per qualsiasi altro contenuto in bozza."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    if content["stato"] != "CANCELLED":
+        raise HTTPException(status_code=409, detail="Il contenuto non è annullato")
+    db_social.aggiorna_content(conn, content_id, errore=None)
+    state_machine.transisci(conn, content_id, "IDEA", utente_id=sessione["utente"]["id"])
+    db_social.audit(conn, "contenuto_riportato_in_bozza", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id)
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+
+
 @router.post("/contenuti/{content_id}/brief")
 def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
-                   brief: str = Form(None), csrf: str = Form(None),
+                   brief: str = Form(None), bando_specifico: str = Form(None),
+                   csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Modifica il tema/brief PRIMA di rilanciare la pipeline (es. dopo una
-    richiesta di modifiche): salva subito, nessuna chiamata AI. Non riavvia
-    da sola la pipeline — il revisore decide quando farlo (bottone a parte)."""
+    richiesta di modifiche, o dopo aver riportato in bozza un contenuto
+    annullato): salva subito, nessuna chiamata AI. Non riavvia da sola la
+    pipeline — il revisore decide quando farlo (bottone a parte).
+
+    bando_specifico (opzionale): stesso meccanismo di crea_contenuto —
+    se compilato, deriva il titolo dal bando vero (mai scritto a mano) e
+    imposta content.concorso_id, che fa saltare la ricerca semantica in
+    agents.research(). Se vuoto, il concorso_id gia' eventualmente
+    presente NON viene toccato (nessun modo di svuotarlo da questo form:
+    solo di impostarlo)."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     content = db_social.get_content(conn, content_id)
@@ -736,8 +769,18 @@ def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
     if content["stato"] not in agents.STATI_PIPELINE_AVVIABILE:
         raise HTTPException(status_code=409,
                             detail="Il brief si modifica solo prima di (ri)lanciare la pipeline")
+    campi_concorso = {}
+    if bando_specifico and bando_specifico.strip():
+        concorso_id = _estrai_concorso_id(bando_specifico)
+        bando = jobinpa_client.client().bando(concorso_id)
+        if bando is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Bando non trovato su JobInPA: controlla l'id o l'URL incollato")
+        titolo = bando["titolo"]
+        campi_concorso["concorso_id"] = concorso_id
     db_social.aggiorna_content(conn, content_id, titolo=titolo.strip(),
-                               brief=(brief or "").strip() or None)
+                               brief=(brief or "").strip() or None, **campi_concorso)
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 

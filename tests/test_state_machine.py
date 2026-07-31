@@ -39,6 +39,17 @@ def test_percorso_completo_fino_a_published(conn):
     assert db_social.get_content(conn, content_id)["stato"] == "ARCHIVED"
 
 
+def test_cancelled_puo_tornare_in_bozza(conn):
+    """Un contenuto annullato (es. "nessun bando pertinente") puo' avere
+    una causa rimediabile: deve poter tornare a IDEA per essere corretto
+    e rilanciato, non solo essere archiviato/eliminato (segnalato
+    dall'utente, vedi web.riporta_in_bozza)."""
+    content_id = db_social.crea_content(conn, "Test")
+    state_machine.transisci(conn, content_id, "CANCELLED")
+    riga = state_machine.transisci(conn, content_id, "IDEA")
+    assert riga["stato"] == "IDEA"
+
+
 def test_archived_e_terminale(conn):
     content_id = db_social.crea_content(conn, "Test")
     state_machine.transisci(conn, content_id, "CANCELLED")

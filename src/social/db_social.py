@@ -854,7 +854,8 @@ def lista_content(conn, stati=None, limit=200):
 
 def aggiorna_content(conn, content_id, **campi):
     consentiti = {"titolo", "obiettivo", "brief", "stato", "classe_rischio", "decisione_rischio",
-                  "punteggi_rischio", "canali", "programmato_at", "errore", "bandi_trovati"}
+                  "punteggi_rischio", "canali", "programmato_at", "errore", "bandi_trovati",
+                  "concorso_id"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
         return

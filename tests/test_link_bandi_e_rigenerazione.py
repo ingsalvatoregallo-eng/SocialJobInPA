@@ -12,7 +12,7 @@ from pathlib import Path
 import auth
 import pytest
 
-from social import agents, db_social, llm, models
+from social import agents, db_social, llm, models, state_machine
 from social.images import MockImageProvider
 
 _BANDO_CON_LINK = {
@@ -388,6 +388,121 @@ def test_crea_contenuto_concorsi_senza_bando_specifico_richiede_titolo(conn, cli
 
     r = client.post("/social/contenuti", data={
         "categoria_id": categoria_id, "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 400
+
+
+# --- Riportare in bozza un contenuto annullato -------------------------------
+# Segnalato dall'utente: un contenuto annullato (es. "nessun bando
+# pertinente") non si poteva ne' modificare ne' rilanciare, solo eliminare
+# definitivamente — anche quando la causa era rimediabile (brief da
+# correggere, o ora un bando specifico da indicare).
+
+def test_riporta_in_bozza_da_cancelled(conn, client):
+    db_social.crea_utente(conn, "editor-bozza1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Contenuto annullato")
+    state_machine.transisci(conn, content_id, "CANCELLED")
+    db_social.aggiorna_content(conn, content_id, errore="Nessun bando pertinente")
+    _login(client, "editor-bozza1@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/riporta-in-bozza",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "IDEA"
+    assert content["errore"] is None
+
+
+def test_riporta_in_bozza_da_stato_non_cancellato_409(conn, client):
+    db_social.crea_utente(conn, "editor-bozza2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Contenuto normale")
+    _login(client, "editor-bozza2@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/riporta-in-bozza",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 409
+    assert db_social.get_content(conn, content_id)["stato"] == "IDEA"
+
+
+def test_riporta_in_bozza_contenuto_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "editor-bozza3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-bozza3@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/contenuti/non-esiste/riporta-in-bozza",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 404
+
+
+def test_pagina_contenuto_mostra_riporta_in_bozza_solo_se_cancellato(conn, client):
+    db_social.crea_utente(conn, "editor-bozza4@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Contenuto annullato")
+    state_machine.transisci(conn, content_id, "CANCELLED")
+    _login(client, "editor-bozza4@test.local")
+
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert "Riporta in bozza" in pagina
+
+
+# --- Bando specifico anche nella modifica del brief di un contenuto gia'
+# esistente (non solo alla creazione) ---------------------------------------
+
+def test_modifica_brief_con_bando_specifico_deriva_il_titolo(conn, client, monkeypatch):
+    monkeypatch.setattr("social.web.jobinpa_client.client",
+                        lambda: _ClientConBando(_BANDO_SEGRETARIO))
+    db_social.crea_utente(conn, "editor-bozza5@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Tema originale", brief="brief originale")
+    _login(client, "editor-bozza5@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/brief", data={
+        "titolo": "Tema originale", "brief": "brief originale",
+        "bando_specifico": "https://jobinpa.it/bandi/gu:26E04294", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    content = db_social.get_content(conn, content_id)
+    assert content["titolo"] == _BANDO_SEGRETARIO["titolo"]
+    assert content["concorso_id"] == "gu:26E04294"
+
+
+def test_modifica_brief_senza_bando_specifico_non_tocca_il_concorso_id_esistente(conn, client, monkeypatch):
+    monkeypatch.setattr("social.web.jobinpa_client.client", lambda: _ClientConBando())
+    db_social.crea_utente(conn, "editor-bozza6@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Tema", concorso_id="gia-impostato")
+    _login(client, "editor-bozza6@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/brief", data={
+        "titolo": "Tema modificato", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_content(conn, content_id)["concorso_id"] == "gia-impostato"
+
+
+def test_modifica_brief_bando_specifico_non_trovato_400(conn, client, monkeypatch):
+    monkeypatch.setattr("social.web.jobinpa_client.client", lambda: _ClientConBando(None))
+    db_social.crea_utente(conn, "editor-bozza7@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Tema")
+    _login(client, "editor-bozza7@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/brief", data={
+        "titolo": "Tema", "bando_specifico": "id-inesistente", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 400

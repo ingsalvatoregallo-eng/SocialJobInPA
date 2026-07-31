@@ -40,7 +40,12 @@ TRANSIZIONI = {
     "PUBLISHED": {"ARCHIVED"},
     "PARTIALLY_PUBLISHED": {"PUBLISHING", "PUBLISHED", "PUBLISH_FAILED", "ARCHIVED"},
     "PUBLISH_FAILED": {"SCHEDULED", "PUBLISHING", "CANCELLED", "ARCHIVED"},
-    "CANCELLED": {"ARCHIVED"},
+    # IDEA: un contenuto annullato (es. "nessun bando pertinente" dalla
+    # ricerca semantica) puo' avere una causa rimediabile — un brief da
+    # correggere, o un bando specifico da indicare adesso disponibile
+    # (vedi web.riporta_in_bozza) — invece di poter solo essere eliminato
+    # definitivamente (segnalato dall'utente).
+    "CANCELLED": {"ARCHIVED", "IDEA"},
     "ARCHIVED": set(),
 }
 
