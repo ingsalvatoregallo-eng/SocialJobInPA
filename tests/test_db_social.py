@@ -1,4 +1,7 @@
 import json
+import sqlite3
+
+import pytest
 
 from social import db_social, security
 
@@ -163,3 +166,81 @@ def test_get_asset_di_altro_contenuto_ritorna_none(conn):
     content_b = db_social.crea_content(conn, "B")
     asset_id = db_social.salva_asset(conn, content_a, "/x.png")
     assert db_social.get_asset(conn, content_b, asset_id) is None
+
+
+# --- Retry su "database is locked" -------------------------------------------
+# Segnalato dall'utente: salvare una categoria dava 500 Internal Server
+# Error con "database is locked" nei log — sotto scritture concorrenti da
+# piu' processi (app/worker/scheduler sullo stesso file SQLite) il timeout
+# passato a sqlite3.connect() non basta sempre ad assorbire la contesa.
+
+class _ConnessioneFinta:
+    """Simula N fallimenti con "database is locked" prima di riuscire (o
+    esaurire i tentativi): non serve un vero secondo scrittore concorrente
+    per testare la logica di retry, solo l'eccezione che produce."""
+
+    def __init__(self, fallimenti):
+        self.fallimenti = fallimenti
+        self.chiamate = 0
+        self.commit_chiamato = False
+
+    def execute(self, sql, parametri):
+        self.chiamate += 1
+        if self.chiamate <= self.fallimenti:
+            raise sqlite3.OperationalError("database is locked")
+
+    def commit(self):
+        self.commit_chiamato = True
+
+
+def test_esegui_scrittura_con_retry_riesce_dopo_alcuni_fallimenti(monkeypatch):
+    monkeypatch.setattr(db_social.time, "sleep", lambda s: None)
+    finta = _ConnessioneFinta(fallimenti=2)
+    db_social._esegui_scrittura_con_retry(finta, "UPDATE x SET y = ?", (1,))
+    assert finta.chiamate == 3  # 2 falliti + 1 riuscito
+    assert finta.commit_chiamato
+
+
+def test_esegui_scrittura_con_retry_rilancia_dopo_troppi_fallimenti(monkeypatch):
+    monkeypatch.setattr(db_social.time, "sleep", lambda s: None)
+    finta = _ConnessioneFinta(fallimenti=99)
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        db_social._esegui_scrittura_con_retry(finta, "UPDATE x SET y = ?", (1,), tentativi=3)
+    assert finta.chiamate == 3
+    assert not finta.commit_chiamato
+
+
+def test_esegui_scrittura_con_retry_non_riprova_altri_errori(monkeypatch):
+    """Solo "database is locked" viene riprovato: un altro OperationalError
+    (es. una colonna sbagliata) deve fallire subito, non nascondersi
+    dietro 5 tentativi identici inutili."""
+    class _ConnessioneAltroErrore:
+        def execute(self, sql, parametri):
+            raise sqlite3.OperationalError("no such column: x")
+
+        def commit(self):
+            pass
+
+    with pytest.raises(sqlite3.OperationalError, match="no such column"):
+        db_social._esegui_scrittura_con_retry(_ConnessioneAltroErrore(), "UPDATE x SET y = ?", (1,))
+
+
+def test_aggiorna_categoria_passa_dal_percorso_con_retry(conn, monkeypatch):
+    """Verifica che aggiorna_categoria deleghi davvero a
+    _esegui_scrittura_con_retry (non un conn.execute/commit diretto che
+    aggirerebbe il retry) — il comportamento di recupero da "database is
+    locked" e' gia' testato a fondo sopra, isolato dalla vera connessione
+    sqlite3 (un tipo C immutabile, non intercettabile a livello di classe
+    dai test)."""
+    categoria_id = db_social.crea_categoria(conn, "Categoria di prova", "prompt")
+    chiamate = []
+    originale = db_social._esegui_scrittura_con_retry
+
+    def spia(connessione, sql, parametri, **kwargs):
+        chiamate.append(sql)
+        return originale(connessione, sql, parametri, **kwargs)
+
+    monkeypatch.setattr(db_social, "_esegui_scrittura_con_retry", spia)
+    db_social.aggiorna_categoria(conn, categoria_id, prompt_ai="prompt aggiornato")
+    assert any("UPDATE social_content_categories" in sql for sql in chiamate)
+    assert db_social.get_categoria(conn, categoria_id)["prompt_ai"] == "prompt aggiornato"

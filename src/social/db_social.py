@@ -18,6 +18,7 @@ di entrare qui: queste funzioni accettano/restituiscono solo il testo cifrato.
 import json
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -537,6 +538,27 @@ def _insert(conn, tabella, dati):
                  tuple(dati.values()))
 
 
+def _esegui_scrittura_con_retry(conn, sql, parametri, *, tentativi=5, attesa=0.2):
+    """Riprova una scrittura se SQLite risponde "database is locked": sotto
+    scritture concorrenti da piu' processi (app/worker/scheduler, stesso
+    file — vedi connect(), journal DELETE non WAL per compatibilita' fra
+    container separati) il timeout=30 passato a sqlite3.connect() assorbe
+    di norma le contese brevi, ma non sempre sotto carico reale (segnalato
+    dall'utente: 500 Internal Server Error su un semplice salvataggio di
+    una categoria, con "database is locked" nei log). Backoff esponenziale
+    breve invece di alzare ulteriormente il timeout globale — non risolve
+    la contesa alla radice, ma il tentativo successivo quasi sempre passa."""
+    for tentativo in range(tentativi):
+        try:
+            conn.execute(sql, parametri)
+            conn.commit()
+            return
+        except sqlite3.OperationalError as errore:
+            if "database is locked" not in str(errore) or tentativo == tentativi - 1:
+                raise
+            time.sleep(attesa * (2 ** tentativo))
+
+
 def init_social_db(conn):
     """Idempotente, sicura ad ogni avvio (stesso pattern di db.init_db)."""
     conn.executescript(_SCHEMA)
@@ -861,9 +883,13 @@ def aggiorna_content(conn, content_id, **campi):
         return
     campi["aggiornato_at"] = _adesso()
     assegnazioni = ", ".join(f"{k} = ?" for k in campi)
-    conn.execute(f"UPDATE social_content SET {assegnazioni} WHERE id = ?",
-                 (*campi.values(), content_id))
-    conn.commit()
+    # Funzione di scrittura piu' chiamata di tutto il modulo (ogni fase
+    # della pipeline la usa, oltre a ogni azione dell'utente dalla
+    # dashboard): stessa contesa possibile di aggiorna_categoria, vedi
+    # _esegui_scrittura_con_retry.
+    _esegui_scrittura_con_retry(
+        conn, f"UPDATE social_content SET {assegnazioni} WHERE id = ?",
+        (*campi.values(), content_id))
 
 
 def elimina_content(conn, content_id, *, utente_id=None):
@@ -980,9 +1006,9 @@ def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimen
         return
     campi["aggiornato_at"] = _adesso()
     assegnazioni = ", ".join(f"{k} = ?" for k in campi)
-    conn.execute(f"UPDATE social_content_categories SET {assegnazioni} WHERE id = ?",
-                 (*campi.values(), categoria_id))
-    conn.commit()
+    _esegui_scrittura_con_retry(
+        conn, f"UPDATE social_content_categories SET {assegnazioni} WHERE id = ?",
+        (*campi.values(), categoria_id))
 
 
 def elimina_categoria(conn, categoria_id):
