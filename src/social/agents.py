@@ -769,9 +769,32 @@ def rigenera_copy(conn, content_id, *, provider=None, note_revisore=None):
     una o piu' immagini dal carosello (vedi db_social.elimina_asset), per
     allineare la caption al carosello effettivamente rimasto — es. il
     conteggio "scorri le N immagini" deve riflettere quelle vere, non
-    quelle originarie della ricerca."""
+    quelle originarie della ricerca — oppure per un contenuto BLOCKED dal
+    Quality & Risk Agent, con note_revisore che riporta il motivo del
+    blocco (vedi web.rigenera_testo).
+
+    Per un contenuto BLOCKED, dopo la rigenerazione rivaluta SUBITO il
+    rischio sul nuovo testo (stesso quality_risk() della pipeline): senza
+    questo, la pagina continuava a mostrare il vecchio giudizio/motivo
+    anche dopo aver rigenerato apposta per correggerlo, lasciando l'utente
+    a chiedersi se fosse servito a qualcosa (segnalato dall'utente). Se il
+    nuovo giudizio migliora, il contenuto avanza automaticamente
+    (AWAITING_APPROVAL o APPROVED); se resta rosso, quality_risk() ha
+    comunque gia' aggiornato punteggi_rischio con la valutazione fresca —
+    il "Motivo" mostrato cambia anche restando BLOCKED."""
+    content = db_social.get_content(conn, content_id)
     risultato = _ricostruisci_risultato_ricerca(conn, content_id)
-    return copywriting(conn, content_id, risultato, provider=provider, note_revisore=note_revisore)
+    copywriting(conn, content_id, risultato, provider=provider, note_revisore=note_revisore)
+    if content["stato"] == "BLOCKED":
+        from social import approvals
+        classe, decisione = quality_risk(conn, content_id, risultato, provider=provider)
+        if decisione == "human_approval":
+            state_machine.transisci(conn, content_id, "AWAITING_APPROVAL", agente="quality_risk",
+                                    motivo=f"classe {classe} dopo rigenerazione testo")
+            approvals.richiedi_approvazione(conn, content_id)
+        elif decisione == "auto_publish":
+            state_machine.transisci(conn, content_id, "APPROVED", agente="quality_risk",
+                                    motivo=f"classe {classe} dopo rigenerazione testo")
 
 
 # --- Quality & Risk Agent ----------------------------------------------------

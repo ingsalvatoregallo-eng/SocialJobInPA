@@ -33,7 +33,12 @@ TRANSIZIONI = {
     # OpenAI durante il carosello immagini).
     "GENERATING_VISUAL": {"QUALITY_CHECK", "DRAFT_READY", "RESEARCH_FAILED", "CANCELLED"},
     "QUALITY_CHECK": {"BLOCKED", "AWAITING_APPROVAL", "APPROVED", "RESEARCH_FAILED", "CANCELLED"},
-    "BLOCKED": {"DRAFTING", "CANCELLED", "ARCHIVED"},
+    # AWAITING_APPROVAL/APPROVED: la rigenerazione guidata del testo (vedi
+    # agents.rigenera_copy) rivaluta subito il rischio col nuovo testo — se
+    # migliora, il contenuto deve poter avanzare da solo invece di restare
+    # bloccato in attesa che qualcuno lo scopra (segnalato dall'utente:
+    # dopo aver rigenerato, la pagina mostrava ancora il vecchio motivo).
+    "BLOCKED": {"DRAFTING", "AWAITING_APPROVAL", "APPROVED", "CANCELLED", "ARCHIVED"},
     "AWAITING_APPROVAL": {"APPROVED", "CHANGES_REQUESTED", "CANCELLED"},
     # RESEARCHING: senza, esegui_pipeline() non puo' mai ripartire da qui
     # (STATI_PIPELINE_AVVIABILE lo elenca come punto di ripartenza valido,

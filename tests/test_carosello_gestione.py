@@ -7,6 +7,7 @@ aver modificato un brief e rilanciato la pipeline:
 3. dopo aver tolto immagini, si deve poter rigenerare SOLO il testo,
    coerente col carosello ridotto (mai piu' bandi di quante immagini)."""
 
+import json
 import re
 from pathlib import Path
 
@@ -192,6 +193,73 @@ def test_rigenera_copy_con_note_revisore_le_passa_al_copywriter(conn):
                          note_revisore="Le scadenze citate non coincidono coi fatti verificati")
     prompt_instagram = next(u for (_, u, _) in provider.chiamate if "Instagram" in u)
     assert "Le scadenze citate non coincidono coi fatti verificati" in prompt_instagram
+
+
+# --- Rigenerare il testo di un BLOCKED rivaluta subito il rischio -----------
+# Segnalato dall'utente: dopo aver rigenerato il testo di un contenuto
+# bloccato, la pagina continuava a mostrare lo stesso motivo del blocco --
+# doveva rivalutare per vedere se il nuovo testo risolveva il problema.
+
+def _contenuto_bloccato(conn, motivo_ai="motivo qualsiasi"):
+    content_id = _contenuto_con_carosello(conn)
+    db_social.aggiorna_content(conn, content_id, stato="BLOCKED", classe_rischio="rosso",
+                               decisione_rischio="blocked",
+                               punteggi_rischio='{"classe_regole": "verde", "motivi_regole": [], '
+                                               f'"classe_ai": "rosso", "accuratezza": 0.2, '
+                                               f'"brand": 0.5, "conformita": 0.5, '
+                                               f'"motivi_ai": ["{motivo_ai}"]}}')
+    return content_id
+
+
+def test_rigenera_copy_su_blocked_avanza_ad_awaiting_approval_se_migliora(conn):
+    content_id = _contenuto_bloccato(conn)
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="giallo", punteggio_accuratezza=0.8, punteggio_brand=0.8,
+        punteggio_conformita=0.8, motivi=[]))
+    agents.rigenera_copy(conn, content_id, provider=provider,
+                         note_revisore="Correggi le scadenze")
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "AWAITING_APPROVAL"
+    assert db_social.approval_aperta_di(conn, content_id) is not None
+
+
+def test_rigenera_copy_su_blocked_avanza_ad_approved_se_torna_verde(conn):
+    content_id = _contenuto_bloccato(conn)
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="verde", punteggio_accuratezza=1.0, punteggio_brand=1.0,
+        punteggio_conformita=1.0, motivi=[]))
+    agents.rigenera_copy(conn, content_id, provider=provider,
+                         note_revisore="Correggi le scadenze")
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "APPROVED"
+
+
+def test_rigenera_copy_su_blocked_resta_bloccato_se_ancora_rosso_ma_aggiorna_il_motivo(conn):
+    content_id = _contenuto_bloccato(conn, motivo_ai="Il vecchio motivo, ormai superato")
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="rosso", punteggio_accuratezza=0.1, punteggio_brand=0.5,
+        punteggio_conformita=0.5, motivi=["Nuovo motivo, ancora un problema"]))
+    agents.rigenera_copy(conn, content_id, provider=provider,
+                         note_revisore="Correggi le scadenze")
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "BLOCKED"
+    punteggi = json.loads(content["punteggi_rischio"])
+    assert punteggi["motivi_ai"] == ["Nuovo motivo, ancora un problema"]
+
+
+def test_rigenera_copy_su_contenuto_non_blocked_non_rivaluta_il_rischio(conn):
+    """Il "carosello ridotto" e altri usi di rigenera_copy su contenuti NON
+    bloccati non devono innescare una rivalutazione del rischio a sorpresa:
+    solo il percorso di recupero da BLOCKED lo fa."""
+    content_id = _contenuto_con_carosello(conn)  # resta IDEA
+    provider = llm.MockLLMProvider(conn)
+    agents.rigenera_copy(conn, content_id, provider=provider)
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "IDEA"
+    assert content["punteggi_rischio"] is None
 
 
 # --- Rotte web ----------------------------------------------------------------
