@@ -13,6 +13,28 @@
   </div>
 </div>
 
+<script>
+// Il refresh automatico usato sotto e' un location.reload() vero e proprio:
+// senza salvare/ripristinare lo scroll orizzontale dei caroselli, ogni
+// ricarica riportava la vista alla prima immagine, rendendo impossibile
+// scorrere un carosello mentre la pipeline e' ancora in corso (segnalato
+// dall'utente). Il refresh automatico resta (serve per vedere l'avanzamento
+// senza ricaricare a mano), solo la posizione dello scroll sopravvive.
+//
+// Questa funzione DEVE essere dichiarata PRIMA degli script setTimeout(...)
+// qui sotto, non dopo: <script> separati eseguono in ordine di documento e
+// una dichiarazione "function" non e' visibile a un tag <script> precedente
+// -- setTimeout(riavviaConScrollSalvato, ...) falliva silenziosamente con
+// "riavviaConScrollSalvato is not defined" (mai un vero location.reload()),
+// bug reale riprodotto: refresh automatico che non partiva mai (segnalato
+// dall'utente, richiedeva sempre un refresh manuale).
+function riavviaConScrollSalvato() {
+  document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
+    sessionStorage.setItem('scroll-' + el.id, el.scrollLeft);
+  });
+  location.reload();
+}
+</script>
 {% if in_corso %}
 <div class="avviso info">⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
 <script>setTimeout(riavviaConScrollSalvato, 4000);</script>
@@ -29,20 +51,6 @@
 <div class="avviso info">⏳ <strong>Pipeline in coda</strong> — un worker la prenderà in carico entro pochi secondi. Questa pagina si aggiorna automaticamente.</div>
 <script>setTimeout(riavviaConScrollSalvato, 3000);</script>
 {% endif %}
-<script>
-// Il refresh automatico qui sopra e' un location.reload() vero e proprio:
-// senza salvare/ripristinare lo scroll orizzontale dei caroselli, ogni
-// ricarica riportava la vista alla prima immagine, rendendo impossibile
-// scorrere un carosello mentre la pipeline e' ancora in corso (segnalato
-// dall'utente). Il refresh automatico resta (serve per vedere l'avanzamento
-// senza ricaricare a mano), solo la posizione dello scroll sopravvive.
-function riavviaConScrollSalvato() {
-  document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
-    sessionStorage.setItem('scroll-' + el.id, el.scrollLeft);
-  });
-  location.reload();
-}
-</script>
 {% if errore_leggibile %}<div class="avviso rosso">⚠️ {{ errore_leggibile }}</div>{% endif %}
 {% if approvazione and approvazione.stato == 'modifiche_richieste' %}
 <div class="avviso giallo">✎ <strong>Modifiche richieste dal revisore:</strong> {{ approvazione.motivo }}
