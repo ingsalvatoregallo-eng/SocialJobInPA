@@ -600,6 +600,20 @@ def _migra(conn):
         # raggiungibile da Internet, mai i byte diretti come LinkedIn.
         conn.execute("ALTER TABLE social_media_assets ADD COLUMN url_pubblico TEXT")
         conn.commit()
+    if "aggiornato_at" not in colonne_assets:
+        # Separata da creato_at apposta: creato_at decide l'ordine delle
+        # slide nel carosello (vedi asset_di, ORDER BY creato_at) e non
+        # deve mai cambiare quando si rigenera SOLO un'immagine, altrimenti
+        # quella slide salterebbe in fondo alla sequenza. aggiornato_at
+        # serve solo a sapere QUANDO e' stata rigenerata l'ultima volta —
+        # mostrato in pagina e usato per invalidare la cache del browser
+        # sull'URL dell'immagine (stabile, /social/asset/{id}): senza,
+        # un'immagine appena rigenerata poteva sembrare "identica a prima"
+        # perche' il browser riusava la versione in cache dello stesso URL
+        # (segnalato dall'utente dopo aver rigenerato una singola immagine
+        # con delle note di correzione).
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN aggiornato_at TEXT")
+        conn.commit()
     if "tipologia" not in colonne_content:
         conn.execute(
             "ALTER TABLE social_content ADD COLUMN tipologia TEXT NOT NULL DEFAULT 'concorso'")
@@ -1073,11 +1087,12 @@ def aggiorna_testo_variante(conn, content_id, piattaforma, testo):
 def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
                 formato=None, provider="template", bando_id=None, url_pubblico=None):
     asset_id = _nuovo_id()
+    adesso = _adesso()
     _insert(conn, "social_media_assets", {
         "id": asset_id, "content_id": content_id, "piattaforma": piattaforma,
         "template": template, "formato": formato, "percorso": str(percorso),
         "provider": provider, "bando_id": bando_id, "url_pubblico": url_pubblico,
-        "creato_at": _adesso()})
+        "creato_at": adesso, "aggiornato_at": adesso})
     conn.commit()
     return asset_id
 
@@ -1139,13 +1154,19 @@ def aggiorna_asset(conn, asset_id, **campi):
     a differenza di elimina_asset_di + salva_asset, non cambia l'id ne' la
     posizione nell'ordine del carosello (vedi agents.rigenera_immagine_
     singola — rigenerare una sola immagine del carosello senza toccare le
-    altre, ne' la loro sequenza)."""
+    altre, ne' la loro sequenza). aggiornato_at si aggiorna SEMPRE da solo
+    (mai passato dal chiamante, come aggiorna_content): usato in pagina per
+    mostrare quando l'immagine e' stata rigenerata l'ultima volta e per
+    invalidare la cache del browser sull'URL dell'asset (stabile, /social/
+    asset/{id}) — senza, un'immagine rigenerata poteva sembrare invariata
+    perche' il browser riusava la versione in cache dello stesso URL."""
     consentiti = {"percorso", "template", "formato", "provider", "url_pubblico"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
         return
     if "percorso" in campi:
         campi["percorso"] = str(campi["percorso"])
+    campi["aggiornato_at"] = _adesso()
     assegnazioni = ", ".join(f"{k} = ?" for k in campi)
     conn.execute(f"UPDATE social_media_assets SET {assegnazioni} WHERE id = ?",
                  (*campi.values(), asset_id))

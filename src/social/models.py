@@ -84,6 +84,24 @@ class RisultatoRicerca(BaseModel):
                     "piattaforma non e' verificato da una fonte esterna come un bando.")
 
 
+class VerificaTestoImmagine(BaseModel):
+    """Giudizio di un secondo modello (con visione) sul testo che l'AI ha
+    disegnato dentro un'immagine (badge/titolo/dati/CTA, vedi images.
+    _prompt_grafica_intera): la generazione immagini non rende il testo in
+    modo deterministico, quindi il prompt da solo non basta a garantirlo
+    corretto — serve una verifica indipendente sull'immagine finita, non
+    solo un'istruzione piu' insistente nel prompt."""
+    testo_corretto: bool = Field(
+        description="True SOLO se ogni stringa quotata e' riprodotta esattamente, "
+                    "lettera per lettera (accenti italiani inclusi), senza lettere "
+                    "mancanti, ripetute, invertite o parole troncate.")
+    problemi: list[str] = Field(
+        default_factory=list,
+        description="Elenco breve e concreto dei problemi trovati (es. 'il badge dice "
+                    "\"NUVO CONCORSO\" invece di \"NUOVO CONCORSO\"'), vuoto se "
+                    "testo_corretto=True.")
+
+
 class VarianteCopy(BaseModel):
     testo: str
     hashtags: list[str] = Field(default_factory=list)

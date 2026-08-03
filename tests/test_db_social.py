@@ -191,6 +191,35 @@ def test_get_asset_e_aggiorna_asset(conn):
     assert riga["bando_id"] == "CONC-1"
 
 
+def test_aggiorna_asset_valorizza_sempre_aggiornato_at(conn):
+    """aggiornato_at si aggiorna da solo a ogni chiamata (mai passato dal
+    chiamante, come aggiorna_content): usato in pagina per mostrare quando
+    l'immagine e' stata rigenerata l'ultima volta e per invalidare la cache
+    del browser sull'URL dell'asset (segnalato dall'utente: un'immagine
+    appena rigenerata sembrava identica a prima perche' il browser
+    riusava la versione in cache dello stesso URL)."""
+    content_id = db_social.crea_content(conn, "Test asset")
+    asset_id = db_social.salva_asset(conn, content_id, "/vecchio.png", piattaforma="instagram")
+    prima = db_social.get_asset(conn, content_id, asset_id)
+    assert prima["aggiornato_at"] is not None
+    db_social.aggiorna_asset(conn, asset_id, percorso="/nuovo.png")
+    dopo = db_social.get_asset(conn, content_id, asset_id)
+    assert dopo["aggiornato_at"] >= prima["aggiornato_at"]
+
+
+def test_aggiorna_asset_non_cambia_creato_at_ordine_carosello_invariato(conn):
+    """creato_at decide l'ordine delle slide nel carosello (vedi asset_di,
+    ORDER BY creato_at): rigenerare SOLO la prima immagine non deve farla
+    saltare in fondo alla sequenza."""
+    content_id = db_social.crea_content(conn, "Carosello di prova")
+    primo_id = db_social.salva_asset(conn, content_id, "/1.png", piattaforma="instagram",
+                                     bando_id="CONC-1")
+    db_social.salva_asset(conn, content_id, "/2.png", piattaforma="instagram", bando_id="CONC-2")
+    db_social.aggiorna_asset(conn, primo_id, percorso="/1-rigenerato.png")
+    ordine = [a["bando_id"] for a in db_social.asset_di(conn, content_id)]
+    assert ordine == ["CONC-1", "CONC-2"]
+
+
 def test_get_asset_di_altro_contenuto_ritorna_none(conn):
     content_a = db_social.crea_content(conn, "A")
     content_b = db_social.crea_content(conn, "B")

@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import sys
+from dataclasses import replace as sostituisci_campi_richiesta
 from datetime import datetime, time as ora_del_giorno, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -56,8 +57,12 @@ _STAT_PER_FUNZIONALITA = {
 
 
 def _run_llm(conn, agente, prompt_nome, schema, user_prompt, *,
-             content_id=None, provider=None):
-    """Esegue una chiamata LLM tracciata in social_agent_runs."""
+             content_id=None, provider=None, immagine_bytes=None):
+    """Esegue una chiamata LLM tracciata in social_agent_runs.
+    immagine_bytes (opzionale): allega un'immagine PNG al messaggio (vedi
+    llm.AnthropicProvider.generate_structured) — usato da
+    _verifica_testo_immagine per far giudicare a un modello con visione
+    un'immagine gia' generata, non solo per generare testo da un prompt."""
     provider = provider or llm.provider_llm(conn)
     system, versione, hash_ = prompts.prompt(prompt_nome)
     prompts.registra_tutti(conn)
@@ -68,7 +73,8 @@ def _run_llm(conn, agente, prompt_nome, schema, user_prompt, *,
         modello=getattr(provider, "modello", None))
     try:
         risultato = asyncio.run(provider.generate_structured(
-            system, user_prompt, schema, content_id=content_id, agente=agente))
+            system, user_prompt, schema, content_id=content_id, agente=agente,
+            immagine_bytes=immagine_bytes))
         token_in, token_out, costo = getattr(risultato, "_token_usage", (None, None, None))
         db_social.chiudi_agent_run(conn, run_id, "ok", token_input=token_in,
                                    token_output=token_out, costo_eur=costo)
@@ -618,6 +624,81 @@ def _strategia_fatti_per_content(conn, content):
     return categoria["strategia_fatti"] if categoria else "bandi_jobinpa"
 
 
+_TENTATIVI_VERIFICA_TESTO_IMMAGINE = 2  # generazione iniziale + al massimo 1 ritentativo
+
+
+def _verifica_testo_immagine(conn, image_bytes, richiesta, *, provider=None):
+    """Manda l'immagine generata a un modello con visione per verificare
+    che il testo composto dall'AI (badge/titolo/dati/CTA, vedi images.
+    _prompt_grafica_intera) sia riprodotto esattamente — mitigazione del
+    rischio noto e accettato quando si e' scelto di lasciare che l'AI
+    disegni il testo (vedi images.OpenAIImageProvider._genera_grafica_
+    intera): la resa testo dei modelli immagine non e' deterministica, un
+    giudizio indipendente sull'immagine finita e' l'unico modo di scoprire
+    davvero un refuso, non basta chiedere "piu' educatamente" nel prompt
+    di generazione (segnalato dall'utente: refusi ricorrenti anche col
+    prompt gia' esplicito su ortografia/accenti)."""
+    stringhe_attese = [richiesta.titolo]
+    if richiesta.sottotitolo:
+        stringhe_attese.append(richiesta.sottotitolo)
+    stringhe_attese.extend(richiesta.dati_chiave)
+    elenco = "\n".join(f'- "{s}"' for s in stringhe_attese)
+    user_prompt = (
+        "Questa immagine dovrebbe contenere ESATTAMENTE queste stringhe di testo "
+        f"(oltre a un badge in alto e a un bottone di invito all'azione in fondo):\n{elenco}\n\n"
+        "Leggi ogni parola dell'immagine e confrontala lettera per lettera con "
+        "l'elenco sopra. E' scritta correttamente, senza lettere mancanti, "
+        "ripetute, invertite, o accenti italiani sbagliati?")
+    valutazione = _run_llm(conn, "quality_risk", "verifica_testo_immagine",
+                           models.VerificaTestoImmagine, user_prompt,
+                           immagine_bytes=image_bytes, provider=provider)
+    return valutazione.testo_corretto, valutazione.problemi
+
+
+def _genera_con_verifica_testo(image_provider, richiesta, conn, *, llm_provider=None):
+    """Genera un'immagine (images.ImageProvider.generate) e, solo per i
+    template a "grafica intera" generati davvero da OpenAI (vedi images.
+    _TEMPLATE_GRAFICA_INTERA — Mock/Template non disegnano testo AI, niente
+    da verificare), verifica il testo con _verifica_testo_immagine e
+    ritenta UNA volta se trova refusi, passando i problemi trovati come
+    nota_correzione (vedi images.ImageGenerationRequest) allo stesso modo
+    di una rigenerazione manuale guidata da una nota. Mai piu' di
+    _TENTATIVI_VERIFICA_TESTO_IMMAGINE generazioni per non far esplodere
+    costo/latenza: se anche l'ultimo tentativo non e' perfetto, si usa
+    comunque — la didascalia del post resta la fonte di testo verificato,
+    l'immagine e' un accessorio visivo (vedi _genera_grafica_intera). Un
+    errore nella verifica stessa (es. rete) non deve mai bloccare la
+    pipeline: si usa l'immagine generata senza verifica.
+
+    Funzione SINCRONA apposta (non async): _verifica_testo_immagine passa
+    da _run_llm, che chiama gia' asyncio.run() al suo interno — annidare
+    quella chiamata dentro un'altra coroutine solleva "asyncio.run()
+    cannot be called from a running event loop" (bug reale riprodotto in
+    test). Ogni generate() qui sotto apre/chiude il proprio event loop con
+    asyncio.run(), in sequenza, mai innestato in un altro."""
+    generato = asyncio.run(image_provider.generate(richiesta))
+    if (richiesta.template not in images._TEMPLATE_GRAFICA_INTERA
+            or getattr(image_provider, "nome", None) != "openai_images"):
+        return generato
+    tentativo = 1
+    while tentativo < _TENTATIVI_VERIFICA_TESTO_IMMAGINE:
+        try:
+            image_bytes = Path(generato.percorso).read_bytes()
+            ok, problemi = _verifica_testo_immagine(conn, image_bytes, richiesta,
+                                                     provider=llm_provider)
+        except Exception as errore:
+            log.warning("verifica testo immagine fallita, uso comunque il risultato: %s", errore)
+            break
+        if ok:
+            break
+        log.info("refusi trovati nel testo dell'immagine, ritento (%s): %s",
+                 tentativo, "; ".join(problemi))
+        richiesta = sostituisci_campi_richiesta(richiesta, nota_correzione="; ".join(problemi))
+        generato = asyncio.run(image_provider.generate(richiesta))
+        tentativo += 1
+    return generato
+
+
 def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider=None):
     # Sovrascrive sempre: senza cancellare prima, ogni rigenerazione (anche
     # dopo una modifica al brief o "Richiedi modifiche") si limiterebbe ad
@@ -684,7 +765,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                 richiesta = _richiesta_immagine_da_bando(
                     bando, formato, content_id, categoria=categoria,
                     immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
-                asset = asyncio.run(image_provider.generate(richiesta))
+                asset = _genera_con_verifica_testo(
+                    image_provider, richiesta, conn, llm_provider=provider)
                 db_social.salva_asset(conn, content_id, asset.percorso,
                                       piattaforma=piattaforma, template=asset.template,
                                       formato=asset.formato, provider=asset.provider,
@@ -696,7 +778,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
             prompt_ai=brief.prompt_ai, content_id=content_id,
             immagini_riferimento=immagini_riferimento, stile_ai=stile_immagine)
-        asset = asyncio.run(image_provider.generate(richiesta))
+        asset = _genera_con_verifica_testo(
+            image_provider, richiesta, conn, llm_provider=provider)
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,
                               formato=asset.formato, provider=asset.provider,
@@ -726,7 +809,8 @@ def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
     return visual(conn, content_id, risultato, provider=provider, image_provider=image_provider)
 
 
-def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None, nota=None):
+def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None, nota=None,
+                              provider=None):
     """Rigenera SOLO l'immagine indicata di un carosello Instagram, senza
     toccare le altre — a differenza di rigenera_visual, che le rifà tutte
     (segnalato dall'utente: correggere una singola immagine del carosello
@@ -740,11 +824,10 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
     `nota` (opzionale, vedi web.rigenera_asset_singolo): istruzione ad-hoc
     per QUESTO tentativo (es. "sistema gli accenti nel titolo, sono usciti
     storpiati") — non persiste sulla categoria, entra solo nel prompt di
-    questa rigenerazione (vedi images._prompt_grafica_intera). Utile per
-    refusi/testo impreciso nella grafica AI (segnalato dall'utente), anche
-    se per la resa del testo — intrinsecamente non deterministica nei
-    modelli immagine — un semplice nuovo tentativo senza nota puo' gia'
-    bastare per puro caso."""
+    questa rigenerazione (vedi images._prompt_grafica_intera). Passa anche
+    da _genera_con_verifica_testo: se il risultato ha ancora refusi, un
+    secondo tentativo automatico li corregge senza bisogno che l'utente
+    rigeneri di nuovo a mano (vedi quella funzione)."""
     asset = db_social.get_asset(conn, content_id, asset_id)
     if asset is None:
         raise ValueError(f"asset inesistente: {asset_id}")
@@ -763,7 +846,7 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
         immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine,
         nota_correzione=nota)
     image_provider = image_provider or images.provider_immagini(conn)
-    nuovo = asyncio.run(image_provider.generate(richiesta))
+    nuovo = _genera_con_verifica_testo(image_provider, richiesta, conn, llm_provider=provider)
     vecchio_percorso = Path(asset["percorso"])
     db_social.aggiorna_asset(conn, asset_id, percorso=nuovo.percorso, template=nuovo.template,
                              formato=nuovo.formato, provider=nuovo.provider,

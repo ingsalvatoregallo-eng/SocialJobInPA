@@ -542,6 +542,11 @@ def _prompt_grafica_intera(request):
         "Italian text rendered directly in the image, exactly as quoted "
         "below. No other text, no placeholder lorem ipsum, no invented "
         "numbers or words beyond what is quoted here.\n\n"
+        "Text rendering is the part you most often get wrong — proofread "
+        "every quoted string character by character before finalizing: no "
+        "missing, doubled, or swapped letters, no truncated words, no wrong "
+        "or missing Italian accents (à, è, é, ì, ò, ù). Every quoted string "
+        "must match EXACTLY, including punctuation and spacing.\n\n"
         "Composition, top to bottom:\n"
         f'1. Top-left: a small rounded pill badge with a sparkle icon and this exact bold white text: "{badge_testo}".\n'
         "2. Top-right: the brand wordmark \"JobInPA\" in bold navy blue.\n"

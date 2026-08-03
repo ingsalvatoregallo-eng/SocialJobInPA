@@ -79,3 +79,49 @@ def test_anthropic_richiede_chiave(conn, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(llm.ErroreProvider):
         llm.AnthropicProvider(conn)
+
+
+class _RispostaAnthropicFinta:
+    def __init__(self, input_schema):
+        self.usage = type("Uso", (), {"input_tokens": 10, "output_tokens": 5})()
+        blocco = type("Blocco", (), {"type": "tool_use", "input": input_schema})()
+        self.content = [blocco]
+
+
+def test_anthropic_generate_structured_allega_l_immagine_quando_presente(conn, monkeypatch):
+    """immagine_bytes (vedi agents._verifica_testo_immagine) deve arrivare
+    ad Anthropic come blocco immagine nel messaggio, non solo come testo:
+    senza, un modello con visione non avrebbe nulla da guardare."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-finta")
+    provider = llm.AnthropicProvider(conn)
+    catturato = {}
+
+    async def _create_finto(**kwargs):
+        catturato.update(kwargs)
+        return _RispostaAnthropicFinta({"testo_corretto": True, "problemi": []})
+
+    provider._client.messages.create = _create_finto
+    asyncio.run(provider.generate_structured(
+        "system", "controlla questa immagine", models.VerificaTestoImmagine,
+        immagine_bytes=b"png finto"))
+
+    contenuto = catturato["messages"][0]["content"]
+    assert isinstance(contenuto, list)
+    assert contenuto[0]["type"] == "image"
+    assert contenuto[0]["source"]["media_type"] == "image/png"
+    assert contenuto[1] == {"type": "text", "text": "controlla questa immagine"}
+
+
+def test_anthropic_generate_structured_senza_immagine_manda_solo_testo(conn, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-finta")
+    provider = llm.AnthropicProvider(conn)
+    catturato = {}
+
+    async def _create_finto(**kwargs):
+        catturato.update(kwargs)
+        return _RispostaAnthropicFinta({})
+
+    provider._client.messages.create = _create_finto
+    asyncio.run(provider.generate_structured("system", "testo libero", models.RisultatoRicerca))
+
+    assert catturato["messages"][0]["content"] == "testo libero"

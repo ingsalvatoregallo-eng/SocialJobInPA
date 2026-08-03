@@ -139,6 +139,22 @@ PROMPTS = {
             "rosso = bloccare. Nel dubbio scegli SEMPRE la classe piu' severa."
         ),
     },
+    "verifica_testo_immagine": {
+        "versione": "1.0.0",
+        "system": (
+            "Confronti il testo scritto DENTRO un'immagine con l'elenco di "
+            "stringhe esatte che avrebbe dovuto contenere (badge, titolo, "
+            "eventuale sottotitolo, dati puntati, bottone). La generazione "
+            "immagini AI non rende il testo in modo affidabile: refusi, "
+            "lettere mancanti/ripetute/invertite e accenti italiani sbagliati "
+            "sono frequenti anche quando il prompt originale era corretto. "
+            "Sii molto meticoloso, guarda ogni parola una alla volta: non dare "
+            "per scontato che il testo sia giusto solo perche' il layout e' "
+            "pulito. Segnala qualunque discrepanza, anche minima (una lettera "
+            "sola, un accento mancante). Se anche una sola stringa non e' "
+            "riprodotta esattamente, testo_corretto deve essere false."
+        ),
+    },
     "community_reply": {
         "versione": "1.0.0",
         "system": (

@@ -148,6 +148,20 @@ class AnthropicProvider:
             "description": "Restituisci il risultato nello schema richiesto.",
             "input_schema": schema.model_json_schema(),
         }
+        # immagine_bytes (opzionale, vedi agents._verifica_testo_immagine):
+        # allega un'immagine al messaggio, PNG in base64 -- serve per far
+        # giudicare a un modello con visione un'immagine gia' generata
+        # (es. verificare il testo disegnato dentro una grafica AI), non
+        # solo per generare testo da un prompt libero.
+        contenuto = user_prompt
+        immagine_bytes = options.get("immagine_bytes")
+        if immagine_bytes:
+            import base64
+            contenuto = [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": base64.b64encode(immagine_bytes).decode()}},
+                {"type": "text", "text": user_prompt},
+            ]
         ultimo_errore = None
         for tentativo in range(self.max_retry):
             try:
@@ -155,7 +169,7 @@ class AnthropicProvider:
                     model=options.get("model", self.modello),
                     max_tokens=options.get("max_tokens", self.max_tokens),
                     system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": contenuto}],
                     tools=[tool],
                     tool_choice={"type": "tool", "name": "rispondi"},
                 )
@@ -201,12 +215,15 @@ class MockLLMProvider:
         self.conn = conn
         self._risposte = {}
         self.chiamate = []  # (system, user, schema) — ispezionabili nei test
+        self.immagini_ricevute = []  # immagine_bytes di ogni chiamata che ne allegava una
 
     def imposta(self, schema, istanza):
         self._risposte[schema.__name__] = istanza
 
     async def generate_structured(self, system_prompt, user_prompt, schema, **options):
         self.chiamate.append((system_prompt, user_prompt, schema))
+        if options.get("immagine_bytes"):
+            self.immagini_ricevute.append(options["immagine_bytes"])
         if self.conn is not None:
             db_social.registra_costo(self.conn, "anthropic", 0.0, modello="mock",
                                      content_id=options.get("content_id"),

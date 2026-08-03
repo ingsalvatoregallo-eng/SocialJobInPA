@@ -225,7 +225,8 @@ function riavviaConScrollSalvato() {
       <div id="{{ slider_id }}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;border-radius:var(--raggio);border:1px solid var(--colore-bordo)">
         {% for a in assets_piattaforma %}
         <div style="flex:0 0 100%;scroll-snap-align:center;position:relative">
-          <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}"
+          <img src="/social/asset/{{ a.id }}?v={{ a.aggiornato_at or a.creato_at }}"
+               alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}"
                class="asset-ingrandibile" style="width:100%;max-width:360px;margin:0 auto;display:block;cursor:zoom-in">
           {% if 'social.edit' in permessi and not in_corso and not rigenerazione_in_corso
                 and not rigenerazione_asset_in_corso and not rigenerazione_testo_in_corso %}
@@ -243,6 +244,9 @@ function riavviaConScrollSalvato() {
           </div>
           {% endif %}
           <span class="badge" style="position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.55);color:#fff;border:none">{{ loop.index }}/{{ loop.length }}</span>
+          <span class="badge" title="Ultima rigenerazione di questa immagine"
+                style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:10.5px">
+            🕒 {{ (a.aggiornato_at or a.creato_at)|data_breve }}</span>
         </div>
         {% endfor %}
       </div>
@@ -254,9 +258,10 @@ function riavviaConScrollSalvato() {
     <p class="hint" style="margin-top:6px">Scorri (trascina o usa le frecce) per vedere tutte le {{ assets_piattaforma|length }} immagini — template: {{ assets_piattaforma[0].template }} — provider: {{ assets_piattaforma[0].provider }}</p>
     {% elif assets_piattaforma %}
     {% set a = assets_piattaforma[0] %}
-    <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" class="asset-ingrandibile"
+    <img src="/social/asset/{{ a.id }}?v={{ a.aggiornato_at or a.creato_at }}" alt="asset {{ piattaforma }}" class="asset-ingrandibile"
          style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block;cursor:zoom-in">
-    <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
+    <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }} —
+      generata/aggiornata il {{ (a.aggiornato_at or a.creato_at)|data_breve }}</p>
     {% endif %}
     {% if varianti.get(piattaforma) %}
       {% if c.stato == 'BLOCKED' and 'social.approve' in permessi %}
