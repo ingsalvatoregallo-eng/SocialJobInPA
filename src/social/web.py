@@ -218,6 +218,12 @@ def _ctx(request, sessione, conn, **extra):
         "pubblicazioni_da_gestire": (
             len(db_social.lista_content(conn, stati=["APPROVED", "SCHEDULED"]))
             + len(db_social.lista_publications(conn, stato="fallito"))),
+        # Stessi stati del gruppo "errori" in contenuti() (_GRUPPI_STATO):
+        # un contenuto bloccato o con pubblicazione fallita era invisibile
+        # finche' non si cliccava per caso sulla tab giusta in Contenuti
+        # (segnalato dall'utente: vuole un segnale nel menu laterale, non
+        # solo un contatore per i pubblicati).
+        "contenuti_in_errore": len(db_social.lista_content(conn, stati=["PUBLISH_FAILED", "BLOCKED"])),
         **extra,
     }
 
@@ -545,7 +551,38 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
         # JobInPA (mai inserite a mano, vedi crea_contenuto sotto): [] se
         # l'API non e' configurata o irraggiungibile, il form lo segnala.
         promozioni_disponibili=jobinpa_client.client().promozioni(),
-        funzionalita_disponibili=jobinpa_client.client().funzionalita().get("funzionalita", [])))
+        funzionalita_disponibili=jobinpa_client.client().funzionalita().get("funzionalita", []),
+        # Vocabolari chiusi per il pannello "Ricerca avanzata" (Concorsi):
+        # stessi campi/valori della ricerca avanzata reale su jobinpa.it,
+        # compilabili a mano dall'utente invece di farli dedurre da un'AI
+        # al brief (segnalato dall'utente: vuole i filtri espliciti, non
+        # nascosti dietro un'interpretazione automatica — vedi memoria
+        # feedback_ricerca_esplicita_vs_ai). {} se l'API non e' raggiungibile.
+        filtri_disponibili=jobinpa_client.client().filtri_disponibili()))
+
+
+def _filtri_manuali_da_form(*, regione=None, categoria=None, settore=None, ente=None,
+                            competenza=None, ambito=None, inquadramento=None,
+                            titolo_studio=None, tipo_contratto=None, posti_minimi=None,
+                            lavoro_agile=None, scadenza_da=None, scadenza_a=None):
+    """Campi del pannello "Ricerca avanzata" (Concorsi, vedi nuovo_contenuto.html)
+    -> dict di filtri per agents.research()/jobinpa_client, stessa forma di
+    _filtri_da_criteri in agents.py. Solo i campi valorizzati: un checkbox
+    "lavoro_agile" non spuntato arriva come None (assente dal form), non
+    "false" -- niente filtro, non un filtro "lavoro_agile=False" implicito
+    che escluderebbe bandi non da remoto."""
+    grezzi = {
+        "regione": regione, "categoria": categoria, "settore": settore, "ente": ente,
+        "competenza": competenza, "ambito": ambito, "inquadramento": inquadramento,
+        "titolo_studio": titolo_studio, "tipo_contratto": tipo_contratto,
+        "scadenza_da": scadenza_da, "scadenza_a": scadenza_a,
+    }
+    filtri = {k: v for k, v in grezzi.items() if v and v.strip()}
+    if posti_minimi and posti_minimi.strip():
+        filtri["posti_minimi"] = int(posti_minimi)
+    if lavoro_agile:
+        filtri["lavoro_agile"] = True
+    return filtri
 
 
 def _estrai_concorso_id(testo):
@@ -566,6 +603,13 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
                    funzionalita_selezionata: Optional[list[str]] = Form(None),
                    bando_specifico: str = Form(None),
                    canali: Optional[list[str]] = Form(None),
+                   f_regione: str = Form(None), f_categoria: str = Form(None),
+                   f_settore: str = Form(None), f_ente: str = Form(None),
+                   f_competenza: str = Form(None), f_ambito: str = Form(None),
+                   f_inquadramento: str = Form(None), f_titolo_studio: str = Form(None),
+                   f_tipo_contratto: str = Form(None), f_posti_minimi: str = Form(None),
+                   f_lavoro_agile: str = Form(None), f_scadenza_da: str = Form(None),
+                   f_scadenza_a: str = Form(None), f_soglia_confidenza: str = Form(None),
                    csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Crea il contenuto e avvia SEMPRE la pipeline: la vecchia scelta fra
@@ -645,6 +689,19 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
             raise HTTPException(status_code=400, detail="Titolo obbligatorio")
     elif not titolo or not titolo.strip():
         raise HTTPException(status_code=400, detail="Titolo obbligatorio")
+    # Ricerca avanzata (Concorsi): irrilevante se un bando specifico bypassa
+    # gia' del tutto la ricerca (concorso_id impostato sopra).
+    filtri_manuali = None
+    soglia_confidenza = None
+    if categoria["strategia_fatti"] == "bandi_jobinpa" and not concorso_id:
+        filtri_manuali = _filtri_manuali_da_form(
+            regione=f_regione, categoria=f_categoria, settore=f_settore, ente=f_ente,
+            competenza=f_competenza, ambito=f_ambito, inquadramento=f_inquadramento,
+            titolo_studio=f_titolo_studio, tipo_contratto=f_tipo_contratto,
+            posti_minimi=f_posti_minimi, lavoro_agile=f_lavoro_agile,
+            scadenza_da=f_scadenza_da, scadenza_a=f_scadenza_a) or None
+        if f_soglia_confidenza and f_soglia_confidenza.strip():
+            soglia_confidenza = int(f_soglia_confidenza)
     # None (nessun campo "canali" inviato, es. form non aggiornato o
     # chiamata diretta) lascia il default di crea_content invariato
     # (entrambe le piattaforme) — solo se il campo e' presente ma svuotato
@@ -658,6 +715,8 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
                                         promo_dati=promo_dati, funzionalita_dati=funzionalita_dati,
                                         categoria_id=categoria_id, canali=canali_scelti,
                                         concorso_id=concorso_id,
+                                        filtri_manuali=filtri_manuali,
+                                        soglia_confidenza=soglia_confidenza,
                                         creato_da=sessione["utente"]["id"])
     db_social.audit(conn, "contenuto_creato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
@@ -688,6 +747,29 @@ def _errore_leggibile(errore):
     return testo
 
 
+def _motivo_breve(content):
+    """Motivo sintetico per un contenuto nel gruppo 'errori' (BLOCKED o
+    PUBLISH_FAILED, vedi _GRUPPI_STATO): senza questo la lista Contenuti
+    mostrava solo 'Fase: Bloccata' + 'Rischio: rosso', senza dire il perche'
+    — bisognava aprire il dettaglio per scoprirlo (segnalato dall'utente).
+    Un errore di pipeline (eccezione, vedi _errore_leggibile) ha sempre la
+    precedenza; per un BLOCKED senza eccezione (il caso normale: il Quality
+    & Risk Agent ha semplicemente giudicato rosso) il motivo e' il primo
+    rilievo AI o, in mancanza, la prima regola deterministica scattata."""
+    leggibile = _errore_leggibile(content["errore"])
+    if leggibile:
+        return leggibile
+    if content["stato"] == "BLOCKED" and content["punteggi_rischio"]:
+        punteggi = json.loads(content["punteggi_rischio"])
+        motivi = (punteggi.get("motivi_ai") or []) + (punteggi.get("motivi_regole") or [])
+        if motivi:
+            return motivi[0]
+    return None
+
+
+templates.env.filters["motivo_breve"] = _motivo_breve
+
+
 @router.get("/contenuti/{content_id}", response_class=HTMLResponse)
 def contenuto(request: Request, content_id: str, avviata: bool = False,
               sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
@@ -696,10 +778,19 @@ def contenuto(request: Request, content_id: str, avviata: bool = False,
         raise HTTPException(status_code=404, detail="Contenuto non trovato")
     punteggi = json.loads(content["punteggi_rischio"]) if content["punteggi_rischio"] else None
     in_corso = content["stato"] in _STATI_PIPELINE_IN_CORSO
+    categoria = db_social.get_categoria(conn, content["categoria_id"]) if content["categoria_id"] else None
     return templates.TemplateResponse(request, "contenuto.html", _ctx(
         request, sessione, conn, c=content, punteggi=punteggi,
         errore_leggibile=_errore_leggibile(content["errore"]),
         in_corso=in_corso,
+        # Pannello "Ricerca avanzata" nel form di modifica brief: solo per
+        # Concorsi, pre-compilato con i filtri manuali gia' salvati (vedi
+        # modifica_brief), stessi vocabolari chiusi del form di creazione.
+        categoria_bandi_jobinpa=bool(categoria and categoria["strategia_fatti"] == "bandi_jobinpa"),
+        filtri_disponibili=(jobinpa_client.client().filtri_disponibili()
+                            if categoria and categoria["strategia_fatti"] == "bandi_jobinpa" else {}),
+        filtri_manuali_attuali=(json.loads(content["filtri_manuali"])
+                                if content["filtri_manuali"] else {}),
         appena_in_coda=(avviata and not in_corso and not content["errore"]
                         and content["stato"] in agents.STATI_PIPELINE_AVVIABILE),
         rigenerazione_in_corso=db_social.job_in_corso(conn, "rigenera_visual", content_id),
@@ -749,6 +840,13 @@ def riporta_in_bozza(request: Request, content_id: str, csrf: str = Form(None),
 @router.post("/contenuti/{content_id}/brief")
 def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
                    brief: str = Form(None), bando_specifico: str = Form(None),
+                   f_regione: str = Form(None), f_categoria: str = Form(None),
+                   f_settore: str = Form(None), f_ente: str = Form(None),
+                   f_competenza: str = Form(None), f_ambito: str = Form(None),
+                   f_inquadramento: str = Form(None), f_titolo_studio: str = Form(None),
+                   f_tipo_contratto: str = Form(None), f_posti_minimi: str = Form(None),
+                   f_lavoro_agile: str = Form(None), f_scadenza_da: str = Form(None),
+                   f_scadenza_a: str = Form(None), f_soglia_confidenza: str = Form(None),
                    csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Modifica il tema/brief PRIMA di rilanciare la pipeline (es. dopo una
@@ -761,7 +859,13 @@ def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
     imposta content.concorso_id, che fa saltare la ricerca semantica in
     agents.research(). Se vuoto, il concorso_id gia' eventualmente
     presente NON viene toccato (nessun modo di svuotarlo da questo form:
-    solo di impostarlo)."""
+    solo di impostarlo).
+
+    f_* (Ricerca avanzata, solo Concorsi): stesso meccanismo di
+    crea_contenuto — se ANCHE UNO e' valorizzato, filtri_manuali viene
+    RISCRITTO da zero con solo i campi valorizzati qui (mai un merge coi
+    filtri precedenti: la form mostra sempre lo stato attuale, quindi
+    "vuoto" qui significa davvero "nessun filtro", non "non toccare")."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     content = db_social.get_content(conn, content_id)
@@ -780,6 +884,17 @@ def modifica_brief(request: Request, content_id: str, titolo: str = Form(...),
                 detail="Bando non trovato su JobInPA: controlla l'id o l'URL incollato")
         titolo = bando["titolo"]
         campi_concorso["concorso_id"] = concorso_id
+    categoria = db_social.get_categoria(conn, content["categoria_id"]) if content["categoria_id"] else None
+    if categoria and categoria["strategia_fatti"] == "bandi_jobinpa":
+        filtri_manuali = _filtri_manuali_da_form(
+            regione=f_regione, categoria=f_categoria, settore=f_settore, ente=f_ente,
+            competenza=f_competenza, ambito=f_ambito, inquadramento=f_inquadramento,
+            titolo_studio=f_titolo_studio, tipo_contratto=f_tipo_contratto,
+            posti_minimi=f_posti_minimi, lavoro_agile=f_lavoro_agile,
+            scadenza_da=f_scadenza_da, scadenza_a=f_scadenza_a)
+        campi_concorso["filtri_manuali"] = json.dumps(filtri_manuali) if filtri_manuali else None
+        campi_concorso["soglia_confidenza"] = (
+            int(f_soglia_confidenza) if f_soglia_confidenza and f_soglia_confidenza.strip() else None)
     db_social.aggiorna_content(conn, content_id, titolo=titolo.strip(),
                                brief=(brief or "").strip() or None, **campi_concorso)
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)

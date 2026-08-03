@@ -37,8 +37,14 @@ class _ClientFinto:
         return self._bando_singolo
 
     def bandi_semantici(self, query, *, limit=5, **filtri):
-        self.chiamate.append(("bandi_semantici", query, limit, dict(filtri)))
-        if filtri:
+        # Come il vero client: un filtro valorizzato a None equivale a
+        # "non passato" (vedi JobInPAClient.bandi_semantici, opzionali
+        # scartati se None prima di costruire i params HTTP) --
+        # _contesto_jobinpa passa sempre scadenza_da/scadenza_a come kwargs
+        # espliciti, anche quando None.
+        filtri_validi = {k: v for k, v in filtri.items() if v is not None}
+        self.chiamate.append(("bandi_semantici", query, limit, filtri_validi))
+        if filtri_validi:
             return self._bandi_semantici_con_filtri or []
         return self._bandi_semantici_senza_filtri or []
 
@@ -98,6 +104,60 @@ def test_contesto_jobinpa_ripete_senza_filtri_se_filtrati_non_trovano_nulla(conn
     assert len(chiamate_semantiche) == 2
     assert chiamate_semantiche[0][3] == {"inquadramento": "Personale sanitario"}  # primo tentativo, coi filtri
     assert chiamate_semantiche[1][3] == {}  # secondo tentativo, senza
+
+
+def test_contesto_jobinpa_fallback_mantiene_scadenza_scarta_solo_i_filtri_soft(conn):
+    """Bug segnalato dall'utente: un brief con vincolo di scadenza ("in
+    scadenza nei prossimi 7 giorni") + un filtro da vocabolario (es.
+    inquadramento, potenzialmente ambiguo) che insieme non trovano nulla
+    faceva scattare il fallback SENZA ALCUN filtro, scadenza inclusa —
+    ripescando bandi con scadenze lontanissime, perche' senza quel filtro
+    il reranking Claude non ha modo di saperlo (non vede le date). La
+    scadenza non e' un'ipotesi ambigua dell'AI come inquadramento: e' un
+    vincolo esplicito dell'utente e deve restare applicata anche nel
+    fallback."""
+    client = _ClientFinto(bandi_semantici_con_filtri=[], bandi_semantici_senza_filtri=[_BANDO_ESEMPIO])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client,
+        filtri={"inquadramento": "Personale sanitario",
+                "scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10"},
+        query_semantica="dirigenti medici in scadenza nei prossimi 7 giorni")
+    chiamate_semantiche = [c for c in client.chiamate if c[0] == "bandi_semantici"]
+    assert len(chiamate_semantiche) == 2
+    primo_filtri, secondo_filtri = chiamate_semantiche[0][3], chiamate_semantiche[1][3]
+    assert primo_filtri["inquadramento"] == "Personale sanitario"
+    assert primo_filtri["scadenza_da"] == "2026-08-03"
+    assert primo_filtri["scadenza_a"] == "2026-08-10"
+    # secondo tentativo (fallback): inquadramento scartato, scadenza NO
+    assert "inquadramento" not in secondo_filtri
+    assert secondo_filtri["scadenza_da"] == "2026-08-03"
+    assert secondo_filtri["scadenza_a"] == "2026-08-10"
+
+
+def test_contesto_jobinpa_filtri_manuali_non_hanno_fallback(conn):
+    """filtri_da_ai=False (ricerca avanzata impostata a mano dall'utente,
+    vedi web.py): zero risultati coi filtri espliciti NON deve far scattare
+    il fallback senza filtri -- un valore scelto dall'utente non e' un
+    ipotesi ambigua dell'AI da poter scartare in automatico (segnalato
+    dall'utente: vuole un risultato prevedibile, mai una reinterpretazione
+    silenziosa al posto della sua scelta esplicita)."""
+    client = _ClientFinto(bandi_semantici_con_filtri=[], bandi_semantici_senza_filtri=[_BANDO_ESEMPIO])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client, filtri={"regione": "Lombardia"},
+        query_semantica="concorsi qualsiasi", filtri_da_ai=False)
+    assert righe == []
+    chiamate_semantiche = [c for c in client.chiamate if c[0] == "bandi_semantici"]
+    assert len(chiamate_semantiche) == 1  # nessun secondo tentativo senza filtri
+
+
+def test_contesto_jobinpa_soglia_confidenza_scarta_match_deboli(conn):
+    bando_forte = dict(_BANDO_ESEMPIO, coerenza_semantica=92)
+    bando_debole = dict(_BANDO_ESEMPIO, id="CONC-2", coerenza_semantica=55)
+    client = _ClientFinto(bandi_semantici_con_filtri=[bando_forte, bando_debole])
+    contesto, righe = agents._contesto_jobinpa(
+        None, client=client, filtri={"regione": "Lombardia"},
+        query_semantica="concorsi qualsiasi", soglia_confidenza=80)
+    assert righe == [bando_forte]
 
 
 def test_contesto_jobinpa_non_ripete_se_i_filtri_trovano_gia_qualcosa(conn):

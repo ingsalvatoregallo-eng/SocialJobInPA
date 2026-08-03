@@ -63,6 +63,64 @@ function riavviaConScrollSalvato() {
     <input type="text" name="bando_specifico"
            placeholder="Incolla l'URL della scheda bando su JobInPA o il suo id">
     <p class="hint">Se compilato, salta la ricerca (brief/ricerca semantica) e usa esattamente questo bando — titolo derivato dal bando stesso. Lascia vuoto per non cambiare nulla su questo fronte.</p>
+    {% if categoria_bandi_jobinpa %}
+    <div style="margin-top:10px;padding:12px;border:1px solid var(--colore-bordo);border-radius:var(--raggio)">
+      <strong style="font-size:13px">🔍 Ricerca avanzata</strong>
+      <p class="hint" style="margin-top:2px">Se compili anche solo un campo, la ricerca userà esattamente questi valori invece dell'interpretazione automatica del brief. Lascia tutto vuoto per tornare all'interpretazione automatica.</p>
+      <div class="griglia griglia-auto" style="gap:10px">
+        <div><label>Regione</label>
+          <select name="f_regione"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('regioni', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('regione') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Categoria bando</label>
+          <select name="f_categoria"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('categorie', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('categoria') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Settore</label>
+          <select name="f_settore"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('settori', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('settore') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Ente</label>
+          <select name="f_ente"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('enti', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('ente') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Competenza</label>
+          <select name="f_competenza"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('competenze', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('competenza') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Ambito</label>
+          <select name="f_ambito"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('ambiti', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('ambito') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Inquadramento</label>
+          <select name="f_inquadramento"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('inquadramenti', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('inquadramento') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Titolo di studio</label>
+          <select name="f_titolo_studio"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('titoli_studio', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('titolo_studio') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Tipo contratto</label>
+          <select name="f_tipo_contratto"><option value="">— qualsiasi —</option>
+            {% for v in filtri_disponibili.get('tipi_contratto', []) %}<option value="{{ v }}" {{ 'selected' if filtri_manuali_attuali.get('tipo_contratto') == v }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label>Posti minimi</label>
+          <input type="number" name="f_posti_minimi" min="1" value="{{ filtri_manuali_attuali.get('posti_minimi') or '' }}"></div>
+        <div><label>Scadenza da</label>
+          <input type="date" name="f_scadenza_da" value="{{ filtri_manuali_attuali.get('scadenza_da') or '' }}"></div>
+        <div><label>Scadenza a</label>
+          <input type="date" name="f_scadenza_a" value="{{ filtri_manuali_attuali.get('scadenza_a') or '' }}"></div>
+        <div><label>Confidenza minima AI</label>
+          <select name="f_soglia_confidenza">
+            <option value="">— nessuna soglia —</option>
+            {% for s in (90, 80, 70, 60) %}<option value="{{ s }}" {{ 'selected' if c.soglia_confidenza == s }}>≥ {{ s }}%</option>{% endfor %}
+          </select></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:10px">
+        <input type="checkbox" name="f_lavoro_agile" value="1" style="width:auto" {{ 'checked' if filtri_manuali_attuali.get('lavoro_agile') }}>Solo con lavoro agile
+      </label>
+    </div>
+    {% endif %}
     <button class="btn piccolo secondario" type="submit" style="margin-top:6px">💾 Salva tema/brief</button>
   </form>
   {% else %}
@@ -149,7 +207,8 @@ function riavviaConScrollSalvato() {
       <div id="{{ slider_id }}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;border-radius:var(--raggio);border:1px solid var(--colore-bordo)">
         {% for a in assets_piattaforma %}
         <div style="flex:0 0 100%;scroll-snap-align:center;position:relative">
-          <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}" style="width:100%;max-width:360px;margin:0 auto;display:block">
+          <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }} {{ loop.index }}/{{ loop.length }}"
+               class="asset-ingrandibile" style="width:100%;max-width:360px;margin:0 auto;display:block;cursor:zoom-in">
           {% if 'social.edit' in permessi and not in_corso and not rigenerazione_in_corso
                 and not rigenerazione_asset_in_corso and not rigenerazione_testo_in_corso %}
           <div style="position:absolute;top:6px;right:6px;display:flex;gap:4px">
@@ -177,7 +236,8 @@ function riavviaConScrollSalvato() {
     <p class="hint" style="margin-top:6px">Scorri (trascina o usa le frecce) per vedere tutte le {{ assets_piattaforma|length }} immagini — template: {{ assets_piattaforma[0].template }} — provider: {{ assets_piattaforma[0].provider }}</p>
     {% elif assets_piattaforma %}
     {% set a = assets_piattaforma[0] %}
-    <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block">
+    <img src="/social/asset/{{ a.id }}" alt="asset {{ piattaforma }}" class="asset-ingrandibile"
+         style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block;cursor:zoom-in">
     <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }}</p>
     {% endif %}
     {% if varianti.get(piattaforma) %}
@@ -244,6 +304,28 @@ document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
   el.style.scrollBehavior = 'auto';
   el.scrollLeft = parseInt(salvato, 10);
   el.style.scrollBehavior = precedente;
+});
+</script>
+
+<div id="lightbox-overlay" onclick="chiudiLightbox()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center;cursor:zoom-out">
+  <img id="lightbox-img" src="" alt="Immagine ingrandita" style="max-width:92vw;max-height:92vh;border-radius:4px">
+</div>
+<script>
+function apriLightbox(src) {
+  document.getElementById('lightbox-img').src = src;
+  var overlay = document.getElementById('lightbox-overlay');
+  overlay.style.display = 'flex';
+}
+function chiudiLightbox() {
+  document.getElementById('lightbox-overlay').style.display = 'none';
+  document.getElementById('lightbox-img').src = '';
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { chiudiLightbox(); }
+});
+document.querySelectorAll('.asset-ingrandibile').forEach(function (img) {
+  img.addEventListener('click', function () { apriLightbox(img.src); });
 });
 </script>
 {% endblock %}

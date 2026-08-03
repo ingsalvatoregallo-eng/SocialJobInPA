@@ -338,6 +338,11 @@ class _ClientConBando:
     def bando(self, concorso_id):
         return self._bando if self._bando and self._bando["id"] == concorso_id else None
 
+    def filtri_disponibili(self):
+        return {"regioni": [], "categorie": [], "settori": [], "enti": [],
+                "inquadramenti": [], "titoli_studio": [], "tipi_contratto": [],
+                "competenze": [], "ambiti": []}
+
 
 def test_crea_contenuto_con_bando_specifico_deriva_titolo_e_salta_la_ricerca(conn, client, monkeypatch):
     monkeypatch.setattr("social.web.jobinpa_client.client",
@@ -391,6 +396,79 @@ def test_crea_contenuto_concorsi_senza_bando_specifico_richiede_titolo(conn, cli
     }, follow_redirects=False)
 
     assert r.status_code == 400
+
+
+# --- Ricerca avanzata: filtri espliciti stile JobInPA -----------------------
+# Segnalato dall'utente: non vuole che i filtri di ricerca restino nascosti
+# dietro l'interpretazione AI del brief -- li vuole espliciti, come sulla
+# ricerca avanzata di JobInPA (vedi memoria feedback_ricerca_esplicita_vs_ai).
+
+def test_crea_contenuto_con_ricerca_avanzata_salva_filtri_manuali(conn, client):
+    db_social.crea_utente(conn, "editor-avanzata1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-avanzata1@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "categoria_id": categoria_id, "titolo": "Concorsi medici", "csrf": csrf,
+        "f_regione": "Lombardia", "f_scadenza_da": "2026-08-03", "f_scadenza_a": "2026-08-10",
+        "f_posti_minimi": "5", "f_lavoro_agile": "1", "f_soglia_confidenza": "80",
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    content = db_social.get_content(conn, content_id)
+    import json
+    filtri = json.loads(content["filtri_manuali"])
+    assert filtri == {"regione": "Lombardia", "scadenza_da": "2026-08-03",
+                      "scadenza_a": "2026-08-10", "posti_minimi": 5, "lavoro_agile": True}
+    assert content["soglia_confidenza"] == 80
+
+
+def test_crea_contenuto_senza_ricerca_avanzata_non_salva_filtri(conn, client):
+    db_social.crea_utente(conn, "editor-avanzata2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-avanzata2@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "categoria_id": categoria_id, "titolo": "Concorsi medici", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    content = db_social.get_content(conn, content_id)
+    assert content["filtri_manuali"] is None
+    assert content["soglia_confidenza"] is None
+
+
+def test_modifica_brief_con_ricerca_avanzata_salva_e_puo_svuotare_filtri(conn, client):
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+    db_social.crea_utente(conn, "editor-avanzata3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Concorsi medici", categoria_id=categoria_id)
+    _login(client, "editor-avanzata3@test.local")
+    csrf = _csrf(client, url=f"/social/contenuti/{content_id}")
+
+    r = client.post(f"/social/contenuti/{content_id}/brief", data={
+        "titolo": "Concorsi medici", "f_regione": "Lazio", "csrf": csrf,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    import json
+    content = db_social.get_content(conn, content_id)
+    assert json.loads(content["filtri_manuali"]) == {"regione": "Lazio"}
+
+    # Riscrittura da zero: lasciare tutto vuoto svuota i filtri (non un
+    # "non toccare" -- la form mostra sempre lo stato attuale).
+    csrf = _csrf(client, url=f"/social/contenuti/{content_id}")
+    r = client.post(f"/social/contenuti/{content_id}/brief", data={
+        "titolo": "Concorsi medici", "csrf": csrf,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    content = db_social.get_content(conn, content_id)
+    assert content["filtri_manuali"] is None
 
 
 # --- Riportare in bozza un contenuto annullato -------------------------------

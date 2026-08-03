@@ -145,6 +145,36 @@ def test_costo_periodo(conn):
     assert db_social.costo_periodo(conn, "openai_images") == 0.04
 
 
+def test_crea_content_con_filtri_manuali_e_soglia_confidenza(conn):
+    """Ricerca avanzata (segnalato dall'utente: vuole gli stessi filtri
+    espliciti di JobInPA, non un'interpretazione AI nascosta): filtri_manuali
+    e soglia_confidenza si salvano e si rileggono cosi' come passati."""
+    content_id = db_social.crea_content(
+        conn, "Concorsi medici", filtri_manuali={"regione": "Lombardia", "scadenza_da": "2026-08-03"},
+        soglia_confidenza=80)
+    content = db_social.get_content(conn, content_id)
+    assert json.loads(content["filtri_manuali"]) == {"regione": "Lombardia", "scadenza_da": "2026-08-03"}
+    assert content["soglia_confidenza"] == 80
+
+
+def test_crea_content_senza_filtri_manuali_resta_none(conn):
+    content_id = db_social.crea_content(conn, "Contenuto qualsiasi")
+    content = db_social.get_content(conn, content_id)
+    assert content["filtri_manuali"] is None
+    assert content["soglia_confidenza"] is None
+
+
+def test_aggiorna_content_puo_svuotare_filtri_manuali(conn):
+    """A differenza di concorso_id (mai svuotabile), filtri_manuali deve
+    poter tornare a None: la form di modifica brief mostra sempre lo stato
+    attuale, "vuoto" li' significa davvero "nessun filtro"."""
+    content_id = db_social.crea_content(conn, "Concorsi medici",
+                                        filtri_manuali={"regione": "Lombardia"})
+    db_social.aggiorna_content(conn, content_id, filtri_manuali=None)
+    content = db_social.get_content(conn, content_id)
+    assert content["filtri_manuali"] is None
+
+
 def test_get_asset_e_aggiorna_asset(conn):
     content_id = db_social.crea_content(conn, "Test asset")
     asset_id = db_social.salva_asset(conn, content_id, "/vecchio.png", piattaforma="instagram",

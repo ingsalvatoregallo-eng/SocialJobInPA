@@ -40,7 +40,11 @@ class _ClientFinto:
         return self._bandi
 
     def bandi_semantici(self, query, *, limit=5, **filtri):
-        self.chiamate_bandi_semantici.append(dict(query=query, limit=limit, **filtri))
+        # Come il vero client: un filtro None equivale a "non passato" (vedi
+        # JobInPAClient.bandi_semantici) -- _contesto_jobinpa passa sempre
+        # scadenza_da/scadenza_a come kwargs espliciti, anche quando None.
+        filtri_validi = {k: v for k, v in filtri.items() if v is not None}
+        self.chiamate_bandi_semantici.append(dict(query=query, limit=limit, **filtri_validi))
         return self._bandi
 
     def bando(self, concorso_id):
@@ -186,6 +190,32 @@ def test_research_con_scadenza_la_passa_come_filtro_duro(conn):
     assert client.chiamate_bandi_semantici == [
         {"query": "Concorsi per medici in scadenza nei prossimi 7 giorni", "limit": 10,
          "scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10"}]
+
+
+def test_research_con_filtri_manuali_salta_interpreta_brief(conn):
+    """Ricerca avanzata (segnalato dall'utente: filtri espliciti come su
+    JobInPA, non un'interpretazione AI nascosta): con filtri_manuali
+    impostato, research() non deve chiamare interpreta_brief per niente --
+    i filtri usati sono ESATTAMENTE quelli scelti dall'utente."""
+    client = _ClientFinto(bandi=[_BANDO_INFORMATICO])
+    provider = llm.MockLLMProvider(conn)
+    content_id = db_social.crea_content(
+        conn, "Concorsi IT", brief="Novità di oggi",
+        filtri_manuali={"regione": "Lombardia", "competenza": "informatica"})
+    agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
+    assert client.chiamate_bandi_semantici == [
+        {"query": "Novità di oggi", "limit": 10, "regione": "Lombardia", "competenza": "informatica"}]
+    esecuzioni = db_social.agent_runs_recenti(conn)
+    assert not any(r["prompt_nome"] == "interpreta_brief" for r in esecuzioni)
+
+
+def test_research_con_filtri_manuali_e_zero_risultati_annulla(conn):
+    client = _ClientFinto(bandi=[])
+    provider = llm.MockLLMProvider(conn)
+    content_id = db_social.crea_content(
+        conn, "Concorsi IT", brief="Novità di oggi", filtri_manuali={"regione": "Lombardia"})
+    with pytest.raises(agents.NessunBandoCorrispondente):
+        agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
 
 
 def test_research_senza_brief_non_interpreta_niente(conn):

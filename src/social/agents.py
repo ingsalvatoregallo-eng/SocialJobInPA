@@ -104,7 +104,8 @@ def _fetch_fonte(conn, url):
 
 
 def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO, *,
-                      client=None, filtri=None, query_semantica=None):
+                      client=None, filtri=None, query_semantica=None, soglia_confidenza=None,
+                      filtri_da_ai=True):
     """Fatti dal portale JobInPA (fonte primaria autorizzata), letti via API
     private: il bando indicato con la sua classificazione AI (sintesi,
     requisiti, titolo di studio), oppure — con `query_semantica` (il brief
@@ -124,15 +125,41 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
     (embedding_filtrati non lo prevede): applicato qui come post-filtro sui
     risultati, cosi' il vincolo resta rispettato comunque.
 
-    Se la ricerca CON filtri non trova nulla, si riprova SENZA (fallback):
-    interpreta_brief puo' scegliere in modo non deterministico fra due
-    valori del vocabolario chiuso genuinamente ambigui per lo stesso brief
-    (es. inquadramento "Dirigente" vs "Personale sanitario" per un medico
-    dirigente) — un valore "sbagliato" (comunque valido, non inventato)
-    escluderebbe bandi realmente pertinenti PRIMA che la ricerca semantica
-    possa giudicarli, annullando un contenuto che invece ha fonti reali
-    (bug riprodotto: stesso identico brief, 3 chiamate, 2 volte filtri che
-    funzionano e trovano 10 bandi, 1 volta un filtro che ne trova zero).
+    Se la ricerca CON filtri non trova nulla, si riprova SENZA i filtri da
+    VOCABOLARIO (fallback): interpreta_brief puo' scegliere in modo non
+    deterministico fra due valori del vocabolario chiuso genuinamente
+    ambigui per lo stesso brief (es. inquadramento "Dirigente" vs
+    "Personale sanitario" per un medico dirigente) — un valore "sbagliato"
+    (comunque valido, non inventato) escluderebbe bandi realmente
+    pertinenti PRIMA che la ricerca semantica possa giudicarli, annullando
+    un contenuto che invece ha fonti reali (bug riprodotto: stesso identico
+    brief, 3 chiamate, 2 volte filtri che funzionano e trovano 10 bandi, 1
+    volta un filtro che ne trova zero).
+
+    scadenza_da/scadenza_a NON rientrano in questo fallback e restano
+    SEMPRE applicati, anche quando gli altri filtri vengono scartati: a
+    differenza di un valore di vocabolario (un'interpretazione dell'AI,
+    potenzialmente ambigua), sono un vincolo esplicito e univoco chiesto
+    dall'utente sulla data REALE del bando — scartarli riproporrebbe
+    esattamente il bug che dovevano risolvere (un brief con "in scadenza
+    nei prossimi 7 giorni" che ripesca bandi con scadenze lontanissime,
+    perche' senza quel filtro il reranking Claude non ha modo di saperlo:
+    non vede le date). Se anche senza gli altri filtri la finestra di
+    scadenza non trova nulla, e' corretto che la ricerca torni vuota (vedi
+    research(), annullamento se nessun bando corrisponde).
+
+    filtri_da_ai=False (filtri impostati a mano dall'utente via "ricerca
+    avanzata", vedi web.py) disattiva DEL TUTTO questo fallback: un filtro
+    scelto esplicitamente dall'utente non e' un'ipotesi ambigua da poter
+    scartare in automatico — se non trova nulla, la ricerca deve restare
+    vuota e basta (risultato prevedibile, mai una reinterpretazione
+    silenziosa al posto della scelta esplicita).
+
+    soglia_confidenza (0-100, opzionale): post-filtro sulla coerenza_
+    semantica di ogni risultato della ricerca semantica (0-100, il giudizio
+    di pertinenza dell'AI) — scarta i match che l'AI stessa giudica sotto
+    soglia, cosi' l'utente decide quanto essere permissivo invece di
+    subire una soglia fissa nascosta nel codice.
 
     Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
     se la ricerca ha trovato qualcosa (vedi research(), annullamento se la
@@ -147,11 +174,18 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
         filtri_semantici = dict(filtri or {})
         filtri_semantici.pop("query", None)  # la query e' query_semantica, non un sotto-filtro
         posti_minimi = filtri_semantici.pop("posti_minimi", None)
-        righe = client.bandi_semantici(query_semantica, limit=limite, **filtri_semantici)
-        if not righe and filtri_semantici:
-            righe = client.bandi_semantici(query_semantica, limit=limite)
+        scadenza_da = filtri_semantici.pop("scadenza_da", None)
+        scadenza_a = filtri_semantici.pop("scadenza_a", None)
+        righe = client.bandi_semantici(query_semantica, limit=limite,
+                                       scadenza_da=scadenza_da, scadenza_a=scadenza_a,
+                                       **filtri_semantici)
+        if not righe and filtri_semantici and filtri_da_ai:
+            righe = client.bandi_semantici(query_semantica, limit=limite,
+                                           scadenza_da=scadenza_da, scadenza_a=scadenza_a)
         if posti_minimi:
             righe = [r for r in righe if (r.get("num_posti") or 0) >= posti_minimi]
+        if soglia_confidenza is not None:
+            righe = [r for r in righe if (r.get("coerenza_semantica") or 0) >= soglia_confidenza]
     elif filtri:
         righe = client.bandi(limit=limite, **filtri)
     else:
@@ -327,7 +361,23 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     filtri = None
     query_semantica = None
     criteri_specifici = False
-    if not content["concorso_id"] and content["brief"]:
+    filtri_manuali_usati = False
+    if not content["concorso_id"] and content["filtri_manuali"]:
+        # Filtri "ricerca avanzata" impostati a mano dall'utente (stessi
+        # campi della ricerca avanzata di JobInPA, vedi web.py): sostituiscono
+        # DEL TUTTO interpreta_brief, nessuna interpretazione AI del brief
+        # in questo caso -- risultato prevedibile, esattamente i filtri che
+        # l'utente ha scelto (segnalato dall'utente: vuole controllo
+        # esplicito, non un'AI che deduce/nasconde i filtri dal testo
+        # libero, vedi memoria feedback_ricerca_esplicita_vs_ai). Il brief,
+        # se presente, resta la query in linguaggio naturale (il "prompt"),
+        # combinata coi filtri come vincoli duri -- stesso comportamento
+        # della ricerca avanzata reale su jobinpa.it.
+        filtri = json.loads(content["filtri_manuali"])
+        criteri_specifici = True
+        filtri_manuali_usati = True
+        query_semantica = content["brief"] or None
+    elif not content["concorso_id"] and content["brief"]:
         criteri = interpreta_brief(conn, content["brief"], provider=provider, client=client)
         if criteri.annuncio_funzionalita:
             # Il brief promuove una funzionalita'/iniziativa della piattaforma,
@@ -350,12 +400,14 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
         if criteri_specifici:
             filtri = _filtri_da_criteri(criteri)
         query_semantica = content["brief"]
-    contesto, righe_trovate = _contesto_jobinpa(content["concorso_id"], client=client,
-                                                filtri=filtri, query_semantica=query_semantica)
+    contesto, righe_trovate = _contesto_jobinpa(
+        content["concorso_id"], client=client, filtri=filtri, query_semantica=query_semantica,
+        soglia_confidenza=content["soglia_confidenza"], filtri_da_ai=not filtri_manuali_usati)
     if criteri_specifici and not righe_trovate:
         raise NessunBandoCorrispondente(
-            "Nessun bando su JobInPA pertinente al brief secondo la ricerca semantica: "
-            f"{content['brief']!r}")
+            "Nessun bando su JobInPA pertinente" +
+            (f" al brief secondo la ricerca semantica: {content['brief']!r}" if content["brief"]
+             else " ai filtri di ricerca impostati"))
     blocchi_fonte = [f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>"]
     if contesto:
         db_social.salva_source_item(conn, "jobinpa://bandi", "jobinpa.it",

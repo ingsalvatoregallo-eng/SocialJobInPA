@@ -234,6 +234,9 @@ CREATE TABLE IF NOT EXISTS social_content (
     promo_dati    TEXT,               -- JSON: dati reali della promo letti da JobInPA
     funzionalita_dati TEXT,           -- JSON: dati reali della funzionalita' (+ statistiche) da JobInPA
     categoria_id  TEXT,               -- riferimento facoltativo a social_content_categories(id)
+    filtri_manuali TEXT,              -- JSON: filtri espliciti "ricerca avanzata" (vedi web.py),
+                                      -- se valorizzato SOSTITUISCE interpreta_brief
+    soglia_confidenza INTEGER,        -- coerenza_semantica minima accettata (0-100), None = nessuna
     is_demo       INTEGER NOT NULL DEFAULT 0,
     creato_da     INTEGER,            -- utenti.id
     creato_at     TEXT NOT NULL,
@@ -613,6 +616,18 @@ def _migra(conn):
     if "categoria_id" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN categoria_id TEXT")
         conn.commit()
+    if "filtri_manuali" not in colonne_content:
+        # Filtri espliciti "ricerca avanzata" (stessi campi della ricerca
+        # avanzata di JobInPA): se valorizzati, sostituiscono interpreta_brief
+        # invece di lasciare che l'AI li deduca dal brief (segnalato
+        # dall'utente: vuole gli stessi filtri espliciti di JobInPA, non
+        # un'interpretazione nascosta -- vedi memoria
+        # feedback_ricerca_esplicita_vs_ai).
+        conn.execute("ALTER TABLE social_content ADD COLUMN filtri_manuali TEXT")
+        conn.commit()
+    if "soglia_confidenza" not in colonne_content:
+        conn.execute("ALTER TABLE social_content ADD COLUMN soglia_confidenza INTEGER")
+        conn.commit()
     colonne_categorie = {r["name"] for r in conn.execute("PRAGMA table_info(social_content_categories)")}
     if "immagini_riferimento" not in colonne_categorie:
         # Prima si supportava una sola immagine di riferimento
@@ -832,7 +847,8 @@ def audit_recenti(conn, limit=100):
 
 def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None, canali=None,
                  concorso_id=None, creato_da=None, is_demo=False, tipologia="concorso",
-                 scadenza_promo=None, promo_dati=None, funzionalita_dati=None, categoria_id=None):
+                 scadenza_promo=None, promo_dati=None, funzionalita_dati=None, categoria_id=None,
+                 filtri_manuali=None, soglia_confidenza=None):
     if tipologia not in TIPOLOGIE_CONTENUTO:
         raise ValueError(f"tipologia non valida: {tipologia}")
     pillar_id = None
@@ -850,6 +866,8 @@ def crea_content(conn, titolo, *, pillar_chiave=None, obiettivo=None, brief=None
         "funzionalita_dati": json.dumps(funzionalita_dati, ensure_ascii=False)
                              if funzionalita_dati else None,
         "categoria_id": categoria_id,
+        "filtri_manuali": json.dumps(filtri_manuali, ensure_ascii=False) if filtri_manuali else None,
+        "soglia_confidenza": soglia_confidenza,
         "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
     conn.commit()
     return content_id
@@ -877,7 +895,7 @@ def lista_content(conn, stati=None, limit=200):
 def aggiorna_content(conn, content_id, **campi):
     consentiti = {"titolo", "obiettivo", "brief", "stato", "classe_rischio", "decisione_rischio",
                   "punteggi_rischio", "canali", "programmato_at", "errore", "bandi_trovati",
-                  "concorso_id"}
+                  "concorso_id", "filtri_manuali", "soglia_confidenza"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
         return

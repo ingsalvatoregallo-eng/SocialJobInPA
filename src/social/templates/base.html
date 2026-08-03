@@ -176,7 +176,8 @@ th { color: var(--colore-testo-muto); font-weight: 600; font-size: 11.5px; text-
     <div class="sidebar-sezione">Workspace</div>
     <a href="/social/" class="{{ 'attivo' if pagina_attiva == 'panoramica' else '' }}">🏠 Panoramica</a>
     <a href="/social/calendario" class="{{ 'attivo' if pagina_attiva == 'calendario' else '' }}">🗓️ Calendario</a>
-    <a href="/social/contenuti" class="{{ 'attivo' if pagina_attiva == 'contenuti' else '' }}">📝 Contenuti</a>
+    <a href="/social/contenuti" class="{{ 'attivo' if pagina_attiva == 'contenuti' else '' }}">📝 Contenuti
+      {% if contenuti_in_errore %}<span class="badge rosso" style="margin-left:auto">{{ contenuti_in_errore }}</span>{% endif %}</a>
     <a href="/social/approvazioni" class="{{ 'attivo' if pagina_attiva == 'revisione' else '' }}">✅ Revisione
       {% if revisione_in_attesa %}<span class="badge rosso" style="margin-left:auto">{{ revisione_in_attesa }}</span>{% endif %}</a>
     <a href="/social/pubblicazioni" class="{{ 'attivo' if pagina_attiva == 'pubblicazioni' else '' }}">📣 Pubblicazioni

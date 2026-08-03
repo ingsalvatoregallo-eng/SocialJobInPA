@@ -68,6 +68,11 @@ class _ClientFinto:
     def funzionalita(self):
         return {}
 
+    def filtri_disponibili(self):
+        return {"regioni": [], "categorie": [], "settori": [], "enti": [],
+                "inquadramenti": [], "titoli_studio": [], "tipi_contratto": [],
+                "competenze": [], "ambiti": []}
+
 
 @pytest.fixture
 def client(conn, tmp_db_path):
