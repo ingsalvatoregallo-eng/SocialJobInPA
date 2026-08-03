@@ -915,16 +915,26 @@ def rigenera_immagine(request: Request, content_id: str, csrf: str = Form(None),
 
 
 @router.post("/contenuti/{content_id}/rigenera-testo")
-def rigenera_testo(request: Request, content_id: str, csrf: str = Form(None),
+def rigenera_testo(request: Request, content_id: str, note_revisore: str = Form(None),
+                   csrf: str = Form(None),
                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Rigenera solo il testo (non le immagini): tipicamente dopo aver
     tolto una o piu' immagini dal carosello, per allineare la caption
-    (es. il conteggio 'scorri le N immagini') al carosello effettivo."""
+    (es. il conteggio 'scorri le N immagini') al carosello effettivo, oppure
+    per un contenuto BLOCKED dal Quality & Risk Agent -- note_revisore
+    (opzionale, precompilato in contenuto.html coi motivi del blocco) entra
+    nel prompt del copywriter esattamente come la nota di "richiedi
+    modifiche" di un revisore umano (vedi copywriting/esegui_pipeline),
+    cosi' la nuova versione tiene conto del perche' e' stata bloccata
+    invece di riprodurre lo stesso problema."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     if db_social.get_content(conn, content_id) is None:
         raise HTTPException(status_code=404, detail="Contenuto non trovato")
-    db_social.crea_job(conn, "rigenera_copy", {"content_id": content_id})
+    payload = {"content_id": content_id}
+    if note_revisore and note_revisore.strip():
+        payload["note_revisore"] = note_revisore.strip()
+    db_social.crea_job(conn, "rigenera_copy", payload)
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
@@ -1067,17 +1077,30 @@ def approvazioni(request: Request, content_id: str = None,
 def modifica_variante(request: Request, content_id: str, piattaforma: str,
                       testo: str = Form(...), csrf: str = Form(None),
                       sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
-    """Modifica manuale del testo da parte del revisore (es. per correggere
-    o aggiungere un link): salva subito, nessuna chiamata AI, nessun costo."""
+    """Modifica manuale del testo (es. per correggere o aggiungere un link,
+    o per riscrivere a mano un post BLOCKED dal Quality & Risk Agent invece
+    di farlo rigenerare dall'AI): salva subito, nessuna chiamata AI, nessun
+    costo. Nessun vincolo sullo stato del contenuto -- lo stesso form serve
+    sia dalla coda di Revisione (AWAITING_APPROVAL) sia dalla pagina
+    Contenuto (BLOCKED)."""
     _richiedi(conn, sessione, "social.approve")
     _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
     if piattaforma not in db_social.PIATTAFORME:
         raise HTTPException(status_code=404, detail=f"piattaforma sconosciuta: {piattaforma}")
     db_social.aggiorna_testo_variante(conn, content_id, piattaforma, testo)
     db_social.audit(conn, "variante_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id,
                     dettagli={"piattaforma": piattaforma})
-    return RedirectResponse(f"/social/approvazioni?content_id={content_id}", status_code=303)
+    # Tornare a Revisione ha senso solo se il contenuto e' davvero li'
+    # (AWAITING_APPROVAL): altrimenti approvazioni() ripiegherebbe sul primo
+    # elemento della coda (o su una pagina vuota), un redirect fuorviante
+    # per chi arriva dalla pagina Contenuto di un BLOCKED.
+    if content["stato"] == "AWAITING_APPROVAL":
+        return RedirectResponse(f"/social/approvazioni?content_id={content_id}", status_code=303)
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
 @router.post("/approvazioni/{approval_id}")

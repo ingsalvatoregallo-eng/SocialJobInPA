@@ -89,3 +89,58 @@ def test_sidebar_senza_errori_non_mostra_badge(conn, client):
     _login(client, "revisore@test.local")
     pagina = client.get("/social/").text
     assert not re.search(r'Contenuti\s*<span class="badge rosso"', pagina)
+
+
+# --- Rigenerare (con le note del reviewer) o correggere a mano un BLOCKED ---
+# Segnalato dall'utente: un contenuto bloccato dal Quality & Risk Agent non
+# offriva ne' un modo di rigenerare il testo tenendo conto del motivo del
+# blocco, ne' di correggerlo a mano dalla stessa pagina.
+
+def test_pagina_contenuto_blocked_precompila_le_note_col_motivo_del_blocco(conn, client):
+    db_social.crea_utente(conn, "revisore@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
+    # Il pannello "Rigenera testo" (e le note) e' nello stesso blocco del
+    # pulsante "Rigenera immagine", condizionato ad avere gia' almeno un
+    # asset -- coerente con l'uso reale (BLOCKED e' raggiungibile solo dopo
+    # QUALITY_CHECK, che segue sempre GENERATING_VISUAL).
+    db_social.salva_asset(conn, content_id, "/finto.png", piattaforma="instagram")
+    _blocca_per_rischio(conn, content_id, "Le scadenze citate non coincidono con i fatti verificati")
+    _login(client, "revisore@test.local")
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert "Le scadenze citate non coincidono con i fatti verificati" in pagina
+    assert 'name="note_revisore"' in pagina
+
+
+def test_pagina_contenuto_non_blocked_non_mostra_note_revisore(conn, client):
+    db_social.crea_utente(conn, "revisore@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Idea qualsiasi")
+    _login(client, "revisore@test.local")
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert 'name="note_revisore"' not in pagina
+
+
+def test_pagina_contenuto_blocked_mostra_form_di_modifica_manuale(conn, client):
+    db_social.crea_utente(conn, "revisore@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
+    db_social.salva_variante(conn, content_id, "instagram", "testo originale generato")
+    _blocca_per_rischio(conn, content_id, "motivo qualsiasi")
+    _login(client, "revisore@test.local")
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert f'action="/social/approvazioni/{content_id}/variante/instagram"' in pagina
+    assert "testo originale generato" in pagina
+
+
+def test_pagina_contenuto_blocked_senza_permesso_approve_non_mostra_modifica_manuale(conn, client):
+    """editor ha social.edit (rigenerazione con note) ma non social.approve
+    (modifica manuale, riservata a chi puo' approvare/revisionare)."""
+    db_social.crea_utente(conn, "editor@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
+    db_social.salva_variante(conn, content_id, "instagram", "testo originale generato")
+    _blocca_per_rischio(conn, content_id, "motivo qualsiasi")
+    _login(client, "editor@test.local")
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+    assert f'action="/social/approvazioni/{content_id}/variante/instagram"' not in pagina

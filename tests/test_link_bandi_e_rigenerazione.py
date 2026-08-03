@@ -279,6 +279,49 @@ def test_route_modifica_variante_piattaforma_sconosciuta_404(conn, client):
     assert r.status_code == 404
 
 
+def test_route_modifica_variante_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "revisore3@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "revisore3@test.local")
+    csrf = _csrf(client)
+    r = client.post("/social/approvazioni/non-esiste/variante/instagram",
+                    data={"testo": "x", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_route_modifica_variante_awaiting_approval_torna_a_revisione(conn, client):
+    db_social.crea_utente(conn, "revisore4@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Contenuto in revisione")
+    db_social.salva_variante(conn, content_id, "instagram", "testo")
+    db_social.aggiorna_content(conn, content_id, stato="AWAITING_APPROVAL")
+    _login(client, "revisore4@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "corretto a mano", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/social/approvazioni")
+
+
+def test_route_modifica_variante_blocked_torna_al_contenuto(conn, client):
+    """Un contenuto BLOCKED non e' nella coda di Revisione (solo
+    AWAITING_APPROVAL lo e'): tornare li' mostrerebbe un elemento a caso
+    della coda invece del contenuto appena modificato, un redirect
+    fuorviante segnalato dall'utente per il flusso "correggi a mano" da
+    un BLOCKED."""
+    db_social.crea_utente(conn, "revisore5@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Contenuto bloccato")
+    db_social.salva_variante(conn, content_id, "instagram", "testo")
+    db_social.aggiorna_content(conn, content_id, stato="BLOCKED")
+    _login(client, "revisore5@test.local")
+    csrf = _csrf(client)
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "corretto a mano", "csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/social/contenuti/{content_id}"
+
+
 def test_route_rigenera_immagine_mette_in_coda_il_job(conn, client):
     db_social.crea_utente(conn, "editor-img@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")

@@ -182,6 +182,18 @@ def test_rigenera_copy_riflette_il_carosello_ridotto(conn):
     assert "carosello di 2 immagini" in prompt_instagram
 
 
+def test_rigenera_copy_con_note_revisore_le_passa_al_copywriter(conn):
+    """Un contenuto BLOCKED dal Quality & Risk Agent puo' essere rigenerato
+    passando il motivo del blocco come nota: stesso meccanismo gia' usato
+    per "richiedi modifiche" di un revisore umano (vedi copywriting)."""
+    content_id = _contenuto_con_carosello(conn)
+    provider = llm.MockLLMProvider(conn)
+    agents.rigenera_copy(conn, content_id, provider=provider,
+                         note_revisore="Le scadenze citate non coincidono coi fatti verificati")
+    prompt_instagram = next(u for (_, u, _) in provider.chiamate if "Instagram" in u)
+    assert "Le scadenze citate non coincidono coi fatti verificati" in prompt_instagram
+
+
 # --- Rotte web ----------------------------------------------------------------
 
 @pytest.fixture
@@ -286,6 +298,43 @@ def test_route_rigenera_testo_mette_in_coda_il_job(conn, client):
 
     assert r.status_code == 303
     assert db_social.job_in_corso(conn, "rigenera_copy", content_id)
+
+
+def test_route_rigenera_testo_con_note_revisore_le_mette_nel_payload(conn, client):
+    """Il form "Note per la rigenerazione" (mostrato per i contenuti BLOCKED,
+    vedi contenuto.html) mette la nota nel payload del job, cosi' il worker
+    la passa a agents.rigenera_copy(note_revisore=...)."""
+    content_id = _contenuto_con_carosello(conn)
+    db_social.crea_utente(conn, "editor-testo2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-testo2@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/rigenera-testo",
+                    data={"csrf": csrf, "note_revisore": "Le date non coincidono"},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "rigenera_copy", "Le date non coincidono")
+
+
+def test_route_rigenera_testo_con_note_revisore_il_worker_le_usa_davvero(conn, client):
+    """Catena completa rotta -> coda -> worker -> copywriting: la nota
+    arriva davvero nel prompt del copywriter, non solo nel payload del job."""
+    content_id = _contenuto_con_carosello(conn)
+    db_social.crea_utente(conn, "editor-testo3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-testo3@test.local")
+    csrf = _csrf(client)
+
+    client.post(f"/social/contenuti/{content_id}/rigenera-testo",
+               data={"csrf": csrf, "note_revisore": "Le date non coincidono"},
+               follow_redirects=False)
+    scheduler.ciclo_worker(conn, una_volta=True)
+
+    assert not db_social.job_in_corso(conn, "rigenera_copy", content_id)
+    variante = next(v for v in db_social.varianti_di(conn, content_id) if v["piattaforma"] == "instagram")
+    assert variante["testo"]  # rigenerato senza esplodere
 
 
 def test_route_rigenera_asset_singolo_mette_in_coda_il_job(conn, client):
