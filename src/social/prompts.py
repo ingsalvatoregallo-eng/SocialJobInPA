@@ -30,7 +30,7 @@ _BRAND = (
 
 PROMPTS = {
     "interpreta_brief": {
-        "versione": "1.1.0",
+        "versione": "1.2.0",
         "system": (
             "Traduci una richiesta editoriale in linguaggio naturale nei "
             "filtri REALI disponibili sull'API di JobInPA. Ti vengono forniti "
@@ -42,6 +42,13 @@ PROMPTS = {
             "specifici (tema generico, nessun numero/luogo/profilo "
             "esplicito), imposta nessun_criterio_specifico=true e lascia "
             "tutti gli altri campi vuoti.\n"
+            "Se il brief chiede un vincolo sulla SCADENZA del bando (es. "
+            "'in scadenza nei prossimi 7 giorni', 'entro fine mese'), usa la "
+            "data di oggi (fornita nel prompt utente) per calcolare "
+            "scadenza_da/scadenza_a come date concrete YYYY-MM-DD — non "
+            "lasciare la frase relativa cosi' com'e', e non impostare "
+            "nessun_criterio_specifico=true se questo e' l'unico criterio: "
+            "e' comunque un vincolo specifico da rispettare.\n"
             "Prima di tutto, distingui il TIPO di brief: se promuove un "
             "CONCORSO/BANDO pubblico (anche generico), procedi come sopra. Se "
             "invece promuove una FUNZIONALITA' o INIZIATIVA della piattaforma "

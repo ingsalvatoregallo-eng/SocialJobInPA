@@ -38,6 +38,15 @@ class CriteriRicerca(BaseModel):
     tipo_contratto: Optional[str] = None
     posti_minimi: Optional[int] = Field(default=None, ge=1)
     lavoro_agile: Optional[bool] = None
+    scadenza_da: Optional[str] = Field(
+        default=None,
+        description="Data ISO (YYYY-MM-DD): SOLO se il brief chiede un vincolo esplicito "
+                    "sulla scadenza del bando (es. 'in scadenza nei prossimi 7 giorni'). "
+                    "Calcola la data concreta usando la data di oggi fornita nel prompt "
+                    "-- non lasciare la frase relativa cosi' com'e', il confronto e' "
+                    "sulla data reale del bando, non un giudizio dell'AI.")
+    scadenza_a: Optional[str] = Field(
+        default=None, description="Data ISO (YYYY-MM-DD), vedi scadenza_da.")
     nessun_criterio_specifico: bool = Field(
         default=True,
         description="True se il brief NON chiede filtri specifici (es. tema generico "

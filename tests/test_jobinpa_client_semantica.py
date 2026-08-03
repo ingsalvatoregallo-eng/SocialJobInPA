@@ -56,6 +56,22 @@ def test_bandi_semantici_passa_solo_i_filtri_valorizzati():
     assert "titolo_studio" not in kwargs["params"]
 
 
+def test_bandi_semantici_passa_scadenza_da_e_scadenza_a():
+    """scadenza_da/scadenza_a sono l'unico modo affidabile di applicare un
+    vincolo temporale ('in scadenza nei prossimi 7 giorni'): un filtro DURO
+    lato JobInPA (applicato prima del reranking AI), non testo libero che
+    il reranking non puo' verificare (non vede le date dei bandi)."""
+    client = _client_configurato()
+    risposta_finta = mock.Mock()
+    risposta_finta.json.return_value = {"bandi": []}
+    risposta_finta.raise_for_status.return_value = None
+    with mock.patch("social.jobinpa_client.requests.get", return_value=risposta_finta) as finto:
+        client.bandi_semantici("test", scadenza_da="2026-08-03", scadenza_a="2026-08-10")
+    _, kwargs = finto.call_args
+    assert kwargs["params"]["scadenza_da"] == "2026-08-03"
+    assert kwargs["params"]["scadenza_a"] == "2026-08-10"
+
+
 def test_bandi_semantici_errore_di_rete_ritorna_lista_vuota():
     import requests
     client = _client_configurato()

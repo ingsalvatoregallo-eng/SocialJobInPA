@@ -83,6 +83,31 @@ def test_filtri_da_criteri_rinomina_query_testuale():
     assert filtri == {"query": "cybersecurity"}
 
 
+def test_filtri_da_criteri_include_scadenza():
+    """Un vincolo temporale nel brief ('in scadenza nei prossimi 7 giorni')
+    diventa scadenza_da/scadenza_a: un filtro DURO applicato PRIMA della
+    ricerca semantica, non una frase libera che il reranking di JobInPA non
+    puo' verificare (non vede le date dei bandi)."""
+    criteri = models.CriteriRicerca(scadenza_da="2026-08-03", scadenza_a="2026-08-10")
+    filtri = agents._filtri_da_criteri(criteri)
+    assert filtri == {"scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10"}
+
+
+def test_interpreta_brief_riceve_la_data_di_oggi_nel_prompt(conn):
+    """Il modello deve poter calcolare date concrete da frasi relative
+    ('prossimi 7 giorni'): serve la data di oggi nel prompt utente, non
+    solo il brief."""
+    client = _ClientFinto()
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        scadenza_da="2026-08-03", scadenza_a="2026-08-10", nessun_criterio_specifico=False))
+    agents.interpreta_brief(
+        conn, "Concorsi per medici in scadenza nei prossimi 7 giorni",
+        provider=provider, client=client)
+    _, user_prompt, _ = provider.chiamate[0]
+    assert "Data di oggi:" in user_prompt
+
+
 def test_research_con_criteri_specifici_e_bandi_trovati(conn):
     """Con un brief, la ricerca passa sempre dalla ricerca semantica (query =
     il brief stesso): posti_minimi non viene passato alla chiamata (non
@@ -143,6 +168,24 @@ def test_research_senza_criteri_specifici_non_annulla_anche_se_vuoto(conn):
         conn, "Novità della settimana", brief="Raccontiamo le novità di questa settimana")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
     assert risultato is not None  # non solleva NessunBandoCorrispondente
+
+
+def test_research_con_scadenza_la_passa_come_filtro_duro(conn):
+    """Bug segnalato dall'utente: un brief con vincolo temporale ('in
+    scadenza nei prossimi 7 giorni') non trovava nulla perche' la frase
+    finiva solo nella query semantica, che Claude non puo' verificare (non
+    vede le date). scadenza_da/scadenza_a devono arrivare come filtro
+    strutturato a bandi_semantici(), applicato PRIMA del confronto AI."""
+    client = _ClientFinto(bandi=[_BANDO_INFORMATICO])
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.CriteriRicerca, models.CriteriRicerca(
+        scadenza_da="2026-08-03", scadenza_a="2026-08-10", nessun_criterio_specifico=False))
+    content_id = db_social.crea_content(
+        conn, "Concorsi medici", brief="Concorsi per medici in scadenza nei prossimi 7 giorni")
+    agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
+    assert client.chiamate_bandi_semantici == [
+        {"query": "Concorsi per medici in scadenza nei prossimi 7 giorni", "limit": 10,
+         "scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10"}]
 
 
 def test_research_senza_brief_non_interpreta_niente(conn):

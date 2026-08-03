@@ -52,7 +52,7 @@ class JobInPAClient:
     def bandi(self, *, stato="OPEN", limit=5, solo_classificati=True, query=None,
               regione=None, categoria=None, settore=None, ente=None, competenza=None,
               ambito=None, inquadramento=None, titolo_studio=None, tipo_contratto=None,
-              posti_minimi=None, lavoro_agile=None):
+              posti_minimi=None, lavoro_agile=None, scadenza_da=None, scadenza_a=None):
         """Bandi con classificazione AI, filtrati. Lista di dict; [] se non
         configurato o in caso di errore di rete (loggato): la pipeline non
         deve mai fallire perche' il portale e' irraggiungibile."""
@@ -66,7 +66,7 @@ class JobInPAClient:
             "ente": ente, "competenza": competenza, "ambito": ambito,
             "inquadramento": inquadramento, "titolo_studio": titolo_studio,
             "tipo_contratto": tipo_contratto, "posti_minimi": posti_minimi,
-            "lavoro_agile": lavoro_agile,
+            "lavoro_agile": lavoro_agile, "scadenza_da": scadenza_da, "scadenza_a": scadenza_a,
         }
         params.update({k: v for k, v in opzionali.items() if v is not None})
         try:
@@ -78,13 +78,17 @@ class JobInPAClient:
     def bandi_semantici(self, query, *, stato="OPEN", limit=5, regione=None, categoria=None,
                        settore=None, ente=None, competenza=None, ambito=None,
                        inquadramento=None, titolo_studio=None, tipo_contratto=None,
-                       lavoro_agile=None):
+                       lavoro_agile=None, scadenza_da=None, scadenza_a=None):
         """Ricerca semantica (embedding + reranking AI lato JobInPA, vedi
         /api/internal/bandi/semantica): `query` e' il testo libero del brief,
         non un valore di vocabolario — la corrispondenza e' un giudizio di
         pertinenza dell'AI, non un match esatto sui filtri strutturati come
         in bandi(). Gli altri parametri restano vincoli duri applicati PRIMA
-        del confronto semantico. Lista di dict (bando completo + coerenza_
+        del confronto semantico — scadenza_da/scadenza_a in particolare sono
+        l'unico modo affidabile di applicare un vincolo temporale (es. "in
+        scadenza nei prossimi 7 giorni"): il reranking non vede le date dei
+        bandi, quindi non potrebbe verificarlo da solo (vedi
+        agents.interpreta_brief). Lista di dict (bando completo + coerenza_
         semantica/motivo_match); [] se non configurato, in caso di errore di
         rete, o se nessun candidato e' genuinamente pertinente."""
         if not self.configurato:
@@ -95,7 +99,7 @@ class JobInPAClient:
             "regione": regione, "categoria": categoria, "settore": settore, "ente": ente,
             "competenza": competenza, "ambito": ambito, "inquadramento": inquadramento,
             "titolo_studio": titolo_studio, "tipo_contratto": tipo_contratto,
-            "lavoro_agile": lavoro_agile,
+            "lavoro_agile": lavoro_agile, "scadenza_da": scadenza_da, "scadenza_a": scadenza_a,
         }
         params.update({k: v for k, v in opzionali.items() if v is not None})
         try:

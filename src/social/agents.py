@@ -175,10 +175,19 @@ def interpreta_brief(conn, brief, *, provider=None, client=None):
     (modello CriteriRicerca). I vocabolari chiusi (regioni/categorie/
     competenze/ambiti/...) vengono presi dal vero /api/internal/bandi/filtri
     e inseriti nel prompt: il modello puo' scegliere SOLO fra quei valori,
-    mai inventarne — stesso principio dei vocabolari chiusi lato JobInPA."""
+    mai inventarne — stesso principio dei vocabolari chiusi lato JobInPA.
+
+    La data di oggi viene passata esplicitamente nel prompt: serve al
+    modello per tradurre un vincolo temporale relativo ("in scadenza nei
+    prossimi 7 giorni") in scadenza_da/scadenza_a concreti (YYYY-MM-DD),
+    cosi' diventano un filtro DURO applicato PRIMA della ricerca semantica
+    (vedi jobinpa_client.bandi_semantici) invece di una frase libera che il
+    reranking Claude di JobInPA non puo' verificare (non vede le date)."""
     client = client or jobinpa_client.client()
     vocabolari = client.filtri_disponibili()
+    oggi = datetime.now(ZoneInfo(config.default_timezone())).date().isoformat()
     user_prompt = (
+        f"Data di oggi: {oggi}\n\n"
         f"Brief: {brief}\n\n"
         "Vocabolari chiusi disponibili (usa SOLO questi valori):\n"
         f"{json.dumps(vocabolari, ensure_ascii=False)}")
@@ -191,7 +200,7 @@ def _filtri_da_criteri(criteri):
     campi valorizzati, mai None: bandi() li tratta come "nessun filtro")."""
     campi = ("query_testuale", "regione", "categoria", "settore", "ente", "competenza",
              "ambito", "inquadramento", "titolo_studio", "tipo_contratto",
-             "posti_minimi", "lavoro_agile")
+             "posti_minimi", "lavoro_agile", "scadenza_da", "scadenza_a")
     filtri = {campo: getattr(criteri, campo) for campo in campi if getattr(criteri, campo) is not None}
     if "query_testuale" in filtri:
         filtri["query"] = filtri.pop("query_testuale")
@@ -583,6 +592,17 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             # concorsi (segnalato dall'utente: risultato troppo lontano dal
             # mockup atteso anche con lo stile immagine corretto).
             brief.template = "promozione"
+        elif categoria["strategia_fatti"] == "bandi_jobinpa":
+            # Stesso principio: il carosello (piu' di un bando, vedi sotto)
+            # usa gia' SEMPRE "nuovo_concorso" (grafica intera, vedi
+            # images._TEMPLATE_GRAFICA_INTERA), ma con un solo bando trovato
+            # niente carosello, il Visual Agent sceglieva liberamente fra
+            # TUTTI i template — anche uno dei vecchi "a sfondo intero +
+            # fascia scura che taglia l'immagine a meta'" (es. "scadenza"),
+            # tornando al problema gia' risolto per le promozioni (segnalato
+            # di nuovo dall'utente sullo stesso identico sintomo: fascia che
+            # divide l'immagine, ritaglio in alto).
+            brief.template = "nuovo_concorso"
         if categoria["prompt_ai"]:
             # Il "soggetto" dell'illustrazione non e' lasciato all'AI
             # (rischio di uno stile incoerente da un post all'altro):
