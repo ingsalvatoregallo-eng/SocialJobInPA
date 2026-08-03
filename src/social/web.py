@@ -957,11 +957,16 @@ def elimina_asset(request: Request, content_id: str, asset_id: str,
 
 @router.post("/contenuti/{content_id}/asset/{asset_id}/rigenera")
 def rigenera_asset_singolo(request: Request, content_id: str, asset_id: str,
-                           csrf: str = Form(None),
+                           nota: str = Form(None), csrf: str = Form(None),
                            sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Rigenera SOLO questa immagine del carosello, in coda come gli altri
     agenti (stesso possibile costo AI di 'Rigenera immagine'): le altre
-    immagini del carosello non vengono toccate (segnalato dall'utente)."""
+    immagini del carosello non vengono toccate (segnalato dall'utente).
+
+    `nota` (opzionale, vedi contenuto.html): istruzione ad-hoc per questo
+    tentativo (es. refusi/accenti storpiati nel testo generato dall'AI),
+    passata solo a questa rigenerazione — vedi agents.rigenera_immagine_
+    singola/images._prompt_grafica_intera."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     asset = db_social.get_asset(conn, content_id, asset_id)
@@ -971,7 +976,10 @@ def rigenera_asset_singolo(request: Request, content_id: str, asset_id: str,
         raise HTTPException(
             status_code=400,
             detail="Questa immagine non fa parte di un carosello: usa 'Rigenera immagine'")
-    db_social.crea_job(conn, "rigenera_asset_singolo", {"content_id": content_id, "asset_id": asset_id})
+    payload = {"content_id": content_id, "asset_id": asset_id}
+    if nota and nota.strip():
+        payload["nota"] = nota.strip()
+    db_social.crea_job(conn, "rigenera_asset_singolo", payload)
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 

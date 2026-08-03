@@ -420,6 +420,47 @@ def test_route_rigenera_asset_singolo_mette_in_coda_il_job(conn, client):
     assert db_social.job_in_corso(conn, "rigenera_asset_singolo", content_id)
 
 
+def test_route_rigenera_asset_singolo_con_nota_la_mette_nel_payload(conn, client):
+    """Il prompt "su cosa deve concentrarsi?" mostrato prima della
+    rigenerazione di una singola immagine (segnalato dall'utente: refusi/
+    accenti storpiati nel testo generato dall'AI) mette la nota nel
+    payload del job."""
+    content_id = _contenuto_con_carosello(conn)
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    db_social.crea_utente(conn, "editor-asset5@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset5@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera",
+                    data={"csrf": csrf, "nota": "sistema gli accenti nel titolo"},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "rigenera_asset_singolo", "sistema gli accenti nel titolo")
+
+
+def test_rigenera_immagine_singola_con_nota_la_passa_alla_richiesta_immagine(conn):
+    content_id = _contenuto_con_carosello(conn)
+    asset = next(a for a in db_social.asset_di(conn, content_id) if a["bando_id"] == "CONC-1")
+    provider = MockImageProvider()
+
+    agents.rigenera_immagine_singola(conn, content_id, asset["id"], image_provider=provider,
+                                     nota="sistema gli accenti nel titolo")
+
+    assert provider.richieste[-1].nota_correzione == "sistema gli accenti nel titolo"
+
+
+def test_rigenera_immagine_singola_senza_nota_non_la_valorizza(conn):
+    content_id = _contenuto_con_carosello(conn)
+    asset = next(a for a in db_social.asset_di(conn, content_id) if a["bando_id"] == "CONC-1")
+    provider = MockImageProvider()
+
+    agents.rigenera_immagine_singola(conn, content_id, asset["id"], image_provider=provider)
+
+    assert provider.richieste[-1].nota_correzione is None
+
+
 def test_route_rigenera_asset_singolo_inesistente_404(conn, client):
     content_id = _contenuto_con_carosello(conn)
     db_social.crea_utente(conn, "editor-asset2@test.local",

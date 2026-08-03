@@ -564,7 +564,8 @@ def _formatta_scadenza(scadenza):
 
 
 def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
-                                 immagini_riferimento=None, stile_immagine=None):
+                                 immagini_riferimento=None, stile_immagine=None,
+                                 nota_correzione=None):
     """Immagine 'nuovo_concorso' per un singolo bando di un carosello, con
     dati SEMPRE presi dal record JobInPA (mai dal modello) — stesso
     principio dei dati_chiave del VisualBrief, qui applicato quando i
@@ -594,7 +595,7 @@ def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
         template="nuovo_concorso", formato=formato, titolo=titolo_bando,
         sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id,
         prompt_ai=prompt_ai, immagini_riferimento=immagini_riferimento or [],
-        stile_ai=stile_immagine)
+        stile_ai=stile_immagine, nota_correzione=nota_correzione)
 
 
 def _categoria_per_content(conn, content):
@@ -725,7 +726,7 @@ def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
     return visual(conn, content_id, risultato, provider=provider, image_provider=image_provider)
 
 
-def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None):
+def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None, nota=None):
     """Rigenera SOLO l'immagine indicata di un carosello Instagram, senza
     toccare le altre — a differenza di rigenera_visual, che le rifà tutte
     (segnalato dall'utente: correggere una singola immagine del carosello
@@ -734,7 +735,16 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
     Serve solo per immagini legate a un bando (asset.bando_id, sempre
     presente per un'immagine di carosello, vedi visual()): non ha senso per
     l'unica immagine di una piattaforma senza carosello, dove "rigenera
-    questa" e "rigenera tutte" coincidono gia' (usa rigenera_visual)."""
+    questa" e "rigenera tutte" coincidono gia' (usa rigenera_visual).
+
+    `nota` (opzionale, vedi web.rigenera_asset_singolo): istruzione ad-hoc
+    per QUESTO tentativo (es. "sistema gli accenti nel titolo, sono usciti
+    storpiati") — non persiste sulla categoria, entra solo nel prompt di
+    questa rigenerazione (vedi images._prompt_grafica_intera). Utile per
+    refusi/testo impreciso nella grafica AI (segnalato dall'utente), anche
+    se per la resa del testo — intrinsecamente non deterministica nei
+    modelli immagine — un semplice nuovo tentativo senza nota puo' gia'
+    bastare per puro caso."""
     asset = db_social.get_asset(conn, content_id, asset_id)
     if asset is None:
         raise ValueError(f"asset inesistente: {asset_id}")
@@ -750,7 +760,8 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
     stile_immagine = categoria["stile_immagine"] if categoria else None
     richiesta = _richiesta_immagine_da_bando(
         bando, asset["formato"], content_id, categoria=categoria,
-        immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
+        immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine,
+        nota_correzione=nota)
     image_provider = image_provider or images.provider_immagini(conn)
     nuovo = asyncio.run(image_provider.generate(richiesta))
     vecchio_percorso = Path(asset["percorso"])

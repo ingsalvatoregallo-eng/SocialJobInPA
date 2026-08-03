@@ -38,7 +38,8 @@ def esegui_job(conn, job):
     if tipo == "rigenera_visual":
         return agents.rigenera_visual(conn, payload["content_id"])
     if tipo == "rigenera_asset_singolo":
-        return agents.rigenera_immagine_singola(conn, payload["content_id"], payload["asset_id"])
+        return agents.rigenera_immagine_singola(conn, payload["content_id"], payload["asset_id"],
+                                                nota=payload.get("nota"))
     if tipo == "rigenera_copy":
         return agents.rigenera_copy(conn, payload["content_id"],
                                     note_revisore=payload.get("note_revisore"))

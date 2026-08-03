@@ -85,6 +85,9 @@ class ImageGenerationRequest:
     content_id: Optional[str] = None
     immagini_riferimento: list = field(default_factory=list)  # percorsi locali, guidano /v1/images/edits
     stile_ai: Optional[str] = None  # sostituisce _STILE_OPENAI_IMAGES se valorizzato (da categoria.stile_immagine)
+    nota_correzione: Optional[str] = None  # istruzione ad-hoc per UN tentativo di rigenerazione
+    # (es. "sistema gli accenti nel titolo"), vedi agents.rigenera_immagine_singola: non persiste
+    # sulla categoria, vale solo per questo singolo tentativo.
 
 
 @dataclass
@@ -531,7 +534,7 @@ def _prompt_grafica_intera(request):
     soggetto = request.prompt_ai or f'an illustration relevant to the theme "{request.titolo}"'
     badge_testo = _ETICHETTA_TEMPLATE.get(request.template, "JOBINPA")
     cta_testo = _CTA_GRAFICA_INTERA.get(request.template, "Scopri di più su JobInPA")
-    return (
+    prompt = (
         "Design a single complete Instagram promotional graphic for JobInPA "
         "(an AI-powered job search assistant for Italian public "
         "administration jobs). A polished modern SaaS marketing graphic "
@@ -550,6 +553,19 @@ def _prompt_grafica_intera(request):
         "6. At the bottom, a full-width rounded button with a purple-to-navy "
         f'gradient, a white circular arrow icon, and this exact bold white text: "{cta_testo}".\n'
     )
+    if request.nota_correzione:
+        # Istruzione ad-hoc di chi ha chiesto la rigenerazione (es. "sistema
+        # gli accenti nel titolo, sono usciti storpiati"): il testo esatto
+        # da riprodurre resta quello quotato sopra, questa e' un'indicazione
+        # aggiuntiva su COME renderlo meglio in questo tentativo — non
+        # sostituisce mai i dati verificati (titolo/dati_chiave restano
+        # quelli passati dalla pipeline, mai testo libero dell'utente).
+        prompt += (
+            f'\nIMPORTANT correction requested for this attempt: "{request.nota_correzione}". '
+            "Pay extra attention to rendering every word correctly, including Italian "
+            "accented letters (à, è, é, ì, ò, ù) exactly as quoted above.\n"
+        )
+    return prompt
 
 
 # Formati OpenAI Images supportati da gpt-image-1/dall-e-3 (no formati

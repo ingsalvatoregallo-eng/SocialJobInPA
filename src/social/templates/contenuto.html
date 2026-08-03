@@ -230,10 +230,10 @@ function riavviaConScrollSalvato() {
           {% if 'social.edit' in permessi and not in_corso and not rigenerazione_in_corso
                 and not rigenerazione_asset_in_corso and not rigenerazione_testo_in_corso %}
           <div style="position:absolute;top:6px;right:6px;display:flex;gap:4px">
-            <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/rigenera" class="inline"
-                  onsubmit="return confirm('Rigenerare SOLO questa immagine? Le altre del carosello e il testo non cambiano. Se le immagini AI sono abilitate, questa azione ha un costo.');">
+            <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/rigenera" class="inline rigenera-asset-form">
               <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="btn piccolo secondario" type="submit" title="Rigenera solo questa immagine">🔄</button>
+              <input type="hidden" name="nota">
+              <button class="btn piccolo secondario" type="submit" title="Rigenera solo questa immagine (puoi indicare cosa correggere)">🔄</button>
             </form>
             <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/elimina"
                   onsubmit="return confirm('Togliere questa immagine dal carosello? Se vuoi che la caption rifletta il carosello ridotto, usa poi \'Rigenera testo\'.');">
@@ -330,6 +330,27 @@ document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
   el.style.scrollBehavior = 'auto';
   el.scrollLeft = parseInt(salvato, 10);
   el.style.scrollBehavior = precedente;
+});
+</script>
+
+<script>
+// Rigenerazione di una singola immagine del carosello: prima di inviare,
+// chiede un'istruzione opzionale per QUESTO tentativo (es. refusi/accenti
+// storpiati nel testo generato dall'AI, segnalato dall'utente) -- vale solo
+// per la rigenerazione in corso, non cambia la categoria ne' le altre
+// immagini. Annullare il prompt annulla l'intera azione; lasciarlo vuoto
+// e confermare fa una rigenerazione semplice, come prima.
+document.querySelectorAll('.rigenera-asset-form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var nota = prompt('Rigenerare questa immagine: su cosa deve concentrarsi? '
+      + '(lascia vuoto per una rigenerazione semplice, Annulla per non procedere)');
+    if (nota === null) { return; }
+    if (!confirm('Rigenerare SOLO questa immagine? Le altre del carosello e il testo non '
+      + 'cambiano. Se le immagini AI sono abilitate, questa azione ha un costo.')) { return; }
+    form.querySelector('input[name="nota"]').value = nota;
+    form.submit();
+  });
 });
 </script>
 

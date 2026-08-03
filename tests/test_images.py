@@ -295,6 +295,28 @@ def test_prompt_grafica_intera_senza_soggetto_usa_il_titolo_non_il_pacchetto_reg
     assert "Concorso pubblico AIFA" in prompt
 
 
+def test_prompt_grafica_intera_con_nota_correzione_la_include(conn):
+    """Un'istruzione ad-hoc per un tentativo di rigenerazione (es. refusi/
+    accenti storpiati, segnalato dall'utente) entra nel prompt come
+    correzione per QUESTO tentativo, senza sostituire il testo esatto da
+    riprodurre (titolo/dati_chiave restano quelli quotati)."""
+    richiesta = images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed",
+        titolo="Concorso pubblico Comune di Trieste", dati_chiave=["Posti: 5"],
+        nota_correzione="sistema gli accenti nel titolo, sono usciti storpiati")
+    prompt = images._prompt_grafica_intera(richiesta)
+    assert "sistema gli accenti nel titolo, sono usciti storpiati" in prompt
+    assert '"Concorso pubblico Comune di Trieste"' in prompt  # il testo esatto resta invariato
+
+
+def test_prompt_grafica_intera_senza_nota_correzione_non_la_menziona(conn):
+    richiesta = images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed",
+        titolo="Concorso pubblico Comune di Trieste", dati_chiave=[])
+    prompt = images._prompt_grafica_intera(richiesta)
+    assert "correction" not in prompt.lower()
+
+
 def test_genera_grafica_intera_invia_il_prompt_completo_a_openai(conn, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
     catturato = {}
