@@ -125,3 +125,80 @@ def test_anthropic_generate_structured_senza_immagine_manda_solo_testo(conn, mon
     asyncio.run(provider.generate_structured("system", "testo libero", models.RisultatoRicerca))
 
     assert catturato["messages"][0]["content"] == "testo libero"
+
+
+# --- Recupero da un campo lista/dict tornato come stringa JSON -------------
+# Bug reale osservato in produzione (generate_week_plan, PianoSettimanale):
+# Anthropic a volte restituisce un campo list[Model] come stringa JSON
+# invece del valore nativo, a volte perfino "ri-avvolta" (la stringa
+# contiene di nuovo la stessa chiave). model_validate() falliva sempre con
+# "Input should be a valid list", 3 tentativi identici inutili (non e' un
+# problema di rete) e il job restava a lungo 'pending' con backoff —
+# segnalato dall'utente: "Genera 3 temi" restava bloccato su "in corso"
+# per ore, anche ricaricando la pagina a mano.
+
+def test_decodifica_campi_json_annidati_stringa_semplice(conn):
+    dato = {"voci": '[{"tema": "Prova"}]'}
+    corretto = llm._decodifica_campi_json_annidati(dato, models.PianoSettimanale)
+    assert corretto["voci"] == [{"tema": "Prova"}]
+
+
+def test_decodifica_campi_json_annidati_stringa_ri_avvolta(conn):
+    """Caso reale osservato: la stringa contiene di nuovo la stessa chiave
+    ({"voci": "{\"voci\": [...]}"} invece di {"voci": [...]})."""
+    dato = {"voci": '{"voci": [{"tema": "Prova"}]}'}
+    corretto = llm._decodifica_campi_json_annidati(dato, models.PianoSettimanale)
+    assert corretto["voci"] == [{"tema": "Prova"}]
+
+
+def test_decodifica_campi_json_annidati_lascia_invariati_i_campi_gia_corretti(conn):
+    dato = {"voci": [{"tema": "Prova"}]}
+    corretto = llm._decodifica_campi_json_annidati(dato, models.PianoSettimanale)
+    assert corretto["voci"] == [{"tema": "Prova"}]
+
+
+def test_decodifica_campi_json_annidati_stringa_non_json_resta_invariata(conn):
+    """Se la stringa non e' nemmeno JSON valido, non deve esplodere: la
+    validazione originale fallira' comunque a valle, coi propri dettagli
+    sull'errore reale."""
+    dato = {"voci": "non e' json"}
+    corretto = llm._decodifica_campi_json_annidati(dato, models.PianoSettimanale)
+    assert corretto["voci"] == "non e' json"
+
+
+def test_anthropic_generate_structured_recupera_da_lista_ri_avvolta(conn, monkeypatch):
+    """Riproduce esattamente il bug osservato in produzione: il tool_use
+    restituisce {"voci": "{\"voci\": [...]}"} invece di {"voci": [...]} --
+    generate_structured deve comunque produrre un PianoSettimanale valido
+    al primo tentativo, senza scaricare l'errore sul chiamante/sul job."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-finta")
+    provider = llm.AnthropicProvider(conn)
+    voce = {"tema": "Concorso della settimana", "pillar": "opportunita", "obiettivo": "traffico",
+           "fascia_oraria": "12:00-14:00", "giorno_settimana": "martedi",
+           "categoria_nome": "Concorsi"}
+    import json as json_
+    input_malformato = {"voci": json_.dumps({"voci": [voce]})}
+
+    async def _create_finto(**kwargs):
+        return _RispostaAnthropicFinta(input_malformato)
+
+    provider._client.messages.create = _create_finto
+    risultato = asyncio.run(provider.generate_structured("system", "user", models.PianoSettimanale))
+
+    assert len(risultato.voci) == 1
+    assert risultato.voci[0].tema == "Concorso della settimana"
+
+
+def test_anthropic_generate_structured_rilancia_se_ancora_non_valido(conn, monkeypatch):
+    """Se anche dopo il tentativo di recupero i dati restano non validi
+    (non e' il bug noto, e' un errore diverso), l'eccezione originale deve
+    comunque risalire -- niente fallimento silenzioso."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-finta")
+    provider = llm.AnthropicProvider(conn, max_retry=1)
+
+    async def _create_finto(**kwargs):
+        return _RispostaAnthropicFinta({"voci": "questo non e' json ne' una lista"})
+
+    provider._client.messages.create = _create_finto
+    with pytest.raises(llm.ErroreProvider):
+        asyncio.run(provider.generate_structured("system", "user", models.PianoSettimanale))

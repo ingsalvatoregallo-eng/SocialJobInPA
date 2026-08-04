@@ -111,6 +111,37 @@ class CircuitBreaker:
             self.aperto_fino_a = time.monotonic() + self.cooldown
 
 
+def _decodifica_campi_json_annidati(dato, schema):
+    """Bug noto e osservato (Anthropic tool-use, schemi con un campo
+    list[Model] annidato, es. PianoSettimanale.voci): a volte il modello
+    restituisce un campo lista/dict come STRINGA JSON invece del valore
+    nativo — a volte perfino ri-avvolto ({"voci": "{\"voci\": [...]}"} —
+    la stringa contiene di nuovo la stessa chiave). Senza questa
+    normalizzazione, model_validate() fallisce sempre con "Input should be
+    a valid list", la chiamata viene ritentata inutilmente 3 volte (stesso
+    errore ogni volta, non e' un problema di rete) e il job risultante
+    resta a lungo 'pending' con backoff — segnalato dall'utente: "Genera 3
+    temi" restava bloccato su "in corso" per ore, anche ricaricando la
+    pagina a mano, perche' il job falliva e ripartiva in continuazione con
+    lo stesso identico errore strutturale."""
+    if not isinstance(dato, dict):
+        return dato
+    corretto = dict(dato)
+    for nome_campo in schema.model_fields:
+        valore = corretto.get(nome_campo)
+        if not isinstance(valore, str):
+            continue
+        try:
+            decodificato = json.loads(valore)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(decodificato, dict) and nome_campo in decodificato:
+            corretto[nome_campo] = decodificato[nome_campo]
+        else:
+            corretto[nome_campo] = decodificato
+    return corretto
+
+
 # --- Anthropic ---------------------------------------------------------------
 
 class AnthropicProvider:
@@ -181,7 +212,16 @@ class AnthropicProvider:
                     agente=options.get("agente"), token_input=token_in,
                     token_output=token_out)
                 blocco = next(b for b in risposta.content if b.type == "tool_use")
-                risultato = schema.model_validate(blocco.input)
+                try:
+                    risultato = schema.model_validate(blocco.input)
+                except ValidationError:
+                    # Ritenta con i campi lista/dict tornati come stringa
+                    # JSON normalizzati (vedi _decodifica_campi_json_annidati):
+                    # se anche cosi' non valida, l'eccezione originale
+                    # risale al blocco except sotto, stesso comportamento
+                    # di prima di questo tentativo di recupero.
+                    risultato = schema.model_validate(
+                        _decodifica_campi_json_annidati(blocco.input, schema))
                 self.circuit.successo()
                 # attributo di servizio per agent_runs (object.__setattr__:
                 # Pydantic v2 non consente attributi arbitrari via assegnazione)
