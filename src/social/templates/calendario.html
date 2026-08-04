@@ -23,6 +23,16 @@
 <script>setTimeout(function () { location.reload(); }, 4000);</script>
 {% endif %}
 
+{% if nessuna_categoria_idonea %}
+<div class="avviso rosso">
+  ⚠️ <strong>Nessuna categoria idonea nel backoffice.</strong> "Genera 3 temi" sceglie i temi
+  fra le Categorie censite in <a href="/social/categorie">Categorie</a> con strategia
+  "Concorsi (bandi JobInPA)" o "Libera" — le categorie "Promozioni"/"Funzionalità" richiedono
+  di selezionare a mano una promozione/funzionalità reale, un passaggio che il piano
+  settimanale automatico non prevede. Crea almeno una categoria idonea prima di generare.
+</div>
+{% endif %}
+
 {% if altre_settimane_suggerimenti %}
 <div class="avviso giallo">
   ⚠️ Ci sono temi suggeriti dall'AI in altre settimane:
@@ -91,6 +101,11 @@
       <input type="text" name="tema" value="{{ s.tema }}" required>
       <label>Obiettivo</label>
       <input type="text" name="obiettivo" value="{{ s.obiettivo or '' }}">
+      <label>Categoria</label>
+      <select name="categoria_id">
+        <option value="">Nessuna (tema generico, senza personalizzazioni)</option>
+        {% for c in categorie %}<option value="{{ c.id }}" {{ 'selected' if c.id == s.categoria_id else '' }}>{{ c.nome }}</option>{% endfor %}
+      </select>
       <div style="display:flex;gap:8px">
         <div style="flex:1">
           <label>Pillar</label>

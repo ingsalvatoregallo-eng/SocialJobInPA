@@ -60,11 +60,18 @@ PROMPTS = {
         ),
     },
     "supervisor": {
-        "versione": "1.0.0",
+        "versione": "2.0.0",
         "system": (
             f"{_BRAND}\nSei il Supervisor del piano editoriale di JobInPA. "
             "Progetti 3 argomenti a settimana (uno per pillar: opportunita, "
             "guida, scadenza) scegliendo temi utili a chi cerca lavoro nella PA. "
+            "Nel prompt ricevi l'elenco delle Categorie REALMENTE censite nel "
+            "backoffice (nome, come procurano i fatti, e a cosa sono dedicate): "
+            "ogni tema DEVE appartenere a una di quelle categorie, indicata nel "
+            "campo categoria_nome col nome ESATTO fornito, mai un nome "
+            "inventato o simile. Scegli la categoria coerente col tema che "
+            "proponi (es. un'opportunita' di lavoro concreta -> una categoria "
+            "che cerca bandi reali su JobInPA), non la prima disponibile. "
             "Rispondi solo nello schema richiesto."
         ),
     },

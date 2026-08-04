@@ -302,3 +302,94 @@ def test_calendario_mostra_contenuto_programmato_non_legato_al_piano(conn, clien
 def _prossimo_lunedi():
     oggi = datetime.now(timezone.utc).date()
     return oggi - timedelta(days=oggi.weekday()) + timedelta(weeks=1)
+
+
+# --- "Genera 3 temi" riusa le Categorie censite, mai temi generici ----------
+# Segnalato dall'utente: il piano settimanale generava temi "a tema
+# concorsi" per coincidenza (default senza categoria) invece di riusare
+# davvero prompt/stile/struttura configurati nel backoffice, e generava
+# sempre anche la variante LinkedIn pur disabilitato.
+
+def test_route_genera_piano_blocca_senza_categoria_idonea(conn, client):
+    # "Concorsi" (bandi_jobinpa) e' seminata di default (vedi
+    # db_social._migra): va rimossa per simulare davvero "nessuna categoria
+    # idonea".
+    concorsi = next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+    db_social.elimina_categoria(conn, concorsi["id"])
+    db_social.crea_utente(conn, "editor-piano1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-piano1@test.local")
+    csrf = _csrf(client, "/social/calendario")
+    lunedi = _prossimo_lunedi().isoformat()
+
+    r = client.post("/social/calendario/genera", data={"settimana": lunedi, "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert "errore=nessuna_categoria" in r.headers["location"]
+    assert not db_social.job_in_corso(conn, "generate_week_plan", lunedi)
+
+
+def test_route_genera_piano_mette_in_coda_con_categoria_idonea(conn, client):
+    # "Concorsi" (bandi_jobinpa) e' gia' seminata di default.
+    db_social.crea_utente(conn, "editor-piano2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-piano2@test.local")
+    csrf = _csrf(client, "/social/calendario")
+    lunedi = _prossimo_lunedi().isoformat()
+
+    r = client.post("/social/calendario/genera", data={"settimana": lunedi, "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert "errore" not in r.headers["location"]
+    assert db_social.job_in_corso(conn, "generate_week_plan", lunedi)
+
+
+def test_route_aggiungi_contenuto_giorno_rispetta_i_canali_abilitati(conn, client):
+    """Stesso bug LinkedIn, secondo percorso di creazione (il modulo rapido
+    '+ Aggiungi contenuto' su un giorno del Calendario, che bypassava
+    canali_abilitati allo stesso modo di accetta_plan_entry)."""
+    account_instagram = db_social.account_per_piattaforma(conn, "instagram")
+    db_social.aggiorna_account(conn, account_instagram["id"], publishing_enabled=1)
+    db_social.crea_utente(conn, "editor-piano4@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-piano4@test.local")
+    csrf = _csrf(client, "/social/calendario")
+    giorno = _prossimo_lunedi().isoformat()
+
+    client.post("/social/calendario/giorno/aggiungi",
+               data={"giorno": giorno, "titolo": "Idea rapida", "csrf": csrf},
+               follow_redirects=False)
+
+    content = next(c for c in db_social.lista_content(conn) if c["titolo"] == "Idea rapida")
+    assert json.loads(content["canali"]) == ["instagram"]
+
+
+def test_route_calendario_mostra_avviso_nessuna_categoria(conn, client):
+    db_social.crea_utente(conn, "viewer-piano@test.local",
+                          auth.hash_password("Password123!"), ruolo="viewer")
+    _login(client, "viewer-piano@test.local")
+    pagina = client.get("/social/calendario?errore=nessuna_categoria").text
+    assert "Nessuna categoria idonea" in pagina
+
+
+def test_route_accetta_suggerimento_categoria_esplicita_sovrascrive(conn, client):
+    categoria_supervisor = db_social.crea_categoria(conn, "Bandi test", strategia_fatti="bandi_jobinpa")
+    categoria_scelta = db_social.crea_categoria(conn, "Guide", strategia_fatti="libera")
+    entry_id = db_social.crea_plan_entry(conn, _prossimo_lunedi().isoformat(), "Tema",
+                                         giorno=_prossimo_lunedi().isoformat(),
+                                         categoria_id=categoria_supervisor)
+    db_social.crea_utente(conn, "editor-piano3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-piano3@test.local")
+    csrf = _csrf(client, "/social/calendario")
+
+    r = client.post(f"/social/calendario/{entry_id}/accetta",
+                    data={"tema": "Tema", "categoria_id": categoria_scelta, "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    voce = db_social.plan_entry(conn, entry_id)
+    content = db_social.get_content(conn, voce["content_id"])
+    assert content["categoria_id"] == categoria_scelta

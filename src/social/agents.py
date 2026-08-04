@@ -45,6 +45,18 @@ class NessunBandoCorrispondente(Exception):
     scrivere un post su un risultato vuoto (vedi esegui_pipeline)."""
 
 
+class NessunaCategoriaIdonea(Exception):
+    """Nessuna categoria censita nel backoffice ha strategia_fatti
+    'bandi_jobinpa' o 'libera' (vedi supervisor_pianifica_settimana):
+    'promozioni_jobinpa'/'funzionalita_jobinpa' richiedono di selezionare
+    a mano una promozione/funzionalita' reale e attiva da JobInPA, un
+    passaggio che il piano settimanale automatico non prevede. Senza
+    almeno una categoria idonea non c'e' nulla da cui il Supervisor possa
+    scegliere in modo coerente (segnalato dall'utente: i temi generati
+    senza categoria ignoravano prompt/stile/struttura configurati nel
+    backoffice)."""
+
+
 # Quale statistica aggregata (da /api/internal/funzionalita, vedi
 # research()) citare per ciascuna funzionalita', quando pertinente: un
 # numero reale e verificabile invece di un generico "molto usata".
@@ -940,27 +952,75 @@ def _giorno_da_settimana(settimana, giorno_settimana):
     return (lunedi + timedelta(days=indice)).isoformat()
 
 
+_STRATEGIE_IDONEE_SUPERVISOR = {"bandi_jobinpa", "libera"}
+_DESCRIZIONE_STRATEGIA_SUPERVISOR = {
+    "bandi_jobinpa": "cerca bandi/concorsi pubblici reali su JobInPA in base al tema",
+    "libera": "il tema stesso e' il fatto da riportare, sempre con revisione umana prima "
+             "della pubblicazione",
+}
+
+
+def categorie_idonee_supervisor(conn):
+    """Categorie che il Supervisor puo' scegliere per un tema del piano
+    settimanale automatico (vedi supervisor_pianifica_settimana):
+    'promozioni_jobinpa'/'funzionalita_jobinpa' sono escluse, richiedono di
+    selezionare a mano una promozione/funzionalita' reale e attiva da
+    JobInPA (vedi web.crea_contenuto) — un passaggio che questo flusso
+    automatico non prevede."""
+    return [c for c in db_social.lista_categorie(conn)
+           if c["strategia_fatti"] in _STRATEGIE_IDONEE_SUPERVISOR]
+
+
 def supervisor_pianifica_settimana(conn, settimana, *, provider=None):
     """Genera il piano dei 3 argomenti per la settimana (lunedi' ISO) come
     SUGGERIMENTI (stato 'suggerito', nessun contenuto creato ancora): un
     umano li accetta, modifica o scarta dal Calendario (vedi
     db_social.accetta_plan_entry/elimina_plan_entry) prima che diventino
-    contenuti veri e venga speso budget AI sulla pipeline completa."""
+    contenuti veri e venga speso budget AI sulla pipeline completa.
+
+    Ogni tema DEVE appartenere a una categoria REALMENTE censita nel
+    backoffice (vedi categorie_idonee_supervisor): senza, un suggerimento
+    accettato diventava un contenuto "generico" che ignorava prompt
+    illustrazione/stile/struttura configurati per quella categoria —
+    sembrava a tema concorsi solo perche' 'bandi_jobinpa' e' il default
+    quando categoria_id e' vuoto, non perche' seguisse davvero lo schema
+    della categoria "Concorsi" (segnalato dall'utente). Solleva
+    NessunaCategoriaIdonea se non esiste nessuna categoria idonea: meglio
+    bloccare la generazione che proporre temi senza nessuna categoria reale
+    a cui appoggiarsi."""
+    categorie = categorie_idonee_supervisor(conn)
+    if not categorie:
+        raise NessunaCategoriaIdonea(
+            "nessuna categoria con strategia 'Concorsi (bandi JobInPA)' o 'Libera' nel backoffice")
+    categorie_per_nome = {c["nome"]: c for c in categorie}
+    righe_categorie = "\n".join(
+        f'- "{c["nome"]}": {_DESCRIZIONE_STRATEGIA_SUPERVISOR[c["strategia_fatti"]]}'
+        + (f' — soggetto tipico: {c["prompt_ai"][:150]}' if c["prompt_ai"] else "")
+        for c in categorie)
     contesto, _righe = _contesto_jobinpa(None, limite=5)
     piano = _run_llm(
         conn, "supervisor", "supervisor", models.PianoSettimanale,
         f"Settimana del {settimana}. Bandi aperti di riferimento:\n"
-        f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>\n"
+        f"<fonte origine=\"database JobInPA\">\n{contesto}\n</fonte>\n\n"
+        "Categorie disponibili (scegli SOLO fra queste per categoria_nome, "
+        f"mai un nome diverso):\n{righe_categorie}\n\n"
         "Proponi 3 argomenti, uno per pillar (opportunita, guida, scadenza), "
-        "ciascuno con il giorno della settimana piu' adatto.",
+        "ciascuno con il giorno della settimana piu' adatto e la categoria "
+        "piu' coerente col tema.",
         provider=provider)
     creati = []
     for voce in piano.voci[:db_social.get_setting(conn, "argomenti_settimanali", 3)]:
         pillar = voce.pillar if voce.pillar in {"opportunita", "guida", "scadenza"} else "guida"
         giorno = _giorno_da_settimana(settimana, voce.giorno_settimana)
-        entry_id = db_social.crea_plan_entry(conn, settimana, voce.tema, pillar_chiave=pillar,
-                                             obiettivo=voce.obiettivo,
-                                             fascia_oraria=voce.fascia_oraria, giorno=giorno)
+        # Nome fuori dal vocabolario fornito (il modello ha sbagliato/
+        # inventato): categoria_id resta None piuttosto che indovinare —
+        # stesso principio dei vocabolari chiusi altrove (es.
+        # interpreta_brief), mai un valore che non esiste davvero.
+        categoria = categorie_per_nome.get(voce.categoria_nome)
+        entry_id = db_social.crea_plan_entry(
+            conn, settimana, voce.tema, pillar_chiave=pillar, obiettivo=voce.obiettivo,
+            fascia_oraria=voce.fascia_oraria, giorno=giorno,
+            categoria_id=categoria["id"] if categoria else None)
         creati.append(entry_id)
     db_social.audit(conn, "piano_settimanale", agente="supervisor",
                     oggetto_tipo="plan", oggetto_id=settimana,

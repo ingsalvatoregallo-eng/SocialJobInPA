@@ -148,6 +148,11 @@ class VoceCalendario(BaseModel):
     giorno_settimana: str = Field(
         description="uno tra: lunedi, martedi, mercoledi, giovedi, venerdi, sabato, domenica — "
                     "il giorno della settimana in cui proporre di pubblicare questo tema")
+    categoria_nome: str = Field(
+        description="il nome ESATTO di una delle categorie fornite nel prompt (vocabolario "
+                    "chiuso) — mai un nome inventato o simile-ma-non-uguale. Il tema deve "
+                    "essere coerente con quella categoria (es. un tema su un concorso -> una "
+                    "categoria che cerca bandi JobInPA, non una categoria libera generica).")
 
 
 class PianoSettimanale(BaseModel):

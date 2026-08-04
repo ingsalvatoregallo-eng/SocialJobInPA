@@ -370,7 +370,7 @@ _NOMI_GIORNI = ("Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom")
 
 
 @router.get("/calendario", response_class=HTMLResponse)
-def calendario(request: Request, settimana: Optional[str] = None,
+def calendario(request: Request, settimana: Optional[str] = None, errore: Optional[str] = None,
                sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     if settimana:
         inizio = datetime.strptime(settimana, "%Y-%m-%d").date()
@@ -415,13 +415,16 @@ def calendario(request: Request, settimana: Optional[str] = None,
         (s, n) for s, n in conteggio_settimane.items() if s != settimana_iso)
 
     generazione_in_corso = db_social.job_in_corso(conn, "generate_week_plan", settimana_iso)
+    categorie = db_social.lista_categorie(conn)
 
     return templates.TemplateResponse(request, "calendario.html", _ctx(
         request, sessione, conn, giorni=giorni, suggerimenti=suggerimenti,
         pillars=db_social.pillars(conn),
+        categorie=categorie,
         altre_settimane_suggerimenti=altre_settimane_suggerimenti,
         corrente=settimana_iso,
         generazione_in_corso=generazione_in_corso,
+        nessuna_categoria_idonea=(errore == "nessuna_categoria"),
         precedente=(inizio - timedelta(weeks=1)).isoformat(),
         successiva=(inizio + timedelta(weeks=1)).isoformat()))
 
@@ -431,6 +434,16 @@ def genera_piano(request: Request, settimana: str = Form(...), csrf: str = Form(
                  sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
+    # Verificato SUBITO (non nel job in background): senza almeno una
+    # categoria idonea (vedi agents.categorie_idonee_supervisor) non c'e'
+    # nulla di sensato da generare, e un job in coda destinato a fallire
+    # 5 volte con backoff (prima di finire "morto") sarebbe un errore
+    # silenzioso, mai visibile qui come i job falliti in passato
+    # (segnalato dall'utente: "Genera 3 temi" deve riusare le Categorie,
+    # non inventare temi liberi).
+    if not agents.categorie_idonee_supervisor(conn):
+        return RedirectResponse(
+            f"/social/calendario?settimana={settimana}&errore=nessuna_categoria", status_code=303)
     db_social.crea_job(conn, "generate_week_plan", {"settimana": settimana})
     return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
 
@@ -438,17 +451,21 @@ def genera_piano(request: Request, settimana: str = Form(...), csrf: str = Form(
 @router.post("/calendario/{entry_id}/accetta")
 def accetta_suggerimento(request: Request, entry_id: str, tema: str = Form(...),
                          pillar: str = Form(None), obiettivo: str = Form(None),
-                         giorno: str = Form(None), csrf: str = Form(None),
+                         giorno: str = Form(None), categoria_id: str = Form(None),
+                         csrf: str = Form(None),
                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Accetta (eventualmente modificato: i campi arrivano dal form della
     card, editabile) un suggerimento: crea il contenuto vero e avvia subito
-    la pipeline — accettare un tema equivale a dire "procedi"."""
+    la pipeline — accettare un tema equivale a dire "procedi". categoria_id
+    puo' sovrascrivere quella scelta dal Supervisor (menu a tendina nella
+    card, vedi calendario.html) prima di trasformarla in contenuto vero."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     settimana = request.query_params.get("settimana") or _lunedi().isoformat()
     content_id = db_social.accetta_plan_entry(
         conn, entry_id, tema=tema.strip(), pillar_chiave=pillar or None,
         obiettivo=obiettivo or None, giorno=giorno or None,
+        categoria_id=categoria_id or None,
         creato_da=sessione["utente"]["id"])
     if content_id is None:
         raise HTTPException(status_code=404, detail="Suggerimento non trovato o gia' accettato")
@@ -480,8 +497,13 @@ def aggiungi_contenuto_giorno(request: Request, giorno: str = Form(...),
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
     settimana = _lunedi(datetime.strptime(giorno, "%Y-%m-%d").date()).isoformat()
+    # canali=canali_abilitati(conn): stesso fix di accetta_plan_entry, mai
+    # il default "tutte le piattaforme" di crea_content (segnalato
+    # dall'utente per LinkedIn, stesso bug su questo secondo percorso di
+    # creazione che lo bypassava allo stesso modo).
     content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
-                                        creato_da=sessione["utente"]["id"])
+                                        creato_da=sessione["utente"]["id"],
+                                        canali=db_social.canali_abilitati(conn))
     db_social.crea_plan_entry(conn, settimana, titolo.strip(), pillar_chiave=pillar or None,
                              content_id=content_id, giorno=giorno)
     return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
@@ -538,11 +560,7 @@ def nuovo_contenuto_form(request: Request, sessione=Depends(utente_web),
     # (testo + immagine) per un canale su cui non si puo' comunque
     # pubblicare (segnalato dall'utente per LinkedIn, in attesa di
     # approvazione Community Management API).
-    canali_abilitati = []
-    for _piattaforma in db_social.PIATTAFORME:
-        _account = db_social.account_per_piattaforma(conn, _piattaforma)
-        if _account and _account["publishing_enabled"]:
-            canali_abilitati.append(_piattaforma)
+    canali_abilitati = db_social.canali_abilitati(conn)
     return templates.TemplateResponse(request, "nuovo_contenuto.html", _ctx(
         request, sessione, conn, pillars=db_social.pillars(conn),
         categorie=db_social.lista_categorie(conn),

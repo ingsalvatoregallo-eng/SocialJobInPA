@@ -213,7 +213,9 @@ def test_e2e_richiesta_modifiche_e_nuovo_giro(conn):
 
 def test_e2e_supervisor_genera_piano_settimanale(conn):
     """Il Supervisor crea SUGGERIMENTI (non contenuti): serve un Accetta
-    esplicito prima che diventino contenuti veri (vedi test_calendario_giorno.py)."""
+    esplicito prima che diventino contenuti veri (vedi test_calendario_giorno.py).
+    Nessuna categoria da creare: "Concorsi" (bandi_jobinpa) e' gia' seminata
+    di default su ogni DB (vedi db_social._migra)."""
     creati = agents.supervisor_pianifica_settimana(
         conn, "2026-07-27", provider=llm.MockLLMProvider(conn))
     assert len(creati) == 3

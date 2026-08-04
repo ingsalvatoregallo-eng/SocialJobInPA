@@ -578,6 +578,15 @@ def _migra(conn):
     if "giorno" not in colonne_plans:
         conn.execute("ALTER TABLE social_editorial_plans ADD COLUMN giorno TEXT")
         conn.commit()
+    if "categoria_id" not in colonne_plans:
+        # Categoria scelta dal Supervisor (vocabolario chiuso, vedi
+        # agents.supervisor_pianifica_settimana) o dall'utente prima di
+        # accettare: senza, un suggerimento accettato diventava un
+        # contenuto "generico" che ignorava prompt/stile/struttura della
+        # categoria censita nel backoffice (segnalato dall'utente: "Genera
+        # 3 temi" doveva riusare le Categorie, non inventare temi liberi).
+        conn.execute("ALTER TABLE social_editorial_plans ADD COLUMN categoria_id TEXT")
+        conn.commit()
     colonne_content = {r["name"] for r in conn.execute("PRAGMA table_info(social_content)")}
     if "obiettivo" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN obiettivo TEXT")
@@ -1516,6 +1525,18 @@ def account_per_piattaforma(conn, piattaforma):
         (piattaforma,)).fetchone()
 
 
+def canali_abilitati(conn):
+    """Piattaforme con publishing_enabled=True (vedi impostazioni
+    Integrazioni): stessa logica gia' usata da web.nuovo_contenuto_form per
+    precompilare le checkbox canali, qui condivisa con accetta_plan_entry —
+    un contenuto creato accettando un suggerimento del Supervisor deve
+    rispettare gli stessi canali abilitati di uno creato a mano, non tutte
+    le piattaforme per default (bug segnalato dall'utente: veniva generata
+    anche la variante LinkedIn mentre l'account e' disabilitato)."""
+    return [p for p in PIATTAFORME
+           if (account := account_per_piattaforma(conn, p)) and account["publishing_enabled"]]
+
+
 def lista_accounts(conn):
     return conn.execute("SELECT * FROM social_accounts ORDER BY piattaforma").fetchall()
 
@@ -1562,10 +1583,13 @@ def revoca_oauth_tokens(conn, account_id):
 
 def crea_plan_entry(conn, settimana, tema, *, pillar_chiave=None, obiettivo=None,
                     canali=None, fascia_oraria=None, priorita=0, content_id=None,
-                    giorno=None, stato=None, is_demo=False):
+                    giorno=None, stato=None, is_demo=False, categoria_id=None):
     """stato di default: 'suggerito' se non c'e' ancora un content_id (proposta
     del Supervisor, in attesa di Accetta/Modifica/Scarta), 'pianificato' se
-    content_id e' gia' presente (aggiunta manuale diretta a un giorno)."""
+    content_id e' gia' presente (aggiunta manuale diretta a un giorno).
+    categoria_id: la categoria scelta dal Supervisor per questo tema (vedi
+    agents.supervisor_pianifica_settimana) — trasferita al contenuto vero
+    solo quando il suggerimento viene accettato (vedi accetta_plan_entry)."""
     pillar_id = None
     if pillar_chiave:
         riga = conn.execute("SELECT id FROM social_editorial_pillars WHERE chiave = ?",
@@ -1578,7 +1602,8 @@ def crea_plan_entry(conn, settimana, tema, *, pillar_chiave=None, obiettivo=None
         "id": entry_id, "settimana": settimana, "giorno": giorno, "pillar_id": pillar_id,
         "tema": tema, "obiettivo": obiettivo, "canali": json.dumps(canali or list(PIATTAFORME)),
         "fascia_oraria": fascia_oraria, "priorita": priorita, "content_id": content_id,
-        "stato": stato, "is_demo": 1 if is_demo else 0, "creato_at": _adesso()})
+        "stato": stato, "is_demo": 1 if is_demo else 0, "creato_at": _adesso(),
+        "categoria_id": categoria_id})
     conn.commit()
     return entry_id
 
@@ -1592,27 +1617,44 @@ def plan_entry(conn, entry_id):
 
 
 def accetta_plan_entry(conn, entry_id, *, tema=None, obiettivo=None, brief=None,
-                       pillar_chiave=None, giorno=None, creato_da=None, avvia_pipeline=True):
+                       pillar_chiave=None, giorno=None, creato_da=None, avvia_pipeline=True,
+                       categoria_id=None):
     """Trasforma un suggerimento ('suggerito', content_id NULL) in un
     contenuto vero: crea social_content e collega la voce di calendario, con
-    eventuali modifiche (tema/obiettivo/brief/pillar/giorno, tipicamente da
-    "Modifica" in dashboard) applicate prima di creare il contenuto. Il
-    brief e' facoltativo: il Supervisor propone solo tema+obiettivo, non un
-    brief in linguaggio naturale — senza, la ricerca lavora sui bandi piu'
-    recenti invece che su criteri specifici (comportamento invariato,
-    nessun annullamento automatico). Ritorna il content_id creato, o None se
-    la voce non esiste o non e' piu' un suggerimento in attesa."""
+    eventuali modifiche (tema/obiettivo/brief/pillar/giorno/categoria,
+    tipicamente dalla card del suggerimento in Calendario) applicate prima
+    di creare il contenuto. Il brief e' facoltativo: il Supervisor propone
+    solo tema+obiettivo, non un brief in linguaggio naturale — senza, la
+    ricerca lavora sui bandi piu' recenti invece che su criteri specifici
+    (comportamento invariato, nessun annullamento automatico).
+
+    categoria_id: se non passato esplicitamente, usa quella scelta dal
+    Supervisor (voce.categoria_id) — SENZA categoria, il contenuto perdeva
+    tutte le personalizzazioni configurate nel backoffice (prompt
+    illustrazione, stile, struttura del post: segnalato dall'utente, un
+    "tema concorsi" generato dal piano settimanale non seguiva affatto lo
+    schema della categoria "Concorsi").
+
+    I canali sono SEMPRE quelli davvero abilitati (vedi canali_abilitati),
+    mai tutte le piattaforme per default: creare il contenuto qui usava
+    prima il default di crea_content (tutte), generando anche la variante
+    LinkedIn pur con l'account disabilitato (bug segnalato dall'utente).
+
+    Ritorna il content_id creato, o None se la voce non esiste o non e'
+    piu' un suggerimento in attesa."""
     voce = plan_entry(conn, entry_id)
     if voce is None or voce["content_id"] is not None:
         return None
     tema = tema or voce["tema"]
     obiettivo = obiettivo or voce["obiettivo"]
     pillar_chiave = pillar_chiave or voce["pillar_chiave"]
+    categoria_id = categoria_id if categoria_id is not None else voce["categoria_id"]
     content_id = crea_content(conn, tema, pillar_chiave=pillar_chiave, obiettivo=obiettivo,
-                              brief=brief, creato_da=creato_da)
+                              brief=brief, creato_da=creato_da, categoria_id=categoria_id,
+                              canali=canali_abilitati(conn))
     aggiorna_plan_entry(conn, entry_id, tema=tema, obiettivo=obiettivo, content_id=content_id,
                        stato="pianificato", giorno=giorno or voce["giorno"],
-                       pillar_chiave=pillar_chiave)
+                       pillar_chiave=pillar_chiave, categoria_id=categoria_id)
     if avvia_pipeline:
         crea_job(conn, "pipeline", {"content_id": content_id})
     return content_id
@@ -1660,7 +1702,8 @@ def plan_mese(conn, prefisso_mese):
 
 
 def aggiorna_plan_entry(conn, entry_id, *, pillar_chiave=None, **campi):
-    consentiti = {"tema", "obiettivo", "fascia_oraria", "priorita", "stato", "content_id", "giorno"}
+    consentiti = {"tema", "obiettivo", "fascia_oraria", "priorita", "stato", "content_id", "giorno",
+                 "categoria_id"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if pillar_chiave is not None:
         riga = conn.execute("SELECT id FROM social_editorial_pillars WHERE chiave = ?",
