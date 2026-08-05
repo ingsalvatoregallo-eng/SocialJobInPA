@@ -33,7 +33,7 @@
 
 <div class="card">
   <table>
-    <tr><th>Titolo</th><th>Pillar</th><th>Fase</th><th>Rischio</th>{% if gruppo in ('errori', 'approvazioni') %}<th>Motivo</th>{% endif %}<th>Programmato</th><th>Creato</th><th></th></tr>
+    <tr><th>Titolo</th><th>Intento</th><th>Fase</th><th>Rischio</th>{% if gruppo in ('errori', 'approvazioni') %}<th>Motivo</th>{% endif %}<th>Programmato</th><th>Creato</th><th></th></tr>
     {% for c in contenuti %}
     <tr>
       <td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a>{% if c.is_demo %} <span class="badge grigio">DEMO</span>{% endif %}</td>

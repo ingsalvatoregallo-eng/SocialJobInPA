@@ -504,6 +504,18 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
 
 # --- Copywriting Agent -------------------------------------------------------
 
+# Tono per Intento (content.pillar_chiave, vedi web.crea_contenuto e
+# db_social.PILLARS_SEED): stessa scelta che in visual() decide il
+# template immagine, applicata qui al testo cosi' i due si allineano
+# davvero (segnalato dall'utente: la scelta fatta in creazione deve
+# ritrovarsi sia nell'immagine sia nel testo del post).
+_TONO_PER_PILLAR = {
+    "opportunita": "Il tono e' un annuncio di una nuova opportunita' appena disponibile.",
+    "scadenza": "Il tono e' un promemoria di scadenza imminente: comunica quanto tempo resta per candidarsi.",
+    "guida": "Il tono e' esplicativo/informativo (una guida): non presentarlo come l'annuncio di qualcosa di nuovo.",
+}
+
+
 def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revisore=None):
     content = db_social.get_content(conn, content_id)
     fatti = "\n".join(f"- {f.fatto} (fonte: {f.fonte_url or 'DB JobInPA'})"
@@ -545,6 +557,8 @@ def copywriting(conn, content_id, risultato_ricerca, *, provider=None, note_revi
         # titolo + punti + CTA per le promozioni).
         base += (f"\nStruttura richiesta per questo post (segui questo schema, "
                 f"scrivendo tu le parole sui fatti sopra):\n{categoria['struttura_post']}")
+    if content["pillar_chiave"] in _TONO_PER_PILLAR:
+        base += f"\n{_TONO_PER_PILLAR[content['pillar_chiave']]}"
     if note_revisore:
         # Ripartenza da CHANGES_REQUESTED (vedi esegui_pipeline): questa e'
         # la correzione esplicita chiesta dal revisore, va applicata al testo.
@@ -614,19 +628,24 @@ def _formatta_scadenza(scadenza):
 
 def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
                                  immagini_riferimento=None, stile_immagine=None,
-                                 nota_correzione=None):
-    """Immagine 'nuovo_concorso' per un singolo bando di un carosello, con
-    dati SEMPRE presi dal record JobInPA (mai dal modello) — stesso
-    principio dei dati_chiave del VisualBrief, qui applicato quando i
-    bandi sono piu' di uno e ognuno ha diritto alla propria immagine
-    invece che il modello ne scelga solo uno.
+                                 nota_correzione=None, template="nuovo_concorso"):
+    """Immagine per un singolo bando di un carosello, con dati SEMPRE presi
+    dal record JobInPA (mai dal modello) — stesso principio dei dati_chiave
+    del VisualBrief, qui applicato quando i bandi sono piu' di uno e ognuno
+    ha diritto alla propria immagine invece che il modello ne scelga solo
+    uno.
     prompt_ai/immagini_riferimento/stile_immagine della categoria vanno
     applicati anche qui (bug segnalato dall'utente: una categoria "Concorsi"
     personalizzata con prompt/immagini/stile restava completamente
     ignorata nei caroselli, che passavano sempre e solo per lo stile fisso
     di default) — {TITOLO}/{SCADENZA} nel prompt_ai vengono sostituiti coi
     dati del SINGOLO bando, non del content, perche' ogni slide del
-    carosello ha il proprio bando."""
+    carosello ha il proprio bando.
+
+    `template` (default "nuovo_concorso"): scelto dal chiamante in base
+    all'Intento del contenuto (vedi visual()) — "scadenza" per il badge
+    "IN SCADENZA" invece di "NUOVO CONCORSO", stessa infrastruttura
+    (images._TEMPLATE_GRAFICA_INTERA)."""
     dati_chiave = [f"Ente: {_formatta_ente(bando.get('enti'))}"]
     if bando.get("num_posti"):
         dati_chiave.append(f"Posti: {bando['num_posti']}")
@@ -641,7 +660,7 @@ def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
         prompt_ai = categoria["prompt_ai"].replace("{TITOLO}", titolo_bando).replace(
             "{SCADENZA}", scadenza_leggibile or "")
     return images.ImageGenerationRequest(
-        template="nuovo_concorso", formato=formato, titolo=titolo_bando,
+        template=template, formato=formato, titolo=titolo_bando,
         sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id,
         prompt_ai=prompt_ai, immagini_riferimento=immagini_riferimento or [],
         stile_ai=stile_immagine, nota_correzione=nota_correzione)
@@ -770,16 +789,18 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             # mockup atteso anche con lo stile immagine corretto).
             brief.template = "promozione"
         elif categoria["strategia_fatti"] == "bandi_jobinpa":
-            # Stesso principio: il carosello (piu' di un bando, vedi sotto)
-            # usa gia' SEMPRE "nuovo_concorso" (grafica intera, vedi
-            # images._TEMPLATE_GRAFICA_INTERA), ma con un solo bando trovato
-            # niente carosello, il Visual Agent sceglieva liberamente fra
-            # TUTTI i template — anche uno dei vecchi "a sfondo intero +
-            # fascia scura che taglia l'immagine a meta'" (es. "scadenza"),
-            # tornando al problema gia' risolto per le promozioni (segnalato
-            # di nuovo dall'utente sullo stesso identico sintomo: fascia che
-            # divide l'immagine, ritaglio in alto).
-            brief.template = "nuovo_concorso"
+            # Mai lasciato alla scelta libera del Visual Agent (stesso
+            # motivo delle promozioni: sceglierebbe uno dei vecchi template
+            # "a sfondo intero + fascia scura", segnalato dall'utente). Fra
+            # i due template a grafica intera pensati per i concorsi, quale
+            # dei due dipende dall'Intento scelto alla creazione (vedi
+            # web.crea_contenuto, content.pillar_chiave): "scadenza" per un
+            # promemoria (badge "IN SCADENZA"), "nuovo_concorso" per
+            # un'opportunita'/annuncio o per una guida generica — cosi' la
+            # scelta fatta in fase di creazione si ritrova davvero
+            # nell'immagine, non solo nel testo (segnalato dall'utente).
+            brief.template = ("scadenza" if content["pillar_chiave"] == "scadenza"
+                             else "nuovo_concorso")
         if categoria["prompt_ai"]:
             # Il "soggetto" dell'illustrazione non e' lasciato all'AI
             # (rischio di uno stile incoerente da un post all'altro):
@@ -814,7 +835,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                         "Generazione interrotta dall'utente durante il carosello immagini")
                 richiesta = _richiesta_immagine_da_bando(
                     bando, formato, content_id, categoria=categoria,
-                    immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
+                    immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine,
+                    template=brief.template)
                 asset = _genera_con_verifica_testo(
                     image_provider, richiesta, conn, llm_provider=provider)
                 db_social.salva_asset(conn, content_id, asset.percorso,

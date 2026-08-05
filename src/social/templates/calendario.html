@@ -70,7 +70,7 @@
             <input type="hidden" name="giorno" value="{{ g.data }}">
             <input type="text" name="titolo" placeholder="Titolo idea" required style="font-size:12px;padding:6px 8px;margin-bottom:6px">
             <select name="pillar" style="font-size:12px;padding:6px 8px;margin-bottom:6px">
-              <option value="">Pillar (auto)</option>
+              <option value="">Intento (auto)</option>
               {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
             </select>
             <button class="btn piccolo" type="submit" style="width:100%;justify-content:center">Aggiungi</button>
@@ -108,7 +108,7 @@
       </select>
       <div style="display:flex;gap:8px">
         <div style="flex:1">
-          <label>Pillar</label>
+          <label>Intento</label>
           <select name="pillar">
             <option value="">Nessuno</option>
             {% for p in pillars %}<option value="{{ p.chiave }}" {{ 'selected' if p.chiave == s.pillar_chiave else '' }}>{{ p.nome }}</option>{% endfor %}

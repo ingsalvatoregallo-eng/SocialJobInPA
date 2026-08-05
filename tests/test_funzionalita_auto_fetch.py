@@ -227,7 +227,7 @@ def test_crea_contenuto_funzionalita_singola_rilegge_i_dati_da_jobinpa(conn, cli
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Funzionalità"), "titolo": "Post sulla ricerca AI",
-        "funzionalita_selezionata": "ricerca_intelligente", "csrf": csrf,
+        "funzionalita_selezionata": "ricerca_intelligente", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -253,7 +253,7 @@ def test_crea_contenuto_funzionalita_multiple_rilegge_tutti_i_dati(conn, client,
         "categoria_id": _categoria_id(conn, "Funzionalità"),
         "titolo": "Il pacchetto AI di JobInPA",
         "funzionalita_selezionata": ["ricerca_intelligente", "analisi_cv"],
-        "csrf": csrf,
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -272,7 +272,7 @@ def test_crea_contenuto_funzionalita_senza_selezione_400(conn, client, monkeypat
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Funzionalità"),
-        "titolo": "Qualcosa", "csrf": csrf,
+        "titolo": "Qualcosa", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400
 
@@ -286,7 +286,7 @@ def test_crea_contenuto_funzionalita_senza_titolo_400(conn, client, monkeypatch)
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Funzionalità"),
-        "funzionalita_selezionata": "ricerca_intelligente", "csrf": csrf,
+        "funzionalita_selezionata": "ricerca_intelligente", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400
 
@@ -303,6 +303,6 @@ def test_crea_contenuto_funzionalita_non_piu_nel_catalogo_400(conn, client, monk
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Funzionalità"), "titolo": "Qualcosa",
-        "funzionalita_selezionata": "ricerca_intelligente", "csrf": csrf,
+        "funzionalita_selezionata": "ricerca_intelligente", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400

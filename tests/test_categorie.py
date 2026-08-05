@@ -172,6 +172,71 @@ def test_visual_usa_la_categoria_esplicita_per_qualsiasi_tipologia(conn):
     assert catturate[0].prompt_ai == "Illustrazione di Nuova funzione AI, entro il 1 settembre 2026."
 
 
+# --- agents.visual/copywriting: Intento (pillar) guida template e tono ------
+# Segnalato dall'utente: la scelta fatta in creazione (Intento) deve
+# ritrovarsi davvero nell'immagine (badge) e nel testo (tono), non solo
+# restare un'etichetta organizzativa senza effetto (vecchio comportamento
+# di pillar/obiettivo, mai riletti da nessun agente).
+
+def _categoria_concorsi(conn):
+    return next(c for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+
+def test_visual_bandi_jobinpa_usa_nuovo_concorso_per_opportunita(conn):
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Bando aperto", categoria_id=_categoria_concorsi(conn)["id"],
+        pillar_chiave="opportunita")
+    assert catturate[0].template == "nuovo_concorso"
+
+
+def test_visual_bandi_jobinpa_usa_nuovo_concorso_per_guida_o_senza_intento(conn):
+    """"guida" (spiegazione generica) e l'assenza di un Intento (contenuti
+    creati prima di questa modifica) non hanno un badge dedicato: restano
+    sul default "nuovo_concorso", mai il vecchio template deterministico
+    difettoso (vedi images._TEMPLATE_GRAFICA_INTERA)."""
+    categoria_id = _categoria_concorsi(conn)["id"]
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Come funziona un concorso", categoria_id=categoria_id, pillar_chiave="guida")
+    assert catturate[0].template == "nuovo_concorso"
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Senza intento", categoria_id=categoria_id)
+    assert catturate[0].template == "nuovo_concorso"
+
+
+def test_visual_bandi_jobinpa_usa_scadenza_per_promemoria(conn):
+    catturate = _content_con_richiesta_catturata(
+        conn, titolo="Ultimi giorni", categoria_id=_categoria_concorsi(conn)["id"],
+        pillar_chiave="scadenza")
+    assert catturate[0].template == "scadenza"
+
+
+def test_copywriting_intento_scadenza_cambia_il_tono_del_prompt(conn):
+    content_id = db_social.crea_content(
+        conn, "Bando in chiusura", categoria_id=_categoria_concorsi(conn)["id"],
+        pillar_chiave="scadenza", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_variante = next(u for _, u, schema in provider.chiamate
+                           if schema is models.VarianteCopy)
+    assert "promemoria di scadenza" in prompt_variante
+
+
+def test_copywriting_senza_intento_non_aggiunge_indicazioni_di_tono(conn):
+    content_id = db_social.crea_content(
+        conn, "Tema qualsiasi", categoria_id=_categoria_concorsi(conn)["id"], canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)],
+        sintesi="Sintesi.")
+    agents.copywriting(conn, content_id, risultato, provider=provider)
+    prompt_variante = next(u for _, u, schema in provider.chiamate
+                           if schema is models.VarianteCopy)
+    assert "Il tono e'" not in prompt_variante
+
+
 def test_visual_categoria_promozioni_applica_il_suo_prompt(conn):
     promozioni_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Promozioni")
     db_social.aggiorna_categoria(conn, promozioni_id, prompt_ai="Regalo per {TITOLO}.")

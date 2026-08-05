@@ -632,7 +632,7 @@ def _estrai_concorso_id(testo):
 
 @router.post("/contenuti")
 def crea_contenuto(request: Request, titolo: str = Form(None),
-                   pillar: str = Form(None), obiettivo: str = Form(None),
+                   pillar: str = Form(...),
                    brief: str = Form(None), categoria_id: str = Form(...),
                    promo_selezionata: str = Form(None),
                    funzionalita_selezionata: Optional[list[str]] = Form(None),
@@ -653,7 +653,17 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
     davvero solo una bozza puo' comunque modificare/rilanciare in un
     secondo momento dalla scheda del contenuto.
 
-    La categoria (menu Categorie) e' l'unico selettore: decide da sola se
+    `pillar` (etichettato "Intento" nel form, sempre obbligatorio: vedi
+    nuovo_contenuto.html) non e' piu' solo organizzativo — per i Concorsi
+    sceglie fra il badge "NUOVO CONCORSO" e "IN SCADENZA" nell'immagine
+    (vedi agents.visual) e guida il tono del testo (vedi agents.
+    copywriting), cosi' la scelta fatta qui si ritrova davvero nel
+    contenuto generato (segnalato dall'utente). Sostituisce il vecchio
+    campo "obiettivo" (testo libero mai riletto da nessun agente, solo
+    vetrina): resta disponibile su crea_content per i temi proposti dal
+    Supervisor (vedi accetta_plan_entry), non piu' su questo form manuale.
+
+    La categoria (menu Categorie) e' l'altro selettore chiave: decide se
     serve scegliere una promozione, cercare bandi dal brief, o scrivere
     liberamente — non piu' una tipologia fissa separata."""
     _richiedi(conn, sessione, "social.edit")
@@ -743,8 +753,7 @@ def crea_contenuto(request: Request, titolo: str = Form(None),
     # dall'utente il filtro puo' risultare in lista vuota, gestita a valle
     # dalla pipeline (nessuna variante/immagine generata per nessun canale).
     canali_scelti = [c for c in canali if c in db_social.PIATTAFORME] if canali is not None else None
-    content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar or None,
-                                        obiettivo=obiettivo or None,
+    content_id = db_social.crea_content(conn, titolo.strip(), pillar_chiave=pillar,
                                         brief=(brief or "").strip() or None,
                                         scadenza_promo=scadenza_promo,
                                         promo_dati=promo_dati, funzionalita_dati=funzionalita_dati,

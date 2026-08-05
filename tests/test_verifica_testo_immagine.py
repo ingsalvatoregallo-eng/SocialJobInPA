@@ -73,12 +73,15 @@ def test_genera_con_verifica_testo_provider_mock_non_verifica(conn):
 
 
 def test_genera_con_verifica_testo_template_non_grafica_intera_non_verifica(conn):
-    """Un template fuori da images._TEMPLATE_GRAFICA_INTERA (es. "scadenza",
-    sfondo + overlay Pillow) non ha testo disegnato dall'AI da verificare,
-    anche con un provider "openai_images"."""
+    """Un template fuori da images._TEMPLATE_GRAFICA_INTERA (es.
+    "presentazione", sfondo + overlay Pillow) non ha testo disegnato
+    dall'AI da verificare, anche con un provider "openai_images". "scadenza"
+    non e' piu' un buon esempio qui: e' entrato in _TEMPLATE_GRAFICA_INTERA
+    (vedi agents.visual, Intento "promemoria scadenza") e ora la verifica
+    scatta anche per lui, come per "nuovo_concorso"/"promozione"."""
     finto = _ImageProviderFinto(nome="openai_images")
     llm_provider = llm.MockLLMProvider(conn)
-    agents._genera_con_verifica_testo(finto, _richiesta(template="scadenza"), conn,
+    agents._genera_con_verifica_testo(finto, _richiesta(template="presentazione"), conn,
                                       llm_provider=llm_provider)
     assert len(finto.richieste) == 1
     assert llm_provider.chiamate == []

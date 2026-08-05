@@ -136,7 +136,7 @@ def test_crea_contenuto_promozione_rilegge_i_dati_da_jobinpa(conn, client, monke
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Promozioni"),
-        "promo_selezionata": "piano|premium-promo", "csrf": csrf,
+        "promo_selezionata": "piano|premium-promo", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -156,7 +156,7 @@ def test_crea_contenuto_promozione_senza_selezione_400(conn, client, monkeypatch
     csrf = _csrf(client)
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": _categoria_id(conn, "Promozioni"), "csrf": csrf,
+        "categoria_id": _categoria_id(conn, "Promozioni"), "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400
 
@@ -173,7 +173,7 @@ def test_crea_contenuto_promozione_non_piu_attiva_400(conn, client, monkeypatch)
 
     r = client.post("/social/contenuti", data={
         "categoria_id": _categoria_id(conn, "Promozioni"),
-        "promo_selezionata": "piano|premium-promo", "csrf": csrf,
+        "promo_selezionata": "piano|premium-promo", "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400
 
@@ -186,6 +186,6 @@ def test_crea_contenuto_concorso_senza_titolo_400(conn, client, monkeypatch):
     csrf = _csrf(client)
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": _categoria_id(conn, "Concorsi"), "csrf": csrf,
+        "categoria_id": _categoria_id(conn, "Concorsi"), "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     assert r.status_code == 400

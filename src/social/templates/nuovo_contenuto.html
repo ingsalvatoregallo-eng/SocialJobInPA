@@ -55,37 +55,38 @@
       {% endif %}
     </div>
 
+    <div id="blocco-modalita-ricerca" style="display:none">
+      <label>Come vuoi comunicarlo?</label>
+      <div style="display:flex;gap:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+          <input type="radio" name="modalita_ricerca" value="specifico" style="width:auto" onchange="aggiornaCategoria()">Un concorso specifico
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+          <input type="radio" name="modalita_ricerca" value="ricerca" style="width:auto" checked onchange="aggiornaCategoria()">Più concorsi (ricerca)
+        </label>
+      </div>
+    </div>
+
     <div id="blocco-bando-specifico" style="display:none">
-      <label>Bando specifico (opzionale)</label>
-      <input type="text" name="bando_specifico" id="campo-bando-specifico" oninput="aggiornaCategoria()"
+      <label>Bando specifico</label>
+      <input type="text" name="bando_specifico" id="campo-bando-specifico"
              placeholder="Incolla l'URL della scheda bando su JobInPA (es. jobinpa.it/bandi/gu:26E04294) o il suo id">
-      <p class="hint">Se compilato, salta del tutto la ricerca (brief/ricerca semantica) e usa esattamente questo bando — utile se sai già quale bando vuoi ma la ricerca semantica non lo trova ancora (es. appena pubblicato: l'indicizzazione per la ricerca gira circa un'ora dopo la classificazione). Titolo/dati vengono letti dal bando stesso, non serve compilare "Titolo / tema" qui sopra.</p>
+      <p class="hint">Salta del tutto la ricerca (brief/ricerca semantica) e usa esattamente questo bando — utile se sai già quale bando vuoi ma la ricerca semantica non lo trova ancora (es. appena pubblicato: l'indicizzazione gira circa un'ora dopo la classificazione). Titolo/dati vengono letti dal bando stesso, non serve compilare "Titolo / tema" qui sopra.</p>
     </div>
 
-    <div style="display:flex;gap:12px">
-      <div style="flex:1">
-        <label>Pillar</label>
-        <select name="pillar">
-          <option value="">Nessuno</option>
-          {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
-        </select>
-      </div>
-      <div style="flex:1">
-        <label>Obiettivo</label>
-        <input type="text" name="obiettivo" list="lista-obiettivi" placeholder="Es. Informare su una scadenza">
-        <datalist id="lista-obiettivi">
-          <option value="Informare su un nuovo concorso">
-          <option value="Ricordare una scadenza">
-          <option value="Spiegare una procedura">
-          <option value="Rispondere a una domanda frequente">
-        </datalist>
-      </div>
-    </div>
+    <label>Intento *</label>
+    <select name="pillar" required>
+      <option value="">— seleziona —</option>
+      {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
+    </select>
+    <p class="hint">Guida il tono del testo e, per i Concorsi, quale grafica viene generata: badge "NUOVO CONCORSO" per Opportunità/Guida pratica, "IN SCADENZA" per Scadenze e aggiornamenti — la scelta qui si ritrova davvero nell'immagine e nel testo del post.</p>
 
-    <label>Brief</label>
-    <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
-              placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
-    <p class="hint">Il testo del brief è anche la query di ricerca (come la barra di ricerca su JobInPA). Per categorie senza ricerca bandi è un dettaglio facoltativo in più.</p>
+    <div id="blocco-brief">
+      <label>Brief</label>
+      <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
+                placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
+      <p class="hint">Il testo del brief è anche la query di ricerca (come la barra di ricerca su JobInPA). Per categorie senza ricerca bandi è un dettaglio facoltativo in più.</p>
+    </div>
 
     <div id="blocco-ricerca-avanzata" style="display:none">
       <button type="button" class="btn piccolo secondario" onclick="toggleRicercaAvanzata()" id="btn-ricerca-avanzata">🔍 Ricerca avanzata</button>
@@ -191,16 +192,22 @@ function aggiornaCategoria() {
   var promozione = strategia === 'promozioni_jobinpa';
   var funzionalita = strategia === 'funzionalita_jobinpa';
   var bandi = strategia === 'bandi_jobinpa';
-  var bandoSpecifico = bandi && document.getElementById('campo-bando-specifico').value.trim() !== '';
+  var radioSpecifico = document.querySelector('input[name="modalita_ricerca"][value="specifico"]');
+  var bandoSpecifico = bandi && radioSpecifico && radioSpecifico.checked;
 
   document.getElementById('blocco-promozione').style.display = promozione ? 'block' : 'none';
   document.getElementById('blocco-funzionalita').style.display = funzionalita ? 'block' : 'none';
-  document.getElementById('blocco-bando-specifico').style.display = bandi ? 'block' : 'none';
+  document.getElementById('blocco-modalita-ricerca').style.display = bandi ? 'block' : 'none';
+  document.getElementById('blocco-bando-specifico').style.display = bandoSpecifico ? 'block' : 'none';
+  document.getElementById('campo-bando-specifico').disabled = !bandoSpecifico;
   document.getElementById('blocco-ricerca-avanzata').style.display = (bandi && !bandoSpecifico) ? 'block' : 'none';
+  // Il brief e' la query di ricerca: non ha senso quando un bando
+  // specifico bypassa gia' del tutto la ricerca (segnalato dall'utente).
+  document.getElementById('blocco-brief').style.display = bandoSpecifico ? 'none' : 'block';
   // Il titolo/tema resta libero per le funzionalità (possono essere piu'
   // di una: niente "nome" singolo ovvio da cui derivarlo) e per i bandi
-  // quando non e' stato incollato un bando specifico; la promozione o un
-  // bando specifico lo nascondono e lo derivano dai dati reali.
+  // in modalita' ricerca; la promozione o un bando specifico lo
+  // nascondono e lo derivano dai dati reali.
   var titoloDerivato = promozione || bandoSpecifico;
   document.getElementById('blocco-titolo').style.display = titoloDerivato ? 'none' : 'block';
   document.getElementById('campo-titolo').disabled = titoloDerivato;

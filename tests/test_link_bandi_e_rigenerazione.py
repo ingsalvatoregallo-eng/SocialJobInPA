@@ -399,7 +399,7 @@ def test_crea_contenuto_con_bando_specifico_deriva_titolo_e_salta_la_ricerca(con
     r = client.post("/social/contenuti", data={
         "categoria_id": categoria_id,
         "bando_specifico": "https://jobinpa.it/bandi/gu:26E04294",
-        "csrf": csrf,
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -418,7 +418,8 @@ def test_crea_contenuto_bando_specifico_non_trovato_400(conn, client, monkeypatc
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": categoria_id, "bando_specifico": "id-inesistente", "csrf": csrf,
+        "categoria_id": categoria_id, "bando_specifico": "id-inesistente",
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 400
@@ -435,7 +436,7 @@ def test_crea_contenuto_concorsi_senza_bando_specifico_richiede_titolo(conn, cli
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": categoria_id, "csrf": csrf,
+        "categoria_id": categoria_id, "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 400
@@ -454,7 +455,8 @@ def test_crea_contenuto_con_ricerca_avanzata_salva_filtri_manuali(conn, client):
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": categoria_id, "titolo": "Concorsi medici", "csrf": csrf,
+        "categoria_id": categoria_id, "titolo": "Concorsi medici", "pillar": "opportunita",
+        "csrf": csrf,
         "f_regione": "Lombardia", "f_scadenza_da": "2026-08-03", "f_scadenza_a": "2026-08-10",
         "f_posti_minimi": "5", "f_lavoro_agile": "1", "f_soglia_confidenza": "80",
     }, follow_redirects=False)
@@ -477,7 +479,8 @@ def test_crea_contenuto_senza_ricerca_avanzata_non_salva_filtri(conn, client):
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "categoria_id": categoria_id, "titolo": "Concorsi medici", "csrf": csrf,
+        "categoria_id": categoria_id, "titolo": "Concorsi medici", "pillar": "opportunita",
+        "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303

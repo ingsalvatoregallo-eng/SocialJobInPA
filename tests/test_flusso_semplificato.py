@@ -68,7 +68,7 @@ def test_crea_contenuto_avvia_sempre_la_pipeline(conn, client):
 
     r = client.post("/social/contenuti", data={
         "titolo": "Tema di prova", "brief": "Brief di prova", "categoria_id": categoria_id,
-        "csrf": csrf,
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     assert r.status_code == 303
@@ -76,6 +76,60 @@ def test_crea_contenuto_avvia_sempre_la_pipeline(conn, client):
     assert location.endswith("?avviata=1")
     content_id = location.split("/")[-1].split("?")[0]
     assert db_social.job_in_corso(conn, "pipeline", content_id)
+
+
+# --- 1b. Intento (ex pillar/obiettivo) obbligatorio nel form manuale --------
+# Segnalato dall'utente: pillar/obiettivo erano vetrina, mai riletti da
+# nessun agente — sostituiti da un unico Intento obbligatorio che pilota
+# davvero template immagine e tono del testo (vedi test_categorie.py).
+
+def test_crea_contenuto_senza_intento_e_rifiutato(conn, client):
+    db_social.crea_utente(conn, "editor-intento1@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-intento1@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "titolo": "Senza intento", "categoria_id": categoria_id, "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 422
+
+
+def test_crea_contenuto_salva_l_intento_scelto(conn, client):
+    db_social.crea_utente(conn, "editor-intento2@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-intento2@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "titolo": "Con intento", "categoria_id": categoria_id,
+        "pillar": "scadenza", "csrf": csrf,
+    }, follow_redirects=False)
+
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    assert db_social.get_content(conn, content_id)["pillar_chiave"] == "scadenza"
+
+
+def test_crea_contenuto_manuale_non_accetta_piu_obiettivo(conn, client):
+    """Il campo "obiettivo" non e' piu' nel form (sostituito dall'Intento
+    obbligatorio, vedi sopra): anche se inviato via POST diretto, il
+    contenuto risultante non lo salva."""
+    db_social.crea_utente(conn, "editor-intento3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-intento3@test.local")
+    csrf = _csrf(client)
+    categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
+
+    r = client.post("/social/contenuti", data={
+        "titolo": "Con obiettivo ignorato", "categoria_id": categoria_id,
+        "pillar": "opportunita", "obiettivo": "Informare su una scadenza", "csrf": csrf,
+    }, follow_redirects=False)
+
+    content_id = r.headers["location"].split("/")[-1].split("?")[0]
+    assert db_social.get_content(conn, content_id)["obiettivo"] is None
 
 
 # --- Canali: niente spreco AI per un canale non abilitato in Impostazioni ----
@@ -111,7 +165,7 @@ def test_crea_contenuto_con_solo_instagram_selezionato(conn, client):
 
     r = client.post("/social/contenuti", data={
         "titolo": "Solo Instagram", "categoria_id": categoria_id,
-        "canali": ["instagram"], "csrf": csrf,
+        "canali": ["instagram"], "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     content_id = r.headers["location"].split("/")[-1].split("?")[0]
@@ -131,7 +185,8 @@ def test_crea_contenuto_senza_campo_canali_usa_il_default_di_sempre(conn, client
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
 
     r = client.post("/social/contenuti", data={
-        "titolo": "Nessun campo canali", "categoria_id": categoria_id, "csrf": csrf,
+        "titolo": "Nessun campo canali", "categoria_id": categoria_id,
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
 
     content_id = r.headers["location"].split("/")[-1].split("?")[0]
@@ -148,7 +203,8 @@ def test_pagina_contenuto_non_mostra_bottone_avvia_se_appena_in_coda(conn, clien
     csrf = _csrf(client)
     categoria_id = next(c["id"] for c in db_social.lista_categorie(conn) if c["nome"] == "Concorsi")
     r = client.post("/social/contenuti", data={
-        "titolo": "Tema due", "categoria_id": categoria_id, "csrf": csrf,
+        "titolo": "Tema due", "categoria_id": categoria_id,
+        "pillar": "opportunita", "csrf": csrf,
     }, follow_redirects=False)
     location = r.headers["location"]
 

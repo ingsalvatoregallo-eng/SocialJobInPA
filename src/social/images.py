@@ -501,14 +501,19 @@ _STILE_OPENAI_IMAGES = (
 # intera). "nuovo_concorso" ci e' entrato dopo "promozione": lo stesso
 # problema (layout disegnato a mano troppo lontano dal mockup atteso)
 # segnalato per le promozioni valeva identico per il carosello dei
-# concorsi, che usa sempre questo template.
-_TEMPLATE_GRAFICA_INTERA = {"promozione", "nuovo_concorso"}
+# concorsi, che usa sempre questo template. "scadenza" ci e' entrato per
+# lo stesso motivo quando e' stato scelto come alternativa a
+# "nuovo_concorso" per l'intento "promemoria scadenza" (vedi agents.
+# visual): il vecchio template deterministico "a sfondo intero + fascia
+# scura" aveva lo stesso difetto gia' risolto per gli altri due.
+_TEMPLATE_GRAFICA_INTERA = {"promozione", "nuovo_concorso", "scadenza"}
 
 # CTA di fondo per template a grafica intera: nessun default generico,
 # ognuno ha un invito all'azione pertinente al proprio contenuto.
 _CTA_GRAFICA_INTERA = {
     "promozione": "Scopri di più su JobInPA",
     "nuovo_concorso": "Scopri il concorso su JobInPA",
+    "scadenza": "Candidati prima che scada",
 }
 
 
