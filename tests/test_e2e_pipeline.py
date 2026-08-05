@@ -167,6 +167,61 @@ def test_e2e_percorso_rosso_bloccato(conn):
     assert db_social.publications_di(conn, content_id) == []
 
 
+def test_e2e_blocked_finisce_nella_coda_di_revisione(conn):
+    """Segnalato dall'utente: un bollino rosso non deve finire fra gli
+    errori tecnici (PUBLISH_FAILED) senza alcuna azione collegata, ma
+    nella stessa coda di revisione degli AWAITING_APPROVAL, cosi' si puo'
+    approvare/rifiutare/richiedere modifiche come per un giallo."""
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="rosso", punteggio_accuratezza=0.2, punteggio_brand=0.5,
+        punteggio_conformita=0.1, motivi=["accuse verso enti"]))
+    content_id = db_social.crea_content(conn, "Contenuto rischioso")
+    agents.esegui_pipeline(conn, content_id, provider=provider,
+                           image_provider=MockImageProvider())
+
+    coda = db_social.approvals_in_attesa(conn)
+    riga = next((a for a in coda if a["content_id"] == content_id), None)
+    assert riga is not None
+    assert riga["content_stato"] == "BLOCKED"
+
+
+def test_e2e_blocked_si_puo_approvare_dalla_coda_di_revisione(conn):
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="rosso", punteggio_accuratezza=0.2, punteggio_brand=0.5,
+        punteggio_conformita=0.1, motivi=["accuse verso enti"]))
+    content_id = db_social.crea_content(conn, "Contenuto rischioso")
+    agents.esegui_pipeline(conn, content_id, provider=provider,
+                           image_provider=MockImageProvider())
+    approval = next(a for a in db_social.approvals_in_attesa(conn) if a["content_id"] == content_id)
+
+    approvals.approva(conn, approval["id"], utente_id=1, motivo="verificato a mano, va bene")
+
+    # approva() chiama sempre programma_pubblicazione: come per un giallo,
+    # avanza subito da APPROVED a SCHEDULED se c'e' una finestra disponibile.
+    assert db_social.get_content(conn, content_id)["stato"] in {"APPROVED", "SCHEDULED"}
+
+
+def test_e2e_blocked_si_puo_richiedere_modifiche_dalla_coda_di_revisione(conn):
+    """Prima di questo fix BLOCKED -> CHANGES_REQUESTED non era una
+    transizione valida (state_machine.TRANSIZIONI): "Richiedi modifiche"
+    su un rosso avrebbe sollevato TransizioneNonValida."""
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="rosso", punteggio_accuratezza=0.2, punteggio_brand=0.5,
+        punteggio_conformita=0.1, motivi=["accuse verso enti"]))
+    content_id = db_social.crea_content(conn, "Contenuto rischioso")
+    agents.esegui_pipeline(conn, content_id, provider=provider,
+                           image_provider=MockImageProvider())
+    approval = next(a for a in db_social.approvals_in_attesa(conn) if a["content_id"] == content_id)
+
+    approvals.richiedi_modifiche(conn, approval["id"], utente_id=1,
+                                 motivo="Togli il riferimento diretto agli enti")
+
+    assert db_social.get_content(conn, content_id)["stato"] == "CHANGES_REQUESTED"
+
+
 def test_e2e_regole_deterministiche_prevalgono_sul_giudizio_ai(conn):
     """Il mock dice verde, ma il testo contiene una promessa di successo:
     le regole forzano rosso e il giudizio AI non puo' declassarlo."""

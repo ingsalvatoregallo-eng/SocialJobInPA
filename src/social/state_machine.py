@@ -38,7 +38,14 @@ TRANSIZIONI = {
     # migliora, il contenuto deve poter avanzare da solo invece di restare
     # bloccato in attesa che qualcuno lo scopra (segnalato dall'utente:
     # dopo aver rigenerato, la pagina mostrava ancora il vecchio motivo).
-    "BLOCKED": {"DRAFTING", "AWAITING_APPROVAL", "APPROVED", "CANCELLED", "ARCHIVED"},
+    # CHANGES_REQUESTED: un BLOCKED ora entra nella stessa coda di revisione
+    # degli AWAITING_APPROVAL (vedi agents.esegui_pipeline/approvals.
+    # richiedi_approvazione) e usa le stesse azioni Approva/Rifiuta/Richiedi
+    # modifiche -- senza, "Richiedi modifiche" su un bollino rosso avrebbe
+    # sollevato TransizioneNonValida (segnalato dall'utente: un rosso non
+    # deve finire fra gli errori tecnici, ma nella revisione vera e propria).
+    "BLOCKED": {"DRAFTING", "AWAITING_APPROVAL", "APPROVED", "CHANGES_REQUESTED",
+               "CANCELLED", "ARCHIVED"},
     "AWAITING_APPROVAL": {"APPROVED", "CHANGES_REQUESTED", "CANCELLED"},
     # RESEARCHING: senza, esegui_pipeline() non puo' mai ripartire da qui
     # (STATI_PIPELINE_AVVIABILE lo elenca come punto di ripartenza valido,

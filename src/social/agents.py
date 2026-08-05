@@ -821,7 +821,11 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                                       piattaforma=piattaforma, template=asset.template,
                                       formato=asset.formato, provider=asset.provider,
                                       bando_id=bando.get("id"),
-                                      url_pubblico=asset_storage.carica_pubblico(asset.percorso))
+                                      url_pubblico=asset_storage.carica_pubblico(asset.percorso),
+                                      titolo=richiesta.titolo, sottotitolo=richiesta.sottotitolo,
+                                      dati_chiave=richiesta.dati_chiave, prompt_ai=richiesta.prompt_ai,
+                                      immagini_riferimento=richiesta.immagini_riferimento,
+                                      stile_ai=richiesta.stile_ai)
             continue
         if db_social.interruzione_richiesta(conn, content_id):
             raise GenerazioneInterrotta("Generazione interrotta dall'utente prima delle immagini")
@@ -835,7 +839,11 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         db_social.salva_asset(conn, content_id, asset.percorso,
                               piattaforma=piattaforma, template=asset.template,
                               formato=asset.formato, provider=asset.provider,
-                              url_pubblico=asset_storage.carica_pubblico(asset.percorso))
+                              url_pubblico=asset_storage.carica_pubblico(asset.percorso),
+                              titolo=richiesta.titolo, sottotitolo=richiesta.sottotitolo,
+                              dati_chiave=richiesta.dati_chiave, prompt_ai=richiesta.prompt_ai,
+                              immagini_riferimento=richiesta.immagini_riferimento,
+                              stile_ai=richiesta.stile_ai)
     return brief
 
 
@@ -863,15 +871,22 @@ def rigenera_visual(conn, content_id, *, provider=None, image_provider=None):
 
 def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None, nota=None,
                               provider=None):
-    """Rigenera SOLO l'immagine indicata di un carosello Instagram, senza
-    toccare le altre — a differenza di rigenera_visual, che le rifà tutte
-    (segnalato dall'utente: correggere una singola immagine del carosello
-    non deve costare/rifare anche le altre, gia' andate bene).
+    """Rigenera SOLO l'immagine indicata (di un carosello Instagram o
+    l'unica immagine di una piattaforma), senza toccare le altre — a
+    differenza di rigenera_visual, che le rifa' tutte (segnalato
+    dall'utente: correggere una singola immagine non deve costare/rifare
+    anche le altre, gia' andate bene).
 
-    Serve solo per immagini legate a un bando (asset.bando_id, sempre
-    presente per un'immagine di carosello, vedi visual()): non ha senso per
-    l'unica immagine di una piattaforma senza carosello, dove "rigenera
-    questa" e "rigenera tutte" coincidono gia' (usa rigenera_visual).
+    Ricostruisce la ImageGenerationRequest dai campi persistiti
+    sull'asset stesso (titolo/sottotitolo/dati_chiave/prompt_ai/
+    immagini_riferimento/stile_ai, vedi visual()/db_social.salva_asset)
+    invece che dal bando: funziona quindi per QUALSIASI asset, non solo
+    per quelli di un carosello (bug segnalato dall'utente: con una sola
+    immagine — Concorsi con un solo bando trovato, o Promozioni/
+    Funzionalita'/Libera che non hanno mai un bando — "rigenera con
+    suggerimento" non era proprio disponibile). Assets salvati PRIMA di
+    questa migrazione (titolo NULL) restano non rigenerabili in questo
+    modo: usa 'Rigenera immagine' (rigenera_visual) per quelli.
 
     `nota` (opzionale, vedi web.rigenera_asset_singolo): istruzione ad-hoc
     per QUESTO tentativo (es. "sistema gli accenti nel titolo, sono usciti
@@ -883,20 +898,18 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
     asset = db_social.get_asset(conn, content_id, asset_id)
     if asset is None:
         raise ValueError(f"asset inesistente: {asset_id}")
-    if not asset["bando_id"]:
-        raise ValueError("questa immagine non e' collegata a un bando di un carosello")
-    content = db_social.get_content(conn, content_id)
-    bandi = json.loads(content["bandi_trovati"] or "[]")
-    bando = next((b for b in bandi if b.get("id") == asset["bando_id"]), None)
-    if bando is None:
-        raise ValueError(f"bando non piu' presente tra quelli trovati: {asset['bando_id']}")
-    categoria = _categoria_per_content(conn, content)
-    immagini_riferimento = categoria["immagini_riferimento"] if categoria else []
-    stile_immagine = categoria["stile_immagine"] if categoria else None
-    richiesta = _richiesta_immagine_da_bando(
-        bando, asset["formato"], content_id, categoria=categoria,
-        immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine,
-        nota_correzione=nota)
+    if not asset["titolo"]:
+        raise ValueError(
+            "questa immagine e' stata generata prima che la rigenerazione guidata da nota "
+            "fosse disponibile per immagini singole: usa 'Rigenera immagine'")
+    richiesta = images.ImageGenerationRequest(
+        template=asset["template"], formato=asset["formato"], titolo=asset["titolo"],
+        sottotitolo=asset["sottotitolo"],
+        dati_chiave=json.loads(asset["dati_chiave"]) if asset["dati_chiave"] else [],
+        prompt_ai=asset["prompt_ai"], content_id=content_id,
+        immagini_riferimento=(json.loads(asset["immagini_riferimento"])
+                              if asset["immagini_riferimento"] else []),
+        stile_ai=asset["stile_ai"], nota_correzione=nota)
     image_provider = image_provider or images.provider_immagini(conn)
     nuovo = _genera_con_verifica_testo(image_provider, richiesta, conn, llm_provider=provider)
     vecchio_percorso = Path(asset["percorso"])
@@ -941,6 +954,14 @@ def rigenera_copy(conn, content_id, *, provider=None, note_revisore=None):
         elif decisione == "auto_publish":
             state_machine.transisci(conn, content_id, "APPROVED", agente="quality_risk",
                                     motivo=f"classe {classe} dopo rigenerazione testo")
+        else:
+            # Resta BLOCKED: richiedi_approvazione riusa la richiesta gia'
+            # aperta se c'e' (vedi esegui_pipeline), o ne apre una nuova per
+            # un BLOCKED precedente a questa modifica (mai duplicata, vedi
+            # approval_aperta_di) -- cosi' resta comunque visibile nella
+            # coda di Revisione anche dopo un tentativo di correzione che
+            # non e' bastato.
+            approvals.richiedi_approvazione(conn, content_id)
 
 
 # --- Quality & Risk Agent ----------------------------------------------------
@@ -1257,6 +1278,16 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
     if decisione == "blocked":
         state_machine.transisci(conn, content_id, "BLOCKED", agente="quality_risk",
                                 motivo=f"classe {classe}")
+        # Stessa coda di revisione degli AWAITING_APPROVAL (vedi
+        # approvals.richiedi_approvazione/db_social.approvals_in_attesa,
+        # che non filtra per stato del contenuto): un bollino rosso e' un
+        # giudizio dell'AI da far rivedere a un umano, non un errore
+        # tecnico -- prima restava visibile solo nella lista "Contenuti"
+        # sotto "errori", senza alcuna azione di approvazione collegata
+        # (segnalato dall'utente). Lo stato resta BLOCKED (non
+        # AWAITING_APPROVAL): il badge rosso in Revisione/Contenuti deve
+        # restare distinguibile da un giallo.
+        approvals.richiedi_approvazione(conn, content_id)
         return "BLOCKED"
     if decisione == "human_approval":
         state_machine.transisci(conn, content_id, "AWAITING_APPROVAL",

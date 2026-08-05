@@ -1,8 +1,14 @@
-"""Visibilita' dei contenuti in errore: segnalato dall'utente, un contenuto
-BLOCKED mostrava solo "Fase: Bloccata" + "Rischio: rosso" nella lista
-Contenuti, senza dire il perche' (bisognava aprire il dettaglio), e la
-sidebar non dava nessun segnale della sua esistenza finche' non si
-cliccava per caso sulla tab "Errori"."""
+"""Visibilita' dei contenuti in errore/da rivedere: senza un motivo
+sintetico in lista, un contenuto BLOCKED mostrava solo "Fase: Bloccata" +
+"Rischio: rosso", senza dire il perche' (bisognava aprire il dettaglio), e
+la sidebar non dava nessun segnale della sua esistenza finche' non si
+cliccava per caso sulla tab giusta (segnalato dall'utente).
+
+BLOCKED vive nel gruppo "approvazioni" (badge "Revisione" in sidebar), non
+in "errori" (badge "Contenuti", riservato a guasti tecnici come
+PUBLISH_FAILED): un bollino rosso e' un giudizio dell'AI da far rivedere a
+un umano nella stessa coda degli AWAITING_APPROVAL, non un errore di
+sistema (segnalato dall'utente)."""
 
 import json
 import re
@@ -45,22 +51,42 @@ def _blocca_per_rischio(conn, content_id, motivo_ai):
     db_social.aggiorna_content(conn, content_id, stato="BLOCKED",
                                classe_rischio="rosso", decisione_rischio="review",
                                punteggi_rischio=json.dumps(punteggi))
+    # Stesso passo che ora fa esegui_pipeline quando decisione == "blocked"
+    # (vedi approvals.richiedi_approvazione): senza, un BLOCKED impostato
+    # a mano (come qui, per isolare il test dalla pipeline vera) non
+    # comparirebbe nella coda di Revisione.
+    db_social.crea_approval(conn, content_id)
 
 
 def test_lista_contenuti_mostra_il_motivo_del_blocco(conn, client):
+    """BLOCKED vive nel gruppo 'approvazioni' (non 'errori', riservato ai
+    guasti tecnici): la colonna Motivo lo segue li'."""
     db_social.crea_utente(conn, "revisore@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
     _blocca_per_rischio(conn, content_id,
                         "Errore fattuale grave: le scadenze non coincidono con quanto scritto")
     _login(client, "revisore@test.local")
-    pagina = client.get("/social/contenuti?gruppo=errori").text
+    pagina = client.get("/social/contenuti?gruppo=approvazioni").text
     assert "Errore fattuale grave" in pagina
 
 
+def test_lista_contenuti_gruppo_errori_non_mostra_blocked(conn, client):
+    """Un bollino rosso non e' un errore tecnico: non deve comparire nel
+    gruppo 'errori' (riservato a PUBLISH_FAILED, segnalato dall'utente)."""
+    db_social.crea_utente(conn, "revisore@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
+    _blocca_per_rischio(conn, content_id, "motivo qualsiasi")
+    _login(client, "revisore@test.local")
+    pagina = client.get("/social/contenuti?gruppo=errori").text
+    assert content_id not in pagina
+
+
 def test_lista_contenuti_altri_gruppi_non_hanno_colonna_motivo(conn, client):
-    """La colonna Motivo ha senso solo nel gruppo errori: altrove sarebbe
-    sempre vuota (nessun contenuto li' e' in BLOCKED/PUBLISH_FAILED)."""
+    """La colonna Motivo ha senso solo nei gruppi errori/approvazioni:
+    altrove sarebbe sempre vuota (nessun contenuto li' e' in BLOCKED/
+    PUBLISH_FAILED/AWAITING_APPROVAL)."""
     db_social.crea_utente(conn, "revisore@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     db_social.crea_content(conn, "Idea qualsiasi")
@@ -69,7 +95,7 @@ def test_lista_contenuti_altri_gruppi_non_hanno_colonna_motivo(conn, client):
     assert "<th>Motivo</th>" not in pagina
 
 
-def test_sidebar_mostra_il_conteggio_errori_su_qualsiasi_pagina(conn, client):
+def test_sidebar_mostra_il_conteggio_revisione_su_qualsiasi_pagina(conn, client):
     db_social.crea_utente(conn, "revisore@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     content_id = db_social.crea_content(conn, "Concorsi per medici in scadenza")
@@ -78,8 +104,11 @@ def test_sidebar_mostra_il_conteggio_errori_su_qualsiasi_pagina(conn, client):
     # Non solo sulla pagina Contenuti: il segnale deve comparire ovunque,
     # es. in Panoramica -- e' quello il punto (prima serviva entrare per
     # caso nella tab giusta per scoprire che c'era qualcosa da rivedere).
+    # Badge su "Revisione" (stessa coda degli AWAITING_APPROVAL, non
+    # "Contenuti"/errori: un bollino rosso non e' un guasto tecnico).
     pagina = client.get("/social/").text
-    assert re.search(r'Contenuti\s*<span class="badge rosso"[^>]*>1</span>', pagina)
+    assert re.search(r'Revisione\s*<span class="badge rosso"[^>]*>1</span>', pagina)
+    assert not re.search(r'Contenuti\s*<span class="badge rosso"', pagina)
 
 
 def test_sidebar_senza_errori_non_mostra_badge(conn, client):
@@ -89,6 +118,7 @@ def test_sidebar_senza_errori_non_mostra_badge(conn, client):
     _login(client, "revisore@test.local")
     pagina = client.get("/social/").text
     assert not re.search(r'Contenuti\s*<span class="badge rosso"', pagina)
+    assert not re.search(r'Revisione\s*<span class="badge rosso"', pagina)
 
 
 # --- Rigenerare (con le note del reviewer) o correggere a mano un BLOCKED ---

@@ -144,17 +144,43 @@ def test_rigenera_immagine_singola_asset_inesistente(conn):
                                          image_provider=MockImageProvider())
 
 
-def test_rigenera_immagine_singola_senza_bando_id_rifiutata(conn):
-    """L'unica immagine di un contenuto senza carosello non ha bando_id:
-    "rigenera solo questa" non ha senso li' (coincide con "rigenera tutte",
-    vedi rigenera_visual)."""
+def test_rigenera_immagine_singola_senza_bando_id_funziona_dai_campi_persistiti(conn):
+    """L'unica immagine di un contenuto senza carosello (o senza bando,
+    es. Libera/Promozioni) non ha bando_id, ma visual() persiste comunque
+    titolo/sottotitolo/dati_chiave sull'asset: "rigenera con una nota"
+    deve funzionare anche li' (segnalato dall'utente: "se genera una sola
+    immagine il sistema non permette di rigenerarla con i suggerimenti")."""
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+    asset_prima = db_social.asset_di(conn, content_id)[0]
+    img_provider = MockImageProvider()
+
+    agents.rigenera_immagine_singola(conn, content_id, asset_prima["id"], image_provider=img_provider,
+                                     nota="sistema gli accenti nel titolo")
+
+    asset_dopo = db_social.asset_di(conn, content_id)[0]
+    assert asset_dopo["percorso"] != asset_prima["percorso"]
+    assert img_provider.richieste[-1].nota_correzione == "sistema gli accenti nel titolo"
+    assert img_provider.richieste[-1].titolo == asset_prima["titolo"]
+
+
+def test_rigenera_immagine_singola_asset_senza_titolo_persistito_rifiutata(conn):
+    """Asset salvati prima della migrazione che persiste titolo/dati_chiave
+    (titolo NULL in DB): non c'e' modo di ricostruire la richiesta senza
+    richiamare il Visual Agent, quindi resta rifiutata con un messaggio che
+    indirizza a 'Rigenera immagine'."""
     content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
     provider = llm.MockLLMProvider(conn)
     risultato = models.RisultatoRicerca(
         fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
     agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
     asset_id = db_social.asset_di(conn, content_id)[0]["id"]
-    with pytest.raises(ValueError, match="carosello"):
+    conn.execute("UPDATE social_media_assets SET titolo = NULL WHERE id = ?", (asset_id,))
+    conn.commit()
+    with pytest.raises(ValueError, match="Rigenera immagine"):
         agents.rigenera_immagine_singola(conn, content_id, asset_id,
                                          image_provider=MockImageProvider())
 
@@ -354,6 +380,26 @@ def test_pagina_contenuto_immagine_singola_non_usa_lo_slider(conn, client):
     assert "scroll-snap-type:x mandatory" not in pagina
 
 
+def test_pagina_contenuto_immagine_singola_mostra_rigenera_con_nota(conn, client):
+    """Bug segnalato dall'utente: con una sola immagine il bottone "rigenera
+    con suggerimento" non compariva affatto (era dentro il ramo carosello
+    del template)."""
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+    db_social.crea_utente(conn, "editor-slider3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-slider3@test.local")
+
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    assert f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera" in pagina
+    assert "rigenera-asset-form" in pagina
+
+
 def test_route_rigenera_testo_mette_in_coda_il_job(conn, client):
     content_id = _contenuto_con_carosello(conn)
     db_social.crea_utente(conn, "editor-testo@test.local",
@@ -495,7 +541,9 @@ def test_route_rigenera_asset_singolo_il_worker_esegue_davvero(conn, client):
     assert aggiornato["percorso"] != target["percorso"]
 
 
-def test_route_rigenera_asset_singolo_senza_bando_id_400(conn, client):
+def test_route_rigenera_asset_singolo_senza_bando_id_mette_in_coda(conn, client):
+    """Un'immagine senza bando_id (fuori carosello) ora si rigenera come
+    qualsiasi altra, usando i campi persistiti sull'asset."""
     content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
     provider = llm.MockLLMProvider(conn)
     risultato = models.RisultatoRicerca(
@@ -505,6 +553,27 @@ def test_route_rigenera_asset_singolo_senza_bando_id_400(conn, client):
     db_social.crea_utente(conn, "editor-asset3@test.local",
                           auth.hash_password("Password123!"), ruolo="editor")
     _login(client, "editor-asset3@test.local")
+    csrf = _csrf(client)
+
+    r = client.post(f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "rigenera_asset_singolo", content_id)
+
+
+def test_route_rigenera_asset_singolo_senza_titolo_persistito_400(conn, client):
+    content_id = db_social.crea_content(conn, "Un solo concorso", canali=["instagram"])
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+    asset_id = db_social.asset_di(conn, content_id)[0]["id"]
+    conn.execute("UPDATE social_media_assets SET titolo = NULL WHERE id = ?", (asset_id,))
+    conn.commit()
+    db_social.crea_utente(conn, "editor-asset6@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-asset6@test.local")
     csrf = _csrf(client)
 
     r = client.post(f"/social/contenuti/{content_id}/asset/{asset_id}/rigenera",

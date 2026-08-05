@@ -218,12 +218,14 @@ def _ctx(request, sessione, conn, **extra):
         "pubblicazioni_da_gestire": (
             len(db_social.lista_content(conn, stati=["APPROVED", "SCHEDULED"]))
             + len(db_social.lista_publications(conn, stato="fallito"))),
-        # Stessi stati del gruppo "errori" in contenuti() (_GRUPPI_STATO):
-        # un contenuto bloccato o con pubblicazione fallita era invisibile
-        # finche' non si cliccava per caso sulla tab giusta in Contenuti
-        # (segnalato dall'utente: vuole un segnale nel menu laterale, non
-        # solo un contatore per i pubblicati).
-        "contenuti_in_errore": len(db_social.lista_content(conn, stati=["PUBLISH_FAILED", "BLOCKED"])),
+        # Stesso stato del gruppo "errori" in contenuti() (_GRUPPI_STATO):
+        # un contenuto con pubblicazione fallita era invisibile finche' non
+        # si cliccava per caso sulla tab giusta in Contenuti (segnalato
+        # dall'utente: vuole un segnale nel menu laterale, non solo un
+        # contatore per i pubblicati). BLOCKED non e' qui: e' un giudizio
+        # dell'AI da rivedere, gia' contato in "revisione_in_attesa" sopra
+        # (segnalato dall'utente: un bollino rosso non e' un errore tecnico).
+        "contenuti_in_errore": len(db_social.lista_content(conn, stati=["PUBLISH_FAILED"])),
         **extra,
     }
 
@@ -455,23 +457,32 @@ def accetta_suggerimento(request: Request, entry_id: str, tema: str = Form(...),
                          csrf: str = Form(None),
                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Accetta (eventualmente modificato: i campi arrivano dal form della
-    card, editabile) un suggerimento: crea il contenuto vero e avvia subito
-    la pipeline — accettare un tema equivale a dire "procedi". categoria_id
-    puo' sovrascrivere quella scelta dal Supervisor (menu a tendina nella
-    card, vedi calendario.html) prima di trasformarla in contenuto vero."""
+    card, editabile) un suggerimento: crea il contenuto vero in IDEA, SENZA
+    avviare la pipeline. Prima la avviava subito ("accettare un tema
+    equivale a dire procedi"): la pipeline arrivava a GENERATING_VISUAL in
+    meno di un minuto, cosi' in fretta che l'utente non faceva in tempo a
+    leggere il tema/brief precompilato ne' a correggerlo prima che partisse
+    la ricerca/generazione immagini — il form di modifica appariva per
+    pochi secondi per poi sparire dietro al refresh automatico della
+    pagina "in corso" (bug segnalato dall'utente). Ora l'utente atterra
+    sulla scheda del contenuto in IDEA, rivede/modifica tema, brief e
+    filtri con calma, e clicca lui "Avvia pipeline agenti" quando e'
+    pronto — stesso identico passaggio in piu' richiesto per un contenuto
+    creato da "Nuovo contenuto" manuale. categoria_id puo' sovrascrivere
+    quella scelta dal Supervisor (menu a tendina nella card, vedi
+    calendario.html) prima di trasformarla in contenuto vero."""
     _richiedi(conn, sessione, "social.edit")
     _verifica_csrf(sessione, csrf)
-    settimana = request.query_params.get("settimana") or _lunedi().isoformat()
     content_id = db_social.accetta_plan_entry(
         conn, entry_id, tema=tema.strip(), pillar_chiave=pillar or None,
         obiettivo=obiettivo or None, giorno=giorno or None,
         categoria_id=categoria_id or None,
-        creato_da=sessione["utente"]["id"])
+        creato_da=sessione["utente"]["id"], avvia_pipeline=False)
     if content_id is None:
         raise HTTPException(status_code=404, detail="Suggerimento non trovato o gia' accettato")
     db_social.audit(conn, "suggerimento_accettato", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id)
-    return RedirectResponse(f"/social/calendario?settimana={settimana}", status_code=303)
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
 @router.post("/calendario/{entry_id}/scarta")
@@ -515,10 +526,16 @@ _GRUPPI_STATO = {
     "idee": ["IDEA", "RESEARCHING", "RESEARCH_FAILED"],
     "bozze": ["DRAFTING", "DRAFT_READY", "GENERATING_VISUAL", "QUALITY_CHECK",
               "CHANGES_REQUESTED"],
-    "approvazioni": ["AWAITING_APPROVAL"],
+    # BLOCKED (bollino rosso del Quality & Risk Agent) sta con le
+    # approvazioni, non con gli errori: e' un giudizio dell'AI da rivedere
+    # (stessa coda di /social/approvazioni, badge rosso invece di giallo,
+    # vedi approvals.richiedi_approvazione in esegui_pipeline), non un
+    # guasto tecnico — "errori" resta per fallimenti reali (rete, provider,
+    # eccezioni non gestite) (segnalato dall'utente).
+    "approvazioni": ["AWAITING_APPROVAL", "BLOCKED"],
     "programmati": ["APPROVED", "SCHEDULED", "PUBLISHING"],
     "pubblicati": ["PUBLISHED", "PARTIALLY_PUBLISHED"],
-    "errori": ["PUBLISH_FAILED", "BLOCKED"],
+    "errori": ["PUBLISH_FAILED"],
     "archivio": ["CANCELLED", "ARCHIVED"],
 }
 
@@ -766,10 +783,11 @@ def _errore_leggibile(errore):
 
 
 def _motivo_breve(content):
-    """Motivo sintetico per un contenuto nel gruppo 'errori' (BLOCKED o
-    PUBLISH_FAILED, vedi _GRUPPI_STATO): senza questo la lista Contenuti
-    mostrava solo 'Fase: Bloccata' + 'Rischio: rosso', senza dire il perche'
-    — bisognava aprire il dettaglio per scoprirlo (segnalato dall'utente).
+    """Motivo sintetico per un contenuto nel gruppo 'errori' (PUBLISH_FAILED)
+    o 'approvazioni' (include anche BLOCKED, vedi _GRUPPI_STATO): senza
+    questo la lista Contenuti mostrava solo 'Fase: Bloccata' + 'Rischio:
+    rosso', senza dire il perche' — bisognava aprire il dettaglio per
+    scoprirlo (segnalato dall'utente).
     Un errore di pipeline (eccezione, vedi _errore_leggibile) ha sempre la
     precedenza; per un BLOCKED senza eccezione (il caso normale: il Quality
     & Risk Agent ha semplicemente giudicato rosso) il motivo e' il primo
@@ -1000,9 +1018,10 @@ def elimina_asset(request: Request, content_id: str, asset_id: str,
 def rigenera_asset_singolo(request: Request, content_id: str, asset_id: str,
                            nota: str = Form(None), csrf: str = Form(None),
                            sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
-    """Rigenera SOLO questa immagine del carosello, in coda come gli altri
-    agenti (stesso possibile costo AI di 'Rigenera immagine'): le altre
-    immagini del carosello non vengono toccate (segnalato dall'utente).
+    """Rigenera SOLO questa immagine (di un carosello o l'unica di una
+    piattaforma), in coda come gli altri agenti (stesso possibile costo AI
+    di 'Rigenera immagine'): le altre immagini non vengono toccate
+    (segnalato dall'utente).
 
     `nota` (opzionale, vedi contenuto.html): istruzione ad-hoc per questo
     tentativo (es. refusi/accenti storpiati nel testo generato dall'AI),
@@ -1013,10 +1032,11 @@ def rigenera_asset_singolo(request: Request, content_id: str, asset_id: str,
     asset = db_social.get_asset(conn, content_id, asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="Immagine non trovata")
-    if not asset["bando_id"]:
+    if not asset["titolo"]:
         raise HTTPException(
             status_code=400,
-            detail="Questa immagine non fa parte di un carosello: usa 'Rigenera immagine'")
+            detail="Questa immagine e' stata generata prima che la rigenerazione guidata da "
+                   "nota fosse disponibile per immagini singole: usa 'Rigenera immagine'")
     payload = {"content_id": content_id, "asset_id": asset_id}
     if nota and nota.strip():
         payload["nota"] = nota.strip()

@@ -267,8 +267,19 @@ function riavviaConScrollSalvato() {
     <p class="hint" style="margin-top:6px">Scorri (trascina o usa le frecce) per vedere tutte le {{ assets_piattaforma|length }} immagini — template: {{ assets_piattaforma[0].template }} — provider: {{ assets_piattaforma[0].provider }}</p>
     {% elif assets_piattaforma %}
     {% set a = assets_piattaforma[0] %}
-    <img src="/social/asset/{{ a.id }}?v={{ a.aggiornato_at or a.creato_at }}" alt="asset {{ piattaforma }}" class="asset-ingrandibile"
-         style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block;cursor:zoom-in">
+    <div style="position:relative">
+      <img src="/social/asset/{{ a.id }}?v={{ a.aggiornato_at or a.creato_at }}" alt="asset {{ piattaforma }}" class="asset-ingrandibile"
+           style="width:100%;max-width:360px;margin:0 auto;border-radius:var(--raggio);border:1px solid var(--colore-bordo);display:block;cursor:zoom-in">
+      {% if 'social.edit' in permessi and not in_corso and not rigenerazione_in_corso
+            and not rigenerazione_asset_in_corso and not rigenerazione_testo_in_corso %}
+      <form method="post" action="/social/contenuti/{{ c.id }}/asset/{{ a.id }}/rigenera" class="inline rigenera-asset-form"
+            style="position:absolute;top:6px;right:6px">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="nota">
+        <button class="btn piccolo secondario" type="submit" title="Rigenera questa immagine (puoi indicare cosa correggere)">🔄</button>
+      </form>
+      {% endif %}
+    </div>
     <p class="hint">template: {{ a.template }} — {{ a.formato }} — provider: {{ a.provider }} —
       generata/aggiornata il {{ (a.aggiornato_at or a.creato_at)|data_breve }}</p>
     {% endif %}

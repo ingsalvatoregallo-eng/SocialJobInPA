@@ -33,14 +33,14 @@
 
 <div class="card">
   <table>
-    <tr><th>Titolo</th><th>Pillar</th><th>Fase</th><th>Rischio</th>{% if gruppo == 'errori' %}<th>Motivo</th>{% endif %}<th>Programmato</th><th>Creato</th><th></th></tr>
+    <tr><th>Titolo</th><th>Pillar</th><th>Fase</th><th>Rischio</th>{% if gruppo in ('errori', 'approvazioni') %}<th>Motivo</th>{% endif %}<th>Programmato</th><th>Creato</th><th></th></tr>
     {% for c in contenuti %}
     <tr>
       <td><a href="/social/contenuti/{{ c.id }}">{{ c.titolo }}</a>{% if c.is_demo %} <span class="badge grigio">DEMO</span>{% endif %}</td>
       <td>{{ c.pillar_nome or '—' }}</td>
       <td><span class="badge {{ c.stato|fase_colore }}">{{ c.stato|fase }}</span></td>
       <td>{% if c.classe_rischio %}<span class="badge {{ c.classe_rischio }}">{{ c.classe_rischio }}</span>{% else %}—{% endif %}</td>
-      {% if gruppo == 'errori' %}<td class="hint" style="max-width:320px">{{ c|motivo_breve or '—' }}</td>{% endif %}
+      {% if gruppo in ('errori', 'approvazioni') %}<td class="hint" style="max-width:320px">{{ c|motivo_breve or '—' }}</td>{% endif %}
       <td>{{ (c.programmato_at or '—')[:16] }}</td>
       <td>{{ c.creato_at[:10] }}</td>
       <td>
@@ -54,7 +54,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="{{ 8 if gruppo == 'errori' else 7 }}" class="hint">
+    <tr><td colspan="{{ 8 if gruppo in ('errori', 'approvazioni') else 7 }}" class="hint">
       Nessun contenuto in questo gruppo.
       {% if altrove %}Guarda {% for g, n in altrove %}<a href="/social/contenuti?gruppo={{ g }}">{{ g }}</a>{{ ' o ' if not loop.last }}{% endfor %} qui sopra.{% endif %}
     </td></tr>

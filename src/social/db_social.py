@@ -264,6 +264,12 @@ CREATE TABLE IF NOT EXISTS social_media_assets (
     provider    TEXT NOT NULL DEFAULT 'template',
     bando_id    TEXT,                 -- bando del carosello che questa immagine rappresenta (NULL fuori carosello)
     url_pubblico TEXT,                -- URL su storage pubblico (R2), NULL se non caricato/non configurato
+    titolo      TEXT,                 -- campi della ImageGenerationRequest usata per generarla, persistiti per
+    sottotitolo TEXT,                 -- poterla rigenerare con una nota di correzione senza richiamare il
+    dati_chiave TEXT,                 -- Visual Agent (JSON lista) -- vedi agents.rigenera_immagine_singola
+    prompt_ai   TEXT,
+    immagini_riferimento TEXT,        -- JSON lista di percorsi locali
+    stile_ai    TEXT,
     creato_at   TEXT NOT NULL
 );
 
@@ -622,6 +628,25 @@ def _migra(conn):
         # (segnalato dall'utente dopo aver rigenerato una singola immagine
         # con delle note di correzione).
         conn.execute("ALTER TABLE social_media_assets ADD COLUMN aggiornato_at TEXT")
+        conn.commit()
+    if "titolo" not in colonne_assets:
+        # Persistono gli stessi campi con cui e' stata costruita la
+        # ImageGenerationRequest di QUESTO asset (titolo/sottotitolo/
+        # dati_chiave/prompt_ai/immagini_riferimento/stile_ai): senza,
+        # "rigenera questa immagine con una nota" per un'immagine SENZA
+        # bando_id (fuori carosello: Promozioni/Funzionalita'/Libera, o
+        # Concorsi con un solo bando) non avrebbe modo di ricostruire la
+        # richiesta senza richiamare un'altra volta il Visual Agent
+        # (rischiando titolo/sottotitolo diversi dall'originale) -- vedi
+        # agents.rigenera_immagine_singola (segnalato dall'utente: "se
+        # genera una sola immagine il sistema non permette di rigenerarla
+        # con i suggerimenti").
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN titolo TEXT")
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN sottotitolo TEXT")
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN dati_chiave TEXT")
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN prompt_ai TEXT")
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN immagini_riferimento TEXT")
+        conn.execute("ALTER TABLE social_media_assets ADD COLUMN stile_ai TEXT")
         conn.commit()
     if "tipologia" not in colonne_content:
         conn.execute(
@@ -1121,13 +1146,26 @@ def aggiorna_testo_variante(conn, content_id, piattaforma, testo):
 
 
 def salva_asset(conn, content_id, percorso, *, piattaforma=None, template=None,
-                formato=None, provider="template", bando_id=None, url_pubblico=None):
+                formato=None, provider="template", bando_id=None, url_pubblico=None,
+                titolo=None, sottotitolo=None, dati_chiave=None, prompt_ai=None,
+                immagini_riferimento=None, stile_ai=None):
+    """titolo/sottotitolo/dati_chiave/prompt_ai/immagini_riferimento/stile_ai:
+    stessi campi della ImageGenerationRequest usata per generare QUESTO
+    asset (vedi agents.visual), persistiti per poterla ricostruire in una
+    rigenerazione guidata da nota senza richiamare il Visual Agent (vedi
+    agents.rigenera_immagine_singola)."""
     asset_id = _nuovo_id()
     adesso = _adesso()
     _insert(conn, "social_media_assets", {
         "id": asset_id, "content_id": content_id, "piattaforma": piattaforma,
         "template": template, "formato": formato, "percorso": str(percorso),
         "provider": provider, "bando_id": bando_id, "url_pubblico": url_pubblico,
+        "titolo": titolo, "sottotitolo": sottotitolo,
+        "dati_chiave": json.dumps(dati_chiave, ensure_ascii=False) if dati_chiave is not None else None,
+        "prompt_ai": prompt_ai,
+        "immagini_riferimento": (json.dumps(immagini_riferimento, ensure_ascii=False)
+                                 if immagini_riferimento is not None else None),
+        "stile_ai": stile_ai,
         "creato_at": adesso, "aggiornato_at": adesso})
     conn.commit()
     return asset_id

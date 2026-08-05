@@ -393,3 +393,28 @@ def test_route_accetta_suggerimento_categoria_esplicita_sovrascrive(conn, client
     voce = db_social.plan_entry(conn, entry_id)
     content = db_social.get_content(conn, voce["content_id"])
     assert content["categoria_id"] == categoria_scelta
+
+
+def test_route_accetta_suggerimento_non_avvia_piu_la_pipeline_da_solo(conn, client):
+    """Segnalato dall'utente: prima l'accettazione avviava SUBITO la
+    pipeline completa, cosi' in fretta (IDEA -> GENERATING_VISUAL in meno
+    di un minuto) che il form di modifica tema/brief/filtri appariva solo
+    per pochi secondi prima di sparire dietro al refresh automatico.
+    Ora atterra sulla scheda del contenuto, ancora IDEA, senza alcun job
+    accodato: l'utente rivede/modifica con calma e avvia lui la pipeline."""
+    entry_id = db_social.crea_plan_entry(conn, _prossimo_lunedi().isoformat(), "Tema",
+                                         giorno=_prossimo_lunedi().isoformat())
+    db_social.crea_utente(conn, "editor-piano5@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-piano5@test.local")
+    csrf = _csrf(client, "/social/calendario")
+
+    r = client.post(f"/social/calendario/{entry_id}/accetta",
+                    data={"tema": "Tema", "csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    voce = db_social.plan_entry(conn, entry_id)
+    content_id = voce["content_id"]
+    assert r.headers["location"] == f"/social/contenuti/{content_id}"
+    assert db_social.get_content(conn, content_id)["stato"] == "IDEA"
+    assert not db_social.job_in_corso(conn, "pipeline", content_id)
