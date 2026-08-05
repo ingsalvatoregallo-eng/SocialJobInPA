@@ -651,6 +651,18 @@ def _migra(conn):
     if "soglia_confidenza" not in colonne_content:
         conn.execute("ALTER TABLE social_content ADD COLUMN soglia_confidenza INTEGER")
         conn.commit()
+    if "interruzione_richiesta" not in colonne_content:
+        # "Interrompi ora" durante la pipeline (vedi agents.
+        # GenerazioneInterrotta): un flag, non uno stato — il contenuto
+        # resta nel suo stato "in corso" reale finche' il worker non lo
+        # controlla al prossimo checkpoint (soprattutto prima di ogni
+        # immagine del carosello, le piu' costose, vedi visual()), cosi'
+        # fermarsi a meta' risparmia davvero il costo delle immagini
+        # rimanenti (segnalato dall'utente: vuole poter smettere appena
+        # legge il testo, senza aspettare che finiscano anche le immagini).
+        conn.execute(
+            "ALTER TABLE social_content ADD COLUMN interruzione_richiesta INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
     colonne_categorie = {r["name"] for r in conn.execute("PRAGMA table_info(social_content_categories)")}
     if "immagini_riferimento" not in colonne_categorie:
         # Prima si supportava una sola immagine di riferimento
@@ -918,7 +930,7 @@ def lista_content(conn, stati=None, limit=200):
 def aggiorna_content(conn, content_id, **campi):
     consentiti = {"titolo", "obiettivo", "brief", "stato", "classe_rischio", "decisione_rischio",
                   "punteggi_rischio", "canali", "programmato_at", "errore", "bandi_trovati",
-                  "concorso_id", "filtri_manuali", "soglia_confidenza"}
+                  "concorso_id", "filtri_manuali", "soglia_confidenza", "interruzione_richiesta"}
     campi = {k: v for k, v in campi.items() if k in consentiti}
     if not campi:
         return
@@ -931,6 +943,21 @@ def aggiorna_content(conn, content_id, **campi):
     _esegui_scrittura_con_retry(
         conn, f"UPDATE social_content SET {assegnazioni} WHERE id = ?",
         (*campi.values(), content_id))
+
+
+def richiedi_interruzione(conn, content_id):
+    """"Interrompi ora" (vedi web.interrompi_generazione): il worker la
+    controlla a ogni checkpoint della pipeline in corso (vedi agents.
+    GenerazioneInterrotta), non e' immediata — non puo' interrompere una
+    singola chiamata AI gia' in volo, ma evita quelle successive (es. le
+    immagini del carosello non ancora generate)."""
+    aggiorna_content(conn, content_id, interruzione_richiesta=1)
+
+
+def interruzione_richiesta(conn, content_id):
+    riga = conn.execute("SELECT interruzione_richiesta FROM social_content WHERE id = ?",
+                        (content_id,)).fetchone()
+    return bool(riga and riga["interruzione_richiesta"])
 
 
 def elimina_content(conn, content_id, *, utente_id=None):

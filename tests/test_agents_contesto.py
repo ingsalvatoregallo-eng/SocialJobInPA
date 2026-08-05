@@ -28,8 +28,8 @@ class _ClientFinto:
     def configurato(self):
         return True
 
-    def bandi(self, *, stato="OPEN", limit=5, **_):
-        self.chiamate.append(("bandi", stato, limit))
+    def bandi(self, *, stato="OPEN", limit=5, solo_concorsi=None, **_):
+        self.chiamate.append(("bandi", stato, limit, solo_concorsi))
         return self._bandi
 
     def bando(self, concorso_id):
@@ -56,7 +56,22 @@ def test_contesto_jobinpa_con_bandi_dalla_api(conn):
     assert "Comune Demo" in contesto
     assert "Laurea in Informatica" in contesto
     assert righe == [_BANDO_ESEMPIO]
-    assert client.chiamate == [("bandi", "OPEN", 3)]
+    assert client.chiamate == [("bandi", "OPEN", 3, None)]
+
+
+def test_contesto_jobinpa_propaga_solo_concorsi_ai_bandi_semplici(conn):
+    client = _ClientFinto(bandi=[_BANDO_ESEMPIO])
+    agents._contesto_jobinpa(None, limite=3, client=client, solo_concorsi=True)
+    assert client.chiamate == [("bandi", "OPEN", 3, True)]
+
+
+def test_contesto_jobinpa_propaga_solo_concorsi_alla_ricerca_semantica(conn):
+    client = _ClientFinto(bandi_semantici_con_filtri=[_BANDO_ESEMPIO])
+    agents._contesto_jobinpa(
+        None, client=client, filtri={"regione": "Lombardia"},
+        query_semantica="concorsi qualsiasi", solo_concorsi=True)
+    chiamata = [c for c in client.chiamate if c[0] == "bandi_semantici"][0]
+    assert chiamata[3]["solo_concorsi"] is True
 
 
 def test_contesto_jobinpa_per_concorso_specifico(conn):
@@ -192,3 +207,29 @@ def test_research_agent_non_esplode_con_bandi_dalla_api(conn, monkeypatch):
                                        provider=llm.MockLLMProvider(conn),
                                        image_provider=MockImageProvider())
     assert risultato in {"APPROVED", "AWAITING_APPROVAL", "BLOCKED"}
+
+
+def test_research_forza_solo_concorsi_per_la_strategia_bandi_jobinpa(conn, monkeypatch):
+    """Un contenuto senza categoria (default bandi_jobinpa, vedi
+    _strategia_fatti_per_content) deve chiedere solo concorsi veri a
+    JobInPA — segnalato dall'utente: 'Genera 3 idee' (e la creazione
+    manuale) non devono mai mischiare concorsi con mobilita'/distacchi/
+    incarichi per collaboratori esterni."""
+    client = _ClientFinto(bandi=[_BANDO_ESEMPIO])
+    monkeypatch.setattr("social.jobinpa_client.client", lambda: client)
+    content_id = db_social.crea_content(conn, "Idea legata a un bando reale")
+    agents.research(conn, content_id, provider=llm.MockLLMProvider(conn))
+    chiamata_bandi = [c for c in client.chiamate if c[0] == "bandi"][0]
+    assert chiamata_bandi[3] is True
+
+
+def test_supervisor_pianifica_settimana_forza_solo_concorsi_nei_bandi_di_riferimento(conn, monkeypatch):
+    """I bandi di riferimento passati al prompt del Supervisor ('Genera 3
+    idee') non devono includere mobilita'/distacchi/incarichi esterni:
+    "Concorsi" (bandi_jobinpa) e' seminata di default (vedi db_social.
+    _migra), quindi la chiamata a _contesto_jobinpa avviene sempre qui."""
+    client = _ClientFinto(bandi=[_BANDO_ESEMPIO])
+    monkeypatch.setattr("social.jobinpa_client.client", lambda: client)
+    agents.supervisor_pianifica_settimana(conn, "2026-08-03", provider=llm.MockLLMProvider(conn))
+    chiamata_bandi = [c for c in client.chiamate if c[0] == "bandi"][0]
+    assert chiamata_bandi[3] is True

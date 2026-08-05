@@ -125,7 +125,8 @@ def test_research_con_criteri_specifici_e_bandi_trovati(conn):
         conn, "Concorsi IT", brief="Concorsi informatici con più di 10 posti")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
     assert client.chiamate_bandi_semantici == [
-        {"query": "Concorsi informatici con più di 10 posti", "limit": 10, "competenza": "informatica"}]
+        {"query": "Concorsi informatici con più di 10 posti", "limit": 10, "competenza": "informatica",
+         "solo_concorsi": True}]
     assert client.chiamate_bandi == []  # mai il vecchio match esatto quando c'e' un brief
     assert risultato.fatti or risultato.sintesi is not None  # non solleva, prosegue normale
     assert risultato.bandi_trovati == [_BANDO_INFORMATICO]
@@ -155,7 +156,7 @@ def test_research_senza_criteri_specifici_usa_comunque_la_ricerca_semantica(conn
         conn, "Novità della settimana", brief="Raccontiamo le novità di questa settimana")
     risultato = agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
     assert client.chiamate_bandi_semantici == [
-        {"query": "Raccontiamo le novità di questa settimana", "limit": 10}]
+        {"query": "Raccontiamo le novità di questa settimana", "limit": 10, "solo_concorsi": True}]
     assert client.chiamate_bandi == []
     assert risultato is not None
 
@@ -189,7 +190,7 @@ def test_research_con_scadenza_la_passa_come_filtro_duro(conn):
     agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
     assert client.chiamate_bandi_semantici == [
         {"query": "Concorsi per medici in scadenza nei prossimi 7 giorni", "limit": 10,
-         "scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10"}]
+         "scadenza_da": "2026-08-03", "scadenza_a": "2026-08-10", "solo_concorsi": True}]
 
 
 def test_research_con_filtri_manuali_salta_interpreta_brief(conn):
@@ -204,7 +205,8 @@ def test_research_con_filtri_manuali_salta_interpreta_brief(conn):
         filtri_manuali={"regione": "Lombardia", "competenza": "informatica"})
     agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
     assert client.chiamate_bandi_semantici == [
-        {"query": "Novità di oggi", "limit": 10, "regione": "Lombardia", "competenza": "informatica"}]
+        {"query": "Novità di oggi", "limit": 10, "regione": "Lombardia", "competenza": "informatica",
+         "solo_concorsi": True}]
     esecuzioni = db_social.agent_runs_recenti(conn)
     assert not any(r["prompt_nome"] == "interpreta_brief" for r in esecuzioni)
 
@@ -225,7 +227,7 @@ def test_research_senza_brief_non_interpreta_niente(conn):
     provider = llm.MockLLMProvider(conn)
     content_id = db_social.crea_content(conn, "Contenuto senza brief")
     agents.research(conn, content_id, provider=provider, jobinpa_client_=client)
-    assert client.chiamate_bandi == [{"limit": 10, "stato": "OPEN"}]
+    assert client.chiamate_bandi == [{"limit": 10, "stato": "OPEN", "solo_concorsi": True}]
     # nessuna chiamata al prompt interpreta_brief tra le chiamate LLM registrate
     esecuzioni = db_social.agent_runs_recenti(conn)
     assert not any(r["prompt_nome"] == "interpreta_brief" for r in esecuzioni)

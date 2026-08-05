@@ -57,6 +57,22 @@ class NessunaCategoriaIdonea(Exception):
     backoffice)."""
 
 
+class GenerazioneInterrotta(Exception):
+    """L'utente ha cliccato "Interrompi ora" (vedi web.interrompi_
+    generazione/db_social.richiedi_interruzione) mentre la pipeline era
+    ancora in corso — controllato a ogni checkpoint costoso (prima di
+    generare ciascuna immagine del carosello, vedi visual()), cosi'
+    fermarsi a meta' risparmia davvero il costo delle immagini rimanenti,
+    non solo quelle gia' generate (segnalato dall'utente: il testo arriva
+    prima delle immagini, e le immagini costano molto di piu' — vuole
+    poter interrompere appena legge un testo che non gli piace, senza
+    aspettare che finiscano anche le immagini, per poi modificare l'idea
+    e risottometterla). Stesso trattamento di NessunBandoCorrispondente in
+    esegui_pipeline: riporta il contenuto a RESEARCH_FAILED (brief
+    modificabile, pronto per un nuovo tentativo) invece di un errore
+    generico."""
+
+
 # Quale statistica aggregata (da /api/internal/funzionalita, vedi
 # research()) citare per ciascuna funzionalita', quando pertinente: un
 # numero reale e verificabile invece di un generico "molto usata".
@@ -123,7 +139,7 @@ def _fetch_fonte(conn, url):
 
 def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO, *,
                       client=None, filtri=None, query_semantica=None, soglia_confidenza=None,
-                      filtri_da_ai=True):
+                      filtri_da_ai=True, solo_concorsi=None):
     """Fatti dal portale JobInPA (fonte primaria autorizzata), letti via API
     private: il bando indicato con la sua classificazione AI (sintesi,
     requisiti, titolo di studio), oppure — con `query_semantica` (il brief
@@ -179,6 +195,13 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
     soglia, cosi' l'utente decide quanto essere permissivo invece di
     subire una soglia fissa nascosta nel codice.
 
+    solo_concorsi=True esclude mobilita'/distacchi/incarichi per
+    collaboratori esterni (vedi jobinpa_client.bandi, filtro applicato
+    lato JobInPA PRIMA del confronto semantico): usato da research() per
+    la strategia bandi_jobinpa, cosi' "Genera 3 idee" e "Nuovo contenuto"
+    non mischiano mai concorsi veri con altre tipologie di bando
+    (segnalato dall'utente).
+
     Ritorna (testo_formattato, righe): il chiamante usa `righe` per sapere
     se la ricerca ha trovato qualcosa (vedi research(), annullamento se la
     ricerca semantica non trova nulla di pertinente). Senza JOBINPA_API_URL/
@@ -196,18 +219,19 @@ def _contesto_jobinpa(concorso_id=None, limite=images.MASSIMO_IMMAGINI_CAROSELLO
         scadenza_a = filtri_semantici.pop("scadenza_a", None)
         righe = client.bandi_semantici(query_semantica, limit=limite,
                                        scadenza_da=scadenza_da, scadenza_a=scadenza_a,
-                                       **filtri_semantici)
+                                       solo_concorsi=solo_concorsi, **filtri_semantici)
         if not righe and filtri_semantici and filtri_da_ai:
             righe = client.bandi_semantici(query_semantica, limit=limite,
-                                           scadenza_da=scadenza_da, scadenza_a=scadenza_a)
+                                           scadenza_da=scadenza_da, scadenza_a=scadenza_a,
+                                           solo_concorsi=solo_concorsi)
         if posti_minimi:
             righe = [r for r in righe if (r.get("num_posti") or 0) >= posti_minimi]
         if soglia_confidenza is not None:
             righe = [r for r in righe if (r.get("coerenza_semantica") or 0) >= soglia_confidenza]
     elif filtri:
-        righe = client.bandi(limit=limite, **filtri)
+        righe = client.bandi(limit=limite, solo_concorsi=solo_concorsi, **filtri)
     else:
-        righe = client.bandi(stato="OPEN", limit=limite)
+        righe = client.bandi(stato="OPEN", limit=limite, solo_concorsi=solo_concorsi)
     blocchi = []
     for bando in righe:
         if not bando:
@@ -418,9 +442,16 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
         if criteri_specifici:
             filtri = _filtri_da_criteri(criteri)
         query_semantica = content["brief"]
+    # Questo ramo di research() e' raggiunto SOLO dalla strategia
+    # bandi_jobinpa (promozioni_jobinpa/funzionalita_jobinpa/libera sono
+    # gia' usciti sopra con un return): solo_concorsi=True qui, sempre,
+    # esclude mobilita'/distacchi/incarichi per collaboratori esterni,
+    # cosi' "Genera 3 idee" e "Nuovo contenuto" trattano solo concorsi
+    # veri (segnalato dall'utente: non devono mai mischiarsi).
     contesto, righe_trovate = _contesto_jobinpa(
         content["concorso_id"], client=client, filtri=filtri, query_semantica=query_semantica,
-        soglia_confidenza=content["soglia_confidenza"], filtri_da_ai=not filtri_manuali_usati)
+        soglia_confidenza=content["soglia_confidenza"], filtri_da_ai=not filtri_manuali_usati,
+        solo_concorsi=True)
     if criteri_specifici and not righe_trovate:
         raise NessunBandoCorrispondente(
             "Nessun bando su JobInPA pertinente" +
@@ -774,6 +805,13 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             # che ne sceglie uno e relega gli altri a nota testuale nella
             # caption (comportamento precedente, segnalato dall'utente).
             for bando in bandi_carosello:
+                if db_social.interruzione_richiesta(conn, content_id):
+                    # Controllato PRIMA di ogni immagine, non solo una volta
+                    # all'inizio del carosello: fermarsi qui risparmia il
+                    # costo delle immagini ancora da generare, non solo di
+                    # quelle gia' fatte (segnalato dall'utente).
+                    raise GenerazioneInterrotta(
+                        "Generazione interrotta dall'utente durante il carosello immagini")
                 richiesta = _richiesta_immagine_da_bando(
                     bando, formato, content_id, categoria=categoria,
                     immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine)
@@ -785,6 +823,8 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
                                       bando_id=bando.get("id"),
                                       url_pubblico=asset_storage.carica_pubblico(asset.percorso))
             continue
+        if db_social.interruzione_richiesta(conn, content_id):
+            raise GenerazioneInterrotta("Generazione interrotta dall'utente prima delle immagini")
         richiesta = images.ImageGenerationRequest(
             template=brief.template, formato=formato, titolo=brief.titolo,
             sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
@@ -997,7 +1037,13 @@ def supervisor_pianifica_settimana(conn, settimana, *, provider=None):
         f'- "{c["nome"]}": {_DESCRIZIONE_STRATEGIA_SUPERVISOR[c["strategia_fatti"]]}'
         + (f' — soggetto tipico: {c["prompt_ai"][:150]}' if c["prompt_ai"] else "")
         for c in categorie)
-    contesto, _righe = _contesto_jobinpa(None, limite=5)
+    # solo_concorsi=True: questi bandi sono solo un riferimento per
+    # ispirare i temi (la ricerca vera avviene dopo in research(), quando
+    # il tema accettato diventa un contenuto) — ma un mobilita'/distacco/
+    # incarico esterno qui dentro rischia comunque di far proporre un tema
+    # che lo tratta come un concorso vero (segnalato dall'utente: "Genera
+    # 3 idee" non deve mai mischiare le tipologie).
+    contesto, _righe = _contesto_jobinpa(None, limite=5, solo_concorsi=True)
     piano = _run_llm(
         conn, "supervisor", "supervisor", models.PianoSettimanale,
         f"Settimana del {settimana}. Bandi aperti di riferimento:\n"
@@ -1147,6 +1193,10 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
         approvazione = db_social.approval_aperta_di(conn, content_id)
         if approvazione and approvazione["stato"] == "modifiche_richieste":
             note_revisore = approvazione["motivo"]
+    # Azzerato a ogni tentativo: un flag rimasto acceso da un'interruzione
+    # precedente (vedi GenerazioneInterrotta sotto) non deve far fallire
+    # subito anche il nuovo tentativo appena risottomesso dall'utente.
+    db_social.aggiorna_content(conn, content_id, interruzione_richiesta=0)
     state_machine.transisci(conn, content_id, "RESEARCHING", agente="supervisor")
     try:
         ricerca = research(conn, content_id, provider=provider, urls_extra=urls_extra,
@@ -1168,6 +1218,19 @@ def esegui_pipeline(conn, content_id, *, provider=None, image_provider=None,
         state_machine.transisci(conn, content_id, "CANCELLED", agente="supervisor",
                                 motivo=str(errore))
         return "CANCELLED"
+    except GenerazioneInterrotta as errore:
+        # A differenza degli errori veri (except Exception sotto), qui NON
+        # si rilancia: il job deve concludersi 'done', non 'errore' (che
+        # verrebbe ritentato con backoff, riavviando da solo la pipeline
+        # da RESEARCH_FAILED — STATI_PIPELINE_AVVIABILE la considera un
+        # punto di ripartenza valido — e rispendendo esattamente il costo
+        # che l'interruzione doveva evitare). RESEARCH_FAILED lascia il
+        # brief modificabile, pronto per un nuovo tentativo quando l'utente
+        # decide di risottometterlo lui stesso.
+        db_social.aggiorna_content(conn, content_id, errore=str(errore))
+        state_machine.transisci(conn, content_id, "RESEARCH_FAILED", agente="supervisor",
+                                motivo=str(errore))
+        return "RESEARCH_FAILED"
     except Exception as errore:
         # RESEARCH_FAILED e' lo stato di recupero della pipeline, raggiungibile
         # da ogni stato che il blocco try qui sopra attraversa (RESEARCHING,

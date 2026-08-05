@@ -36,7 +36,16 @@ function riavviaConScrollSalvato() {
 }
 </script>
 {% if in_corso %}
-<div class="avviso info">⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</div>
+<div class="avviso info" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+  <span>⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</span>
+  {% if 'social.edit' in permessi %}
+  <form method="post" action="/social/contenuti/{{ c.id }}/interrompi"
+        onsubmit="return confirm('Interrompere la generazione? Non e\' immediato (una chiamata AI gia\' in corso finisce comunque), ma le immagini del carosello non ancora generate vengono risparmiate. Il contenuto torna modificabile per un nuovo tentativo.');">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn piccolo testo-rosso" type="submit">⏹ Interrompi ora</button>
+  </form>
+  {% endif %}
+</div>
 <script>setTimeout(riavviaConScrollSalvato, 4000);</script>
 {% elif rigenerazione_in_corso %}
 <div class="avviso info">⏳ <strong>Rigenerazione immagine in corso</strong> — il testo resta invariato. Questa pagina si aggiorna automaticamente.</div>

@@ -831,6 +831,29 @@ def avvia_pipeline(request: Request, content_id: str, csrf: str = Form(None),
     return RedirectResponse(f"/social/contenuti/{content_id}?avviata=1", status_code=303)
 
 
+@router.post("/contenuti/{content_id}/interrompi")
+def interrompi_generazione(request: Request, content_id: str, csrf: str = Form(None),
+                           sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Segnala al worker di fermarsi al prossimo checkpoint (vedi agents.
+    GenerazioneInterrotta) invece di aspettare che finisca da sola: non
+    immediato (non puo' interrompere una chiamata AI gia' in volo), ma
+    risparmia le immagini del carosello ancora da generare — le piu'
+    costose, e quelle che arrivano per ultime (segnalato dall'utente: vuole
+    poter fermarsi appena legge un testo che non gli piace, senza aspettare
+    che finiscano anche le immagini, per modificare l'idea e risottometterla)."""
+    _richiedi(conn, sessione, "social.edit")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    if content["stato"] not in _STATI_PIPELINE_IN_CORSO:
+        raise HTTPException(status_code=409, detail="Nessuna generazione in corso da interrompere")
+    db_social.richiedi_interruzione(conn, content_id)
+    db_social.audit(conn, "generazione_interrotta", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id)
+    return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
+
+
 @router.post("/contenuti/{content_id}/riporta-in-bozza")
 def riporta_in_bozza(request: Request, content_id: str, csrf: str = Form(None),
                      sessione=Depends(utente_web), conn=Depends(ottieni_conn)):

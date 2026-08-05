@@ -72,6 +72,31 @@ def test_bandi_semantici_passa_scadenza_da_e_scadenza_a():
     assert kwargs["params"]["scadenza_a"] == "2026-08-10"
 
 
+def test_bandi_semantici_passa_solo_concorsi():
+    """solo_concorsi=True esclude mobilita'/distacchi/incarichi esterni
+    PRIMA del confronto semantico (segnalato dall'utente: 'Genera 3 idee'
+    non deve mai mischiare le tipologie di bando)."""
+    client = _client_configurato()
+    risposta_finta = mock.Mock()
+    risposta_finta.json.return_value = {"bandi": []}
+    risposta_finta.raise_for_status.return_value = None
+    with mock.patch("social.jobinpa_client.requests.get", return_value=risposta_finta) as finto:
+        client.bandi_semantici("test", solo_concorsi=True)
+    _, kwargs = finto.call_args
+    assert kwargs["params"]["solo_concorsi"] == "true"
+
+
+def test_bandi_semantici_senza_solo_concorsi_non_lo_passa():
+    client = _client_configurato()
+    risposta_finta = mock.Mock()
+    risposta_finta.json.return_value = {"bandi": []}
+    risposta_finta.raise_for_status.return_value = None
+    with mock.patch("social.jobinpa_client.requests.get", return_value=risposta_finta) as finto:
+        client.bandi_semantici("test")
+    _, kwargs = finto.call_args
+    assert "solo_concorsi" not in kwargs["params"]
+
+
 def test_bandi_semantici_errore_di_rete_ritorna_lista_vuota():
     import requests
     client = _client_configurato()
