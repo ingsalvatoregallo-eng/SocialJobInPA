@@ -139,17 +139,32 @@
     {% endif %}
     {% if dettaglio.punteggi.motivi_ai %}
     <div class="avviso giallo" style="margin-top:10px">
-      <strong>🤖 Dubbi del giudizio AI (agisci su ognuno: cita nella richiesta di modifiche)</strong>
+      <strong>🤖 Dubbi del giudizio AI (agisci su ognuno: cita nella richiesta di modifiche, o addestra il reviewer)</strong>
       <ul style="margin:6px 0 0;padding-left:18px;list-style:none">
         {% for m in dettaglio.punteggi.motivi_ai %}
         <li style="font-size:13px;display:flex;justify-content:space-between;gap:8px;align-items:start;padding:4px 0">
           <span>{{ m }}</span>
           {% if 'social.approve' in permessi %}
-          <button type="button" class="btn piccolo secondario" style="white-space:nowrap" onclick="citaDubbio({{ m|tojson }})">↩ cita</button>
+          <span style="display:flex;gap:4px;white-space:nowrap">
+            <button type="button" class="btn piccolo secondario" onclick="citaDubbio({{ m|tojson }})">↩ cita</button>
+            <form method="post" action="/social/approvazioni/{{ selezionata.content_id }}/dubbio/conferma" class="inline"
+                  title="Fondato: continua a segnalarlo sempre in futuro">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="testo" value="{{ m }}">
+              <button class="btn piccolo secondario" type="submit">✓ conferma</button>
+            </form>
+            <form method="post" action="/social/approvazioni/{{ selezionata.content_id }}/dubbio/rifiuta" class="inline"
+                  title="Falso positivo: non segnalarlo piu' in futuro">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="testo" value="{{ m }}">
+              <button class="btn piccolo secondario" type="submit">✕ rifiuta</button>
+            </form>
+          </span>
           {% endif %}
         </li>
         {% endfor %}
       </ul>
+      <p class="hint" style="margin-top:6px">"Conferma"/"Rifiuta" valgono per tutti i contenuti futuri, non solo questo — gestiscile in <a href="/social/regole">Regole revisione</a>.</p>
     </div>
     {% endif %}
     {% endif %}

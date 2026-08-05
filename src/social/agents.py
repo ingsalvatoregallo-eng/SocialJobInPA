@@ -998,10 +998,24 @@ def quality_risk(conn, content_id, risultato_ricerca, *, provider=None):
         testo_completo, fonti_verificate=fonti_verificate,
         fonti_in_conflitto=fonti_in_conflitto)
     fatti = "\n".join(f"- {f.fatto}" for f in risultato_ricerca.fatti)
+    user_prompt = f"Fatti verificati:\n{fatti}\n\nContenuto proposto:\n{testo_completo}"
+    # Regole "addestrate" da un revisore umano (vedi web.conferma_alert_
+    # reviewer/rifiuta_alert_reviewer, pagina /social/regole): un dubbio del
+    # giudizio AI confermato in passato diventa un criterio applicato SEMPRE
+    # (vincolo), uno rifiutato diventa un caso da non segnalare piu'
+    # (esenzione) — cosi' il giudizio migliora nel tempo invece di ripetere
+    # sempre gli stessi errori/falsi positivi (segnalato dall'utente).
+    vincoli = [r["testo"] for r in db_social.regole_revisione_attive(conn, tipo="vincolo")]
+    esenzioni = [r["testo"] for r in db_social.regole_revisione_attive(conn, tipo="esenzione")]
+    if vincoli:
+        user_prompt += ("\n\nCriteri aggiuntivi confermati da un revisore umano in passato, "
+                        "applicali SEMPRE:\n" + "\n".join(f"- {v}" for v in vincoli))
+    if esenzioni:
+        user_prompt += ("\n\nCasi gia' esaminati da un revisore umano e giudicati NON "
+                        "problematici, non segnalarli piu':\n" + "\n".join(f"- {e}" for e in esenzioni))
     valutazione = _run_llm(
         conn, "quality_risk", "quality_risk", models.ValutazioneRischio,
-        f"Fatti verificati:\n{fatti}\n\nContenuto proposto:\n{testo_completo}",
-        content_id=content_id, provider=provider)
+        user_prompt, content_id=content_id, provider=provider)
     classe_finale = risk.peggiore(classe_regole, valutazione.classe)
     decisione = risk.decisione(classe_finale)
     db_social.aggiorna_content(

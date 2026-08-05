@@ -441,6 +441,26 @@ CREATE TABLE IF NOT EXISTS social_system_settings (
     aggiornato_at TEXT NOT NULL
 );
 
+-- Regole del Quality & Risk Agent "addestrate" dai revisori umani (vedi
+-- web.conferma_alert_reviewer/rifiuta_alert_reviewer, pagina /social/regole):
+-- un dubbio del giudizio AI (content.punteggi_rischio.motivi_ai, mai le
+-- regole deterministiche di risk.classifica_regole, quelle sono codice fisso)
+-- confermato da un umano diventa un "vincolo" applicato SEMPRE nei
+-- prossimi giudizi; rifiutato diventa un'"esenzione" che dice
+-- esplicitamente all'AI di non segnalarlo piu' (vedi agents.quality_risk).
+-- Scope GLOBALE (non per categoria/contenuto): segnalato dall'utente,
+-- vuole una lista sola semplice da gestire.
+CREATE TABLE IF NOT EXISTS social_review_rules (
+    id                  TEXT PRIMARY KEY,
+    testo               TEXT NOT NULL,
+    tipo                TEXT NOT NULL,             -- vincolo | esenzione
+    stato               TEXT NOT NULL DEFAULT 'attiva',  -- attiva | disattivata
+    origine_content_id  TEXT,                      -- NULL se creata a mano dalla pagina regole
+    creato_da           INTEGER,
+    creato_at           TEXT NOT NULL,
+    aggiornato_at       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS social_scheduled_jobs (
     id           TEXT PRIMARY KEY,
     tipo         TEXT NOT NULL,       -- publish | collect_metrics | generate_week_plan | pipeline
@@ -1785,6 +1805,59 @@ def aggiorna_plan_entry(conn, entry_id, *, pillar_chiave=None, **campi):
 def pillars(conn):
     return conn.execute(
         "SELECT * FROM social_editorial_pillars WHERE attivo = 1 ORDER BY chiave").fetchall()
+
+
+# --- Regole del Quality & Risk Agent (vedi social_review_rules) --------------
+
+def crea_regola_revisione(conn, testo, tipo, *, origine_content_id=None, creato_da=None):
+    """tipo: 'vincolo' (applicato sempre) | 'esenzione' (non segnalare piu').
+    Nasce di solito da un dubbio del giudizio AI confermato/rifiutato in
+    Revisione (origine_content_id valorizzato), o creata a mano dalla
+    pagina /social/regole (origine_content_id None)."""
+    if tipo not in ("vincolo", "esenzione"):
+        raise ValueError(f"tipo regola non valido: {tipo}")
+    regola_id = _nuovo_id()
+    adesso = _adesso()
+    _insert(conn, "social_review_rules", {
+        "id": regola_id, "testo": testo.strip(), "tipo": tipo, "stato": "attiva",
+        "origine_content_id": origine_content_id, "creato_da": creato_da,
+        "creato_at": adesso, "aggiornato_at": adesso})
+    conn.commit()
+    return regola_id
+
+
+def regole_revisione_attive(conn, tipo=None):
+    """Iniettate nel prompt del Quality & Risk Agent a ogni valutazione
+    (vedi agents.quality_risk): solo le "attive", una regola disattivata
+    dalla pagina /social/regole smette immediatamente di contare."""
+    if tipo:
+        return conn.execute(
+            "SELECT * FROM social_review_rules WHERE stato = 'attiva' AND tipo = ? "
+            "ORDER BY creato_at", (tipo,)).fetchall()
+    return conn.execute(
+        "SELECT * FROM social_review_rules WHERE stato = 'attiva' ORDER BY creato_at").fetchall()
+
+
+def lista_regole_revisione(conn):
+    return conn.execute(
+        "SELECT * FROM social_review_rules ORDER BY creato_at DESC").fetchall()
+
+
+def aggiorna_regola_revisione(conn, regola_id, **campi):
+    consentiti = {"testo", "stato"}
+    campi = {k: v for k, v in campi.items() if k in consentiti and v is not None}
+    if not campi:
+        return
+    campi["aggiornato_at"] = _adesso()
+    assegnazioni = ", ".join(f"{k} = ?" for k in campi)
+    conn.execute(f"UPDATE social_review_rules SET {assegnazioni} WHERE id = ?",
+                 (*campi.values(), regola_id))
+    conn.commit()
+
+
+def elimina_regola_revisione(conn, regola_id):
+    conn.execute("DELETE FROM social_review_rules WHERE id = ?", (regola_id,))
+    conn.commit()
 
 
 # --- Job persistenti ----------------------------------------------------------

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block titolo %}Regole revisione — JobInPA Social AI{% endblock %}
+{% block contenuto %}
+<div class="header-pagina">
+  <div>
+    <h1>Regole revisione</h1>
+    <p class="sottotitolo">Criteri "addestrati" dal Quality &amp; Risk Agent: nascono di solito confermando o rifiutando un dubbio in Revisione, applicati SEMPRE ai prossimi giudizi (non solo al contenuto da cui sono nati). Le regole deterministiche (parole vietate, ecc.) non sono qui: sono codice fisso, non un'opinione da negoziare.</p>
+  </div>
+</div>
+
+<div class="griglia" style="grid-template-columns:1fr 340px;align-items:start">
+  <div class="card">
+    <h3>Regole esistenti</h3>
+    {% for r in regole %}
+    <div style="border-top:1px solid var(--colore-bordo);padding:14px 0">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="badge {{ 'blu' if r.tipo == 'vincolo' else 'viola' }}">
+            {{ 'Vincolo (segnala sempre)' if r.tipo == 'vincolo' else 'Esenzione (non segnalare)' }}
+          </span>
+          <span class="badge {{ 'verde' if r.stato == 'attiva' else 'grigio' }}">{{ r.stato }}</span>
+          {% if r.origine_content_id %}<span class="hint">nata da un contenuto revisionato</span>{% endif %}
+        </div>
+        <div style="display:flex;gap:8px;white-space:nowrap">
+          <form method="post" action="/social/regole/{{ r.id }}/toggle" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn piccolo secondario" type="submit">{{ '⏸ Disattiva' if r.stato == 'attiva' else '▶ Riattiva' }}</button>
+          </form>
+          <form method="post" action="/social/regole/{{ r.id }}/elimina" class="inline"
+                onsubmit="return confirm('Eliminare definitivamente questa regola?');">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn piccolo secondario" type="submit">🗑️ Elimina</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="vista-{{ r.id }}" style="margin-top:8px">
+        <p style="white-space:pre-wrap;font-size:13px;margin:0">{{ r.testo }}</p>
+        <button type="button" class="btn piccolo secondario" style="margin-top:6px" onclick="mostraModificaRegola('{{ r.id }}')">✏️ Modifica testo</button>
+      </div>
+      <div id="modifica-{{ r.id }}" style="display:none;margin-top:8px">
+        <form method="post" action="/social/regole/{{ r.id }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <textarea name="testo" rows="3" required>{{ r.testo }}</textarea>
+          <div style="display:flex;gap:10px;margin-top:6px">
+            <button type="button" class="btn piccolo secondario" onclick="nascondiModificaRegola('{{ r.id }}')">Annulla</button>
+            <button class="btn piccolo" type="submit">💾 Salva</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">Nessuna regola ancora — nascono confermando/rifiutando un dubbio del Quality &amp; Risk Agent in <a href="/social/approvazioni">Revisione</a>, o creale qui a mano.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Nuova regola</h3>
+    <form method="post" action="/social/regole">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Tipo *</label>
+      <select name="tipo" required>
+        <option value="vincolo">Vincolo — segnala sempre questo criterio</option>
+        <option value="esenzione">Esenzione — non segnalare mai questo caso</option>
+      </select>
+
+      <label>Testo *</label>
+      <textarea name="testo" rows="4" required maxlength="1000"
+                placeholder="Es. 'Non citare mai un prezzo senza indicare la fonte' (vincolo), o 'Non segnalare più i post che citano una scadenza specifica come commerciale' (esenzione)"></textarea>
+      <p class="hint">Entra nel prompt del Quality &amp; Risk Agent a ogni valutazione, vale per tutti i contenuti futuri.</p>
+      <button class="btn piccolo" type="submit" style="margin-top:10px">Crea regola</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function mostraModificaRegola(id) {
+  document.getElementById('vista-' + id).style.display = 'none';
+  document.getElementById('modifica-' + id).style.display = 'block';
+}
+function nascondiModificaRegola(id) {
+  document.getElementById('modifica-' + id).style.display = 'none';
+  document.getElementById('vista-' + id).style.display = 'block';
+}
+</script>
+{% endblock %}

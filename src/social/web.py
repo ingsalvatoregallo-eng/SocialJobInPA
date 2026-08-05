@@ -1181,6 +1181,58 @@ def modifica_variante(request: Request, content_id: str, piattaforma: str,
     return RedirectResponse(f"/social/contenuti/{content_id}", status_code=303)
 
 
+def _redirect_dopo_regola(content):
+    """Stesso motivo di modifica_variante: torna a Revisione solo se il
+    contenuto e' davvero li' (AWAITING_APPROVAL), altrimenti alla pagina
+    Contenuto (BLOCKED, arrivato dalla scheda invece che dalla coda)."""
+    if content["stato"] == "AWAITING_APPROVAL":
+        return RedirectResponse(f"/social/approvazioni?content_id={content['id']}", status_code=303)
+    return RedirectResponse(f"/social/contenuti/{content['id']}", status_code=303)
+
+
+@router.post("/approvazioni/{content_id}/dubbio/conferma")
+def conferma_alert_reviewer(request: Request, content_id: str, testo: str = Form(...),
+                            csrf: str = Form(None),
+                            sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Il dubbio del giudizio AI (content.punteggi_rischio.motivi_ai, MAI le
+    regole deterministiche di risk.classifica_regole: quelle sono codice
+    fisso, non un'opinione da confermare/rifiutare) era fondato: diventa un
+    "vincolo" applicato SEMPRE nei prossimi giudizi (vedi agents.
+    quality_risk), non solo per questo contenuto — cosi' il reviewer AI
+    "impara" dalle correzioni umane invece di ripetere sempre lo stesso
+    lavoro di revisione (segnalato dall'utente)."""
+    _richiedi(conn, sessione, "social.approve")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    db_social.crea_regola_revisione(conn, testo, "vincolo", origine_content_id=content_id,
+                                    creato_da=sessione["utente"]["id"])
+    db_social.audit(conn, "regola_revisione_confermata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id, dettagli={"testo": testo})
+    return _redirect_dopo_regola(content)
+
+
+@router.post("/approvazioni/{content_id}/dubbio/rifiuta")
+def rifiuta_alert_reviewer(request: Request, content_id: str, testo: str = Form(...),
+                           csrf: str = Form(None),
+                           sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Il dubbio del giudizio AI non era fondato (falso positivo): diventa
+    un'"esenzione" che dice esplicitamente all'AI di non segnalarlo piu',
+    non solo per questo contenuto (vedi conferma_alert_reviewer sopra,
+    stesso principio, verso opposto)."""
+    _richiedi(conn, sessione, "social.approve")
+    _verifica_csrf(sessione, csrf)
+    content = db_social.get_content(conn, content_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Contenuto non trovato")
+    db_social.crea_regola_revisione(conn, testo, "esenzione", origine_content_id=content_id,
+                                    creato_da=sessione["utente"]["id"])
+    db_social.audit(conn, "regola_revisione_rifiutata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="content", oggetto_id=content_id, dettagli={"testo": testo})
+    return _redirect_dopo_regola(content)
+
+
 @router.post("/approvazioni/{approval_id}")
 def decidi_approvazione(request: Request, approval_id: str,
                         azione: str = Form(...), motivo: str = Form(None),
@@ -1534,6 +1586,79 @@ def anteprima_immagine_categoria(categoria_id: str, indice: int, sessione=Depend
     if not percorso.exists():
         raise HTTPException(status_code=404)
     return FileResponse(percorso)
+
+
+# --- Regole del Quality & Risk Agent ------------------------------------------
+# Nascono di solito confermando/rifiutando un dubbio in Revisione (vedi
+# conferma_alert_reviewer/rifiuta_alert_reviewer sopra); questa pagina le
+# elenca tutte e permette di crearne/modificarne/disattivarne a mano, senza
+# dover passare per un contenuto specifico (segnalato dall'utente: vuole
+# una pagina di gestione delle regole passate al reviewer).
+
+@router.get("/regole", response_class=HTMLResponse)
+def regole(request: Request, sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    return templates.TemplateResponse(request, "regole.html", _ctx(
+        request, sessione, conn, pagina_attiva="regole",
+        regole=db_social.lista_regole_revisione(conn)))
+
+
+@router.post("/regole")
+def crea_regola(request: Request, testo: str = Form(...), tipo: str = Form(...),
+                csrf: str = Form(None),
+                sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    if tipo not in ("vincolo", "esenzione"):
+        raise HTTPException(status_code=400, detail="tipo non valido")
+    regola_id = db_social.crea_regola_revisione(conn, testo, tipo,
+                                                creato_da=sessione["utente"]["id"])
+    db_social.audit(conn, "regola_revisione_creata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="regola_revisione", oggetto_id=regola_id)
+    return RedirectResponse("/social/regole", status_code=303)
+
+
+@router.post("/regole/{regola_id}")
+def aggiorna_regola(request: Request, regola_id: str, testo: str = Form(...),
+                    csrf: str = Form(None),
+                    sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    db_social.aggiorna_regola_revisione(conn, regola_id, testo=testo)
+    db_social.audit(conn, "regola_revisione_modificata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="regola_revisione", oggetto_id=regola_id)
+    return RedirectResponse("/social/regole", status_code=303)
+
+
+@router.post("/regole/{regola_id}/toggle")
+def toggle_regola(request: Request, regola_id: str, csrf: str = Form(None),
+                  sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Disattivare (mai eliminare) e' la via reversibile per smettere di
+    applicare una regola senza perderne lo storico — riattivabile in un
+    secondo momento con lo stesso bottone."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    riga = conn.execute("SELECT stato FROM social_review_rules WHERE id = ?",
+                        (regola_id,)).fetchone()
+    if riga is None:
+        raise HTTPException(status_code=404)
+    nuovo_stato = "disattivata" if riga["stato"] == "attiva" else "attiva"
+    db_social.aggiorna_regola_revisione(conn, regola_id, stato=nuovo_stato)
+    db_social.audit(conn, "regola_revisione_stato_cambiato", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="regola_revisione", oggetto_id=regola_id,
+                    dettagli={"nuovo_stato": nuovo_stato})
+    return RedirectResponse("/social/regole", status_code=303)
+
+
+@router.post("/regole/{regola_id}/elimina")
+def elimina_regola(request: Request, regola_id: str, csrf: str = Form(None),
+                   sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    db_social.elimina_regola_revisione(conn, regola_id)
+    db_social.audit(conn, "regola_revisione_eliminata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="regola_revisione", oggetto_id=regola_id)
+    return RedirectResponse("/social/regole", status_code=303)
 
 
 # --- Impostazioni ------------------------------------------------------------
