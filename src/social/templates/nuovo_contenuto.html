@@ -4,171 +4,188 @@
 <div class="header-pagina">
   <div>
     <h1>Nuovo contenuto</h1>
-    <p class="sottotitolo">Descrivi l'idea: l'AI la trasformerà in un post con fonti e visual.</p>
+    <p class="sottotitolo">Rispondi alle domande passo per passo: ognuna condiziona la successiva. L'AI trasformerà le tue risposte in un post con fonti e visual.</p>
   </div>
 </div>
 
 <div class="griglia" style="grid-template-columns:1fr 300px;align-items:start">
-  <form class="card" method="post" action="/social/contenuti" id="form-nuovo">
+  <form class="card" method="post" action="/social/contenuti" id="form-nuovo" novalidate>
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="categoria_id" id="campo-categoria" required>
+    <input type="hidden" name="pillar" id="campo-pillar" required>
 
-    <label>Categoria *</label>
-    <select name="categoria_id" id="campo-categoria" required onchange="aggiornaCategoria()">
-      <option value="">— seleziona —</option>
-      {% for c in categorie %}
-      <option value="{{ c.id }}" data-strategia="{{ c.strategia_fatti }}">{{ c.nome }}</option>
-      {% endfor %}
-    </select>
-    <p class="hint">Gestisci categorie, prompt immagine e struttura del post in <a href="/social/categorie">Categorie</a>.</p>
+    <div id="stepper" style="display:flex;align-items:flex-start;gap:6px;margin-bottom:20px"></div>
 
-    <div id="blocco-titolo">
-      <label>Titolo / tema *</label>
-      <input type="text" name="titolo" id="campo-titolo" required placeholder="Es. Concorso Ministero X 100 posti amministrativi">
+    <div class="step" data-step="categoria">
+      <p style="font-weight:600;font-size:14px;margin:0 0 10px">Cosa vuoi creare?</p>
+      <div id="carte-categoria"></div>
     </div>
 
-    <div id="blocco-promozione" style="display:none">
-      <label>Promozione attiva su JobInPA *</label>
-      {% if promozioni_disponibili %}
-      <select name="promo_selezionata" id="campo-promo-selezionata">
-        <option value="">— seleziona —</option>
-        {% for p in promozioni_disponibili %}
-        <option value="{{ p.tipo }}|{{ p.chiave }}">{{ p.nome }}{% if p.prezzo_promozionale_eur is not none %} — {{ "%.2f"|format(p.prezzo_promozionale_eur) }} €{% if p.prezzo_eur %} (invece di {{ "%.2f"|format(p.prezzo_eur) }} €){% endif %}{% endif %}{% if p.scadenza %} · scade {{ p.scadenza }}{% endif %}</option>
-        {% endfor %}
-      </select>
-      <p class="hint">Titolo, descrizione, prezzo e scadenza vengono letti da JobInPA in questo momento: il copywriter AI scrive il post a partire da questi dati reali, non da un claim inserito a mano.</p>
-      {% else %}
-      <div class="avviso giallo">⚠️ Nessuna promozione attiva trovata su JobInPA in questo momento (o l'integrazione JOBINPA_API_URL/KEY non è configurata). Attiva una promozione su JobInPA prima di creare questo contenuto.</div>
-      {% endif %}
+    <div class="step" data-step="modalita">
+      <p style="font-weight:600;font-size:14px;margin:0 0 10px">Come vuoi comunicarlo?</p>
+      <label class="carta-scelta">
+        <input type="radio" name="modalita_ricerca" value="specifico" style="width:auto" onchange="alPassoSuccessivo()">
+        <span><strong>Un concorso specifico</strong><span class="hint" style="margin:2px 0 0">Hai già il bando in mente, incolli il link o l'id</span></span>
+      </label>
+      <label class="carta-scelta">
+        <input type="radio" name="modalita_ricerca" value="ricerca" style="width:auto" checked onchange="alPassoSuccessivo()">
+        <span><strong>Più concorsi (ricerca)</strong><span class="hint" style="margin:2px 0 0">L'AI cerca su JobInPA in base a un tema/brief</span></span>
+      </label>
     </div>
 
-    <div id="blocco-funzionalita" style="display:none">
-      <label>Funzionalità di JobInPA * <span class="hint">(tieni premuto Ctrl/Cmd per selezionarne più di una)</span></label>
-      {% if funzionalita_disponibili %}
-      <select name="funzionalita_selezionata" id="campo-funzionalita-selezionata" multiple size="6">
-        {% for f in funzionalita_disponibili %}
-        <option value="{{ f.chiave }}">{{ f.icona }} {{ f.nome }} ({{ f.categoria }})</option>
-        {% endfor %}
-      </select>
-      <p class="hint">Nome, descrizione, categoria e link vengono letti dal catalogo JobInPA in questo momento: il copywriter AI scrive il post a partire da questi dati reali (comprese le statistiche d'uso, quando disponibili). Puoi scegliere anche più funzionalità per lo stesso post.</p>
-      {% else %}
-      <div class="avviso giallo">⚠️ Nessuna funzionalità trovata su JobInPA in questo momento (o l'integrazione JOBINPA_API_URL/KEY non è configurata).</div>
-      {% endif %}
+    <div class="step" data-step="intento">
+      <p style="font-weight:600;font-size:14px;margin:0 0 4px">Perché lo stai comunicando?</p>
+      <p class="hint" style="margin:0 0 10px">Guida il tono del testo e, per i Concorsi, quale grafica viene generata.</p>
+      <div id="carte-intento"></div>
     </div>
 
-    <div id="blocco-modalita-ricerca" style="display:none">
-      <label>Come vuoi comunicarlo?</label>
+    <div class="step" data-step="dettagli">
+      <p style="font-weight:600;font-size:14px;margin:0 0 10px">Di cosa si tratta?</p>
+
+      <div id="blocco-titolo">
+        <label>Titolo / tema *</label>
+        <input type="text" name="titolo" id="campo-titolo" placeholder="Es. Concorso Ministero X 100 posti amministrativi">
+      </div>
+
+      <div id="blocco-promozione" style="display:none">
+        <label>Promozione attiva su JobInPA *</label>
+        {% if promozioni_disponibili %}
+        <select name="promo_selezionata" id="campo-promo-selezionata">
+          <option value="">— seleziona —</option>
+          {% for p in promozioni_disponibili %}
+          <option value="{{ p.tipo }}|{{ p.chiave }}">{{ p.nome }}{% if p.prezzo_promozionale_eur is not none %} — {{ "%.2f"|format(p.prezzo_promozionale_eur) }} €{% if p.prezzo_eur %} (invece di {{ "%.2f"|format(p.prezzo_eur) }} €){% endif %}{% endif %}{% if p.scadenza %} · scade {{ p.scadenza }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <p class="hint">Titolo, descrizione, prezzo e scadenza vengono letti da JobInPA in questo momento: il copywriter AI scrive il post a partire da questi dati reali, non da un claim inserito a mano.</p>
+        {% else %}
+        <div class="avviso giallo">⚠️ Nessuna promozione attiva trovata su JobInPA in questo momento (o l'integrazione JOBINPA_API_URL/KEY non è configurata). Attiva una promozione su JobInPA prima di creare questo contenuto.</div>
+        {% endif %}
+      </div>
+
+      <div id="blocco-funzionalita" style="display:none">
+        <label>Funzionalità di JobInPA * <span class="hint">(tieni premuto Ctrl/Cmd per selezionarne più di una)</span></label>
+        {% if funzionalita_disponibili %}
+        <select name="funzionalita_selezionata" id="campo-funzionalita-selezionata" multiple size="6">
+          {% for f in funzionalita_disponibili %}
+          <option value="{{ f.chiave }}">{{ f.icona }} {{ f.nome }} ({{ f.categoria }})</option>
+          {% endfor %}
+        </select>
+        <p class="hint">Nome, descrizione, categoria e link vengono letti dal catalogo JobInPA in questo momento: il copywriter AI scrive il post a partire da questi dati reali (comprese le statistiche d'uso, quando disponibili). Puoi scegliere anche più funzionalità per lo stesso post.</p>
+        {% else %}
+        <div class="avviso giallo">⚠️ Nessuna funzionalità trovata su JobInPA in questo momento (o l'integrazione JOBINPA_API_URL/KEY non è configurata).</div>
+        {% endif %}
+      </div>
+
+      <div id="blocco-bando-specifico" style="display:none">
+        <label>Bando specifico</label>
+        <input type="text" name="bando_specifico" id="campo-bando-specifico"
+               placeholder="Incolla l'URL della scheda bando su JobInPA (es. jobinpa.it/bandi/gu:26E04294) o il suo id">
+        <p class="hint">Salta del tutto la ricerca (brief/ricerca semantica) e usa esattamente questo bando — utile se sai già quale bando vuoi ma la ricerca semantica non lo trova ancora (es. appena pubblicato: l'indicizzazione gira circa un'ora dopo la classificazione). Titolo/dati vengono letti dal bando stesso, non serve compilare "Titolo / tema" qui sopra.</p>
+      </div>
+
+      <div id="blocco-brief">
+        <label>Brief</label>
+        <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
+                  placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
+        <p class="hint">Il testo del brief è anche la query di ricerca (come la barra di ricerca su JobInPA). Per categorie senza ricerca bandi è un dettaglio facoltativo in più.</p>
+      </div>
+
+      <div id="blocco-ricerca-avanzata" style="display:none">
+        <button type="button" class="btn piccolo secondario" onclick="toggleRicercaAvanzata()" id="btn-ricerca-avanzata">🔍 Ricerca avanzata</button>
+        <div id="pannello-ricerca-avanzata" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--colore-bordo);border-radius:var(--raggio)">
+          <p class="hint" style="margin-top:0">Stessi filtri della ricerca avanzata di JobInPA: se ne compili anche solo uno, la ricerca usa ESATTAMENTE questi valori invece di farli dedurre dal brief.</p>
+          <div class="griglia griglia-auto" style="gap:10px">
+            <div><label>Regione</label>
+              <select name="f_regione"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('regioni', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Categoria bando</label>
+              <select name="f_categoria"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('categorie', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Settore</label>
+              <select name="f_settore"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('settori', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Ente</label>
+              <select name="f_ente"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('enti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Competenza</label>
+              <select name="f_competenza"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('competenze', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Ambito</label>
+              <select name="f_ambito"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('ambiti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Inquadramento</label>
+              <select name="f_inquadramento"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('inquadramenti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Titolo di studio</label>
+              <select name="f_titolo_studio"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('titoli_studio', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Tipo contratto</label>
+              <select name="f_tipo_contratto"><option value="">— qualsiasi —</option>
+                {% for v in filtri_disponibili.get('tipi_contratto', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select></div>
+            <div><label>Posti minimi</label>
+              <input type="number" name="f_posti_minimi" min="1"></div>
+            <div><label>Scadenza da</label>
+              <input type="date" name="f_scadenza_da"></div>
+            <div><label>Scadenza a</label>
+              <input type="date" name="f_scadenza_a"></div>
+            <div><label>Confidenza minima AI</label>
+              <select name="f_soglia_confidenza">
+                <option value="">— nessuna soglia —</option>
+                <option value="90">≥ 90%</option>
+                <option value="80">≥ 80%</option>
+                <option value="70">≥ 70%</option>
+                <option value="60">≥ 60%</option>
+              </select></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:10px">
+            <input type="checkbox" name="f_lavoro_agile" value="1" style="width:auto">Solo con lavoro agile
+          </label>
+        </div>
+      </div>
+      <div class="avviso giallo" style="margin-top:14px" id="avviso-annullamento">
+        ⚠️ Se la categoria cerca bandi reali e nessuno corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button type="button" class="btn" onclick="alPassoSuccessivo()">Continua</button>
+      </div>
+    </div>
+
+    <div class="step" data-step="canali">
+      <p style="font-weight:600;font-size:14px;margin:0 0 10px">Dove pubblicare?</p>
       <div style="display:flex;gap:16px">
         <label style="display:flex;align-items:center;gap:6px;font-weight:400">
-          <input type="radio" name="modalita_ricerca" value="specifico" style="width:auto" onchange="aggiornaCategoria()">Un concorso specifico
+          <input type="checkbox" name="canali" value="instagram" style="width:auto"
+                 {{ 'checked' if 'instagram' in canali_abilitati }}>📷 Instagram
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-weight:400">
-          <input type="radio" name="modalita_ricerca" value="ricerca" style="width:auto" checked onchange="aggiornaCategoria()">Più concorsi (ricerca)
+          <input type="checkbox" name="canali" value="linkedin" style="width:auto"
+                 {{ 'checked' if 'linkedin' in canali_abilitati }}>💼 LinkedIn
         </label>
+      </div>
+      <p class="hint">Un canale il cui account non è ancora abilitato in <a href="/social/impostazioni">Impostazioni</a> parte deselezionato: niente testo/immagine generati (e nessun costo AI) per un canale su cui non si può comunque pubblicare. Puoi comunque selezionarlo a mano se vuoi preparare un contenuto in anticipo.</p>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button type="button" class="btn" onclick="alPassoSuccessivo()">Continua</button>
       </div>
     </div>
 
-    <div id="blocco-bando-specifico" style="display:none">
-      <label>Bando specifico</label>
-      <input type="text" name="bando_specifico" id="campo-bando-specifico"
-             placeholder="Incolla l'URL della scheda bando su JobInPA (es. jobinpa.it/bandi/gu:26E04294) o il suo id">
-      <p class="hint">Salta del tutto la ricerca (brief/ricerca semantica) e usa esattamente questo bando — utile se sai già quale bando vuoi ma la ricerca semantica non lo trova ancora (es. appena pubblicato: l'indicizzazione gira circa un'ora dopo la classificazione). Titolo/dati vengono letti dal bando stesso, non serve compilare "Titolo / tema" qui sopra.</p>
+    <div class="step" data-step="riepilogo">
+      <p style="font-weight:600;font-size:14px;margin:0 0 10px">Riepilogo</p>
+      <div id="riepilogo-contenuto" style="background:var(--colore-sfondo);border-radius:var(--raggio);padding:12px 16px"></div>
     </div>
 
-    <label>Intento *</label>
-    <select name="pillar" required>
-      <option value="">— seleziona —</option>
-      {% for p in pillars %}<option value="{{ p.chiave }}">{{ p.nome }}</option>{% endfor %}
-    </select>
-    <p class="hint">Guida il tono del testo e, per i Concorsi, quale grafica viene generata: badge "NUOVO CONCORSO" per Opportunità/Guida pratica, "IN SCADENZA" per Scadenze e aggiornamenti — la scelta qui si ritrova davvero nell'immagine e nel testo del post.</p>
-
-    <div id="blocco-brief">
-      <label>Brief</label>
-      <textarea name="brief" id="campo-brief" rows="5" maxlength="1500"
-                placeholder="Descrivi cosa vuoi comunicare: contesto, numeri, target, scadenze, punti chiave."></textarea>
-      <p class="hint">Il testo del brief è anche la query di ricerca (come la barra di ricerca su JobInPA). Per categorie senza ricerca bandi è un dettaglio facoltativo in più.</p>
-    </div>
-
-    <div id="blocco-ricerca-avanzata" style="display:none">
-      <button type="button" class="btn piccolo secondario" onclick="toggleRicercaAvanzata()" id="btn-ricerca-avanzata">🔍 Ricerca avanzata</button>
-      <div id="pannello-ricerca-avanzata" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--colore-bordo);border-radius:var(--raggio)">
-        <p class="hint" style="margin-top:0">Stessi filtri della ricerca avanzata di JobInPA: se ne compili anche solo uno, la ricerca usa ESATTAMENTE questi valori invece di farli dedurre dal brief.</p>
-        <div class="griglia griglia-auto" style="gap:10px">
-          <div><label>Regione</label>
-            <select name="f_regione"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('regioni', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Categoria bando</label>
-            <select name="f_categoria"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('categorie', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Settore</label>
-            <select name="f_settore"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('settori', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Ente</label>
-            <select name="f_ente"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('enti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Competenza</label>
-            <select name="f_competenza"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('competenze', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Ambito</label>
-            <select name="f_ambito"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('ambiti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Inquadramento</label>
-            <select name="f_inquadramento"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('inquadramenti', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Titolo di studio</label>
-            <select name="f_titolo_studio"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('titoli_studio', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Tipo contratto</label>
-            <select name="f_tipo_contratto"><option value="">— qualsiasi —</option>
-              {% for v in filtri_disponibili.get('tipi_contratto', []) %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-            </select></div>
-          <div><label>Posti minimi</label>
-            <input type="number" name="f_posti_minimi" min="1"></div>
-          <div><label>Scadenza da</label>
-            <input type="date" name="f_scadenza_da"></div>
-          <div><label>Scadenza a</label>
-            <input type="date" name="f_scadenza_a"></div>
-          <div><label>Confidenza minima AI</label>
-            <select name="f_soglia_confidenza">
-              <option value="">— nessuna soglia —</option>
-              <option value="90">≥ 90%</option>
-              <option value="80">≥ 80%</option>
-              <option value="70">≥ 70%</option>
-              <option value="60">≥ 60%</option>
-            </select></div>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:10px">
-          <input type="checkbox" name="f_lavoro_agile" value="1" style="width:auto">Solo con lavoro agile
-        </label>
-      </div>
-    </div>
-
-    <label>Canali</label>
-    <div style="display:flex;gap:16px">
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
-        <input type="checkbox" name="canali" value="instagram" style="width:auto"
-               {{ 'checked' if 'instagram' in canali_abilitati }}>📷 Instagram
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
-        <input type="checkbox" name="canali" value="linkedin" style="width:auto"
-               {{ 'checked' if 'linkedin' in canali_abilitati }}>💼 LinkedIn
-      </label>
-    </div>
-    <p class="hint">Un canale il cui account non è ancora abilitato in <a href="/social/impostazioni">Impostazioni</a> parte deselezionato: niente testo/immagine generati (e nessun costo AI) per un canale su cui non si può comunque pubblicare. Puoi comunque selezionarlo a mano se vuoi preparare un contenuto in anticipo.</p>
-    <div class="avviso giallo" style="margin-top:14px" id="avviso-annullamento">
-      ⚠️ Se la categoria cerca bandi reali e nessuno corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
-    </div>
-
-    <div style="display:flex;gap:10px;margin-top:6px">
-      <a class="btn secondario" href="/social/contenuti">Annulla</a>
-      <button type="submit" class="btn" style="margin-left:auto">✨ Crea e avvia l'AI</button>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button type="button" class="btn secondario" id="btn-indietro" onclick="alPassoPrecedente()" style="visibility:hidden">← Indietro</button>
+      <a class="btn secondario" href="/social/contenuti" style="margin-left:auto">Annulla</a>
+      <button type="submit" class="btn" id="btn-crea" style="display:none">✨ Crea e avvia l'AI</button>
     </div>
   </form>
 
@@ -184,11 +201,62 @@
   </div>
 </div>
 
+<style>
+.carta-scelta {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 12px 14px; margin: 0 0 8px; border-radius: var(--raggio);
+  border: 1px solid var(--colore-bordo); background: #fff; cursor: pointer; font-weight: 400;
+}
+.carta-scelta:hover { border-color: var(--colore-primario); }
+.carta-scelta input:checked ~ span, .carta-scelta:has(input:checked) {
+  border-color: var(--colore-primario); background: var(--colore-badge-ai-sfondo);
+}
+.step { display: none; }
+.step.attivo { display: block; }
+</style>
+
 <script>
+var CATEGORIE = [
+  {% for c in categorie %}{id: {{ c.id|tojson }}, nome: {{ c.nome|tojson }}, strategia: {{ c.strategia_fatti|tojson }}},{% endfor %}
+];
+var PILLARS = [
+  {% for p in pillars %}{chiave: {{ p.chiave|tojson }}, nome: {{ p.nome|tojson }}},{% endfor %}
+];
+var iconaCategoria = {bandi_jobinpa: '🏛️', promozioni_jobinpa: '🏷️', funzionalita_jobinpa: '✨', libera: '✏️'};
+var subCategoria = {
+  bandi_jobinpa: 'Cerca o pubblicizza bandi reali da JobInPA',
+  promozioni_jobinpa: 'Un’offerta attiva su JobInPA',
+  funzionalita_jobinpa: 'Racconta una funzione della piattaforma',
+  libera: 'Scrivi da un tuo brief, nessuna fonte JobInPA'
+};
+
+function carta(nome, valore, radioName, sub) {
+  return '<label class="carta-scelta"><input type="radio" name="' + radioName + '" value="' + valore +
+    '" style="width:auto" onchange="scegli' + (radioName === 'sel_categoria' ? 'Categoria' : 'Intento') + '(this.value)"><span><strong>' +
+    nome + '</strong><span class="hint" style="margin:2px 0 0;display:block">' + (sub || '') + '</span></span></label>';
+}
+
+function scegliCategoria(id) {
+  document.getElementById('campo-categoria').value = id;
+  aggiornaCategoria();
+  alPassoSuccessivo();
+}
+function scegliIntento(chiave) {
+  document.getElementById('campo-pillar').value = chiave;
+  alPassoSuccessivo();
+}
+
+document.getElementById('carte-categoria').innerHTML = CATEGORIE.map(function (c) {
+  return carta(c.nome, c.id, 'sel_categoria', subCategoria[c.strategia] || '');
+}).join('');
+document.getElementById('carte-intento').innerHTML = PILLARS.map(function (p) {
+  return carta(p.nome, p.chiave, 'sel_intento', '');
+}).join('');
+
 function aggiornaCategoria() {
-  var select = document.getElementById('campo-categoria');
-  var opzione = select.options[select.selectedIndex];
-  var strategia = opzione ? opzione.dataset.strategia : '';
+  var id = document.getElementById('campo-categoria').value;
+  var cat = CATEGORIE.filter(function (c) { return c.id === id; })[0];
+  var strategia = cat ? cat.strategia : '';
   var promozione = strategia === 'promozioni_jobinpa';
   var funzionalita = strategia === 'funzionalita_jobinpa';
   var bandi = strategia === 'bandi_jobinpa';
@@ -197,17 +265,10 @@ function aggiornaCategoria() {
 
   document.getElementById('blocco-promozione').style.display = promozione ? 'block' : 'none';
   document.getElementById('blocco-funzionalita').style.display = funzionalita ? 'block' : 'none';
-  document.getElementById('blocco-modalita-ricerca').style.display = bandi ? 'block' : 'none';
   document.getElementById('blocco-bando-specifico').style.display = bandoSpecifico ? 'block' : 'none';
   document.getElementById('campo-bando-specifico').disabled = !bandoSpecifico;
   document.getElementById('blocco-ricerca-avanzata').style.display = (bandi && !bandoSpecifico) ? 'block' : 'none';
-  // Il brief e' la query di ricerca: non ha senso quando un bando
-  // specifico bypassa gia' del tutto la ricerca (segnalato dall'utente).
   document.getElementById('blocco-brief').style.display = bandoSpecifico ? 'none' : 'block';
-  // Il titolo/tema resta libero per le funzionalità (possono essere piu'
-  // di una: niente "nome" singolo ovvio da cui derivarlo) e per i bandi
-  // in modalita' ricerca; la promozione o un bando specifico lo
-  // nascondono e lo derivano dai dati reali.
   var titoloDerivato = promozione || bandoSpecifico;
   document.getElementById('blocco-titolo').style.display = titoloDerivato ? 'none' : 'block';
   document.getElementById('campo-titolo').disabled = titoloDerivato;
@@ -215,11 +276,8 @@ function aggiornaCategoria() {
   if (selectPromo) { selectPromo.disabled = !promozione; }
   var selectFunzionalita = document.getElementById('campo-funzionalita-selezionata');
   if (selectFunzionalita) { selectFunzionalita.disabled = !funzionalita; }
-
-  document.getElementById('avviso-annullamento').style.display =
-    bandi && !bandoSpecifico ? 'block' : 'none';
+  document.getElementById('avviso-annullamento').style.display = bandi && !bandoSpecifico ? 'block' : 'none';
 }
-aggiornaCategoria();
 
 function toggleRicercaAvanzata() {
   var pannello = document.getElementById('pannello-ricerca-avanzata');
@@ -227,5 +285,92 @@ function toggleRicercaAvanzata() {
   pannello.style.display = aperto ? 'none' : 'block';
   document.getElementById('btn-ricerca-avanzata').textContent = aperto ? '🔍 Ricerca avanzata' : '🔍 Nascondi ricerca avanzata';
 }
+
+function passiAttivi() {
+  var passi = ['categoria'];
+  var id = document.getElementById('campo-categoria').value;
+  var cat = CATEGORIE.filter(function (c) { return c.id === id; })[0];
+  if (cat && cat.strategia === 'bandi_jobinpa') { passi.push('modalita'); }
+  passi.push('intento', 'dettagli', 'canali', 'riepilogo');
+  return passi;
+}
+
+var passoCorrente = 0;
+
+function etichettaCategoriaScelta() {
+  var id = document.getElementById('campo-categoria').value;
+  var cat = CATEGORIE.filter(function (c) { return c.id === id; })[0];
+  return cat ? cat.nome : '(nessuna)';
+}
+function etichettaIntentoScelto() {
+  var chiave = document.getElementById('campo-pillar').value;
+  var p = PILLARS.filter(function (p) { return p.chiave === chiave; })[0];
+  return p ? p.nome : '(nessuno)';
+}
+
+function renderStepper() {
+  var passi = passiAttivi();
+  var nomi = {categoria: 'Categoria', modalita: 'Come comunicarlo', intento: 'Intento', dettagli: 'Dettagli', canali: 'Canali', riepilogo: 'Riepilogo'};
+  var html = '';
+  for (var idx = 0; idx < passi.length; idx++) {
+    var fatto = idx < passoCorrente, attivo = idx === passoCorrente;
+    var sfondo = fatto ? 'var(--colore-verde-sfondo)' : attivo ? 'var(--colore-badge-ai-sfondo)' : 'var(--colore-sfondo)';
+    var colore = fatto ? 'var(--colore-verde)' : attivo ? 'var(--colore-primario)' : 'var(--colore-testo-muto)';
+    var interno = fatto ? '✓' : (idx + 1);
+    html += '<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0">' +
+      '<div style="width:24px;height:24px;border-radius:50%;background:' + sfondo + ';color:' + colore +
+      ';display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700">' + interno + '</div>' +
+      '<span style="font-size:10.5px;margin-top:3px;color:' + (attivo ? 'var(--colore-testo)' : 'var(--colore-testo-muto)') +
+      ';text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:76px">' + nomi[passi[idx]] + '</span></div>';
+    if (idx < passi.length - 1) {
+      html += '<div style="height:1px;background:' + (fatto ? 'var(--colore-verde)' : 'var(--colore-bordo)') + ';flex:1;margin-top:12px"></div>';
+    }
+  }
+  document.getElementById('stepper').innerHTML = html;
+}
+
+function renderRiepilogo() {
+  var id = document.getElementById('campo-categoria').value;
+  var cat = CATEGORIE.filter(function (c) { return c.id === id; })[0];
+  var righe = [['Categoria', etichettaCategoriaScelta()]];
+  var radioSpecifico = document.querySelector('input[name="modalita_ricerca"][value="specifico"]');
+  if (cat && cat.strategia === 'bandi_jobinpa') {
+    righe.push(['Come comunicarlo', radioSpecifico && radioSpecifico.checked ? 'Un concorso specifico' : 'Ricerca']);
+  }
+  righe.push(['Intento', etichettaIntentoScelto()]);
+  var bando = document.getElementById('campo-bando-specifico').value;
+  var titolo = document.getElementById('campo-titolo').value;
+  righe.push(bando ? ['Bando', bando] : ['Titolo', titolo || '(da definire)']);
+  var canali = [];
+  document.querySelectorAll('input[name="canali"]:checked').forEach(function (c) { canali.push(c.value); });
+  righe.push(['Canali', canali.join(', ') || 'nessuno']);
+  document.getElementById('riepilogo-contenuto').innerHTML = righe.map(function (r) {
+    return '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-top:1px solid var(--colore-bordo)">' +
+      '<span style="color:var(--colore-testo-muto)">' + r[0] + '</span><span style="font-weight:600">' + r[1] + '</span></div>';
+  }).join('');
+}
+
+function mostraPasso() {
+  var passi = passiAttivi();
+  passoCorrente = Math.min(passoCorrente, passi.length - 1);
+  document.querySelectorAll('.step').forEach(function (el) {
+    el.classList.toggle('attivo', el.dataset.step === passi[passoCorrente]);
+  });
+  renderStepper();
+  document.getElementById('btn-indietro').style.visibility = passoCorrente > 0 ? 'visible' : 'hidden';
+  document.getElementById('btn-crea').style.display = passi[passoCorrente] === 'riepilogo' ? 'inline-flex' : 'none';
+  if (passi[passoCorrente] === 'riepilogo') { renderRiepilogo(); }
+}
+function alPassoSuccessivo() {
+  var passi = passiAttivi();
+  passoCorrente = Math.min(passi.length - 1, passoCorrente + 1);
+  mostraPasso();
+}
+function alPassoPrecedente() {
+  passoCorrente = Math.max(0, passoCorrente - 1);
+  mostraPasso();
+}
+
+mostraPasso();
 </script>
 {% endblock %}

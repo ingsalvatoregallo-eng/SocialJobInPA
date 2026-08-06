@@ -89,6 +89,21 @@ templates.env.filters["fase"] = lambda stato: FASE_LABEL.get(fase_di(stato), sta
 templates.env.filters["fase_colore"] = lambda stato: FASE_COLORE.get(fase_di(stato), "grigio")
 
 
+def _tojson(valore):
+    """Non e' Flask: Jinja2Templates di FastAPI non registra 'tojson' da
+    solo. Serve per incorporare dati del server (es. nomi di categorie
+    scelti dall'utente in Categorie, possono contenere apici/caratteri
+    speciali) in un array JS dentro <script>, senza spezzare la sintassi
+    ne' aprire a injection (vedi nuovo_contenuto.html, percorso guidato a
+    step: CATEGORIE/PILLARS costruiti cosi'). Escape di <, >, & per non
+    rischiare di chiudere il tag <script> con un nome tipo '</script>'."""
+    return (json.dumps(valore, ensure_ascii=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
+
+templates.env.filters["tojson"] = _tojson
+
+
 def _data_breve(iso):
     """Mostrava finora l'ISO grezzo troncato — quasi sempre UTC (vedi
     programmato_at/creato_at/richiesto_at ecc.) senza mai convertirlo nel
