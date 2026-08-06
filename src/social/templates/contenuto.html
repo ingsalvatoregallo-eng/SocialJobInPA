@@ -69,7 +69,8 @@ function riavviaConScrollSalvato() {
 
 <div class="card">
   <strong>Brief</strong>
-  {% if 'social.edit' in permessi and c.stato in ('IDEA', 'RESEARCH_FAILED', 'CHANGES_REQUESTED') %}
+  {% if 'social.edit' in permessi and c.stato in ('IDEA', 'RESEARCH_FAILED', 'CHANGES_REQUESTED')
+        and not in_corso and not appena_in_coda %}
   <form method="post" action="/social/contenuti/{{ c.id }}/brief" style="margin-top:8px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Titolo / tema</label>

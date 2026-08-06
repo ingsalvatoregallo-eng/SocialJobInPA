@@ -2,7 +2,7 @@
 del portale, mai un DB condiviso: i due progetti sono separati). Qui si
 verifica con un client finto, iniettato via il parametro `client=`."""
 
-from social import agents, db_social, jobinpa_client, llm
+from social import agents, db_social, jobinpa_client, llm, models
 from social.images import MockImageProvider
 
 _BANDO_ESEMPIO = {
@@ -221,6 +221,45 @@ def test_research_forza_solo_concorsi_per_la_strategia_bandi_jobinpa(conn, monke
     agents.research(conn, content_id, provider=llm.MockLLMProvider(conn))
     chiamata_bandi = [c for c in client.chiamate if c[0] == "bandi"][0]
     assert chiamata_bandi[3] is True
+
+
+def test_research_fatti_vuoti_con_bando_trovato_usa_fallback_dai_dati_reali(conn, monkeypatch):
+    """Bug reale riprodotto in produzione: il Research Agent a volte non
+    popola 'fatti' anche con una fonte JobInPA completa (bando trovato con
+    sintesi/link reali) -- risultato: il Quality & Risk Agent vedeva zero
+    fatti verificati e bloccava un contenuto la cui fonte era davvero
+    verificata (badge "Verificato via API" corretto, ma nessun 'fatto' a
+    supporto), confondendo l'utente. Il fallback deterministico dal bando
+    trovato (mai testo libero del modello) deve garantire almeno un fatto
+    quando un bando c'e' davvero."""
+    client = _ClientFinto(bandi=[_BANDO_ESEMPIO])
+    monkeypatch.setattr("social.jobinpa_client.client", lambda: client)
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.RisultatoRicerca, models.RisultatoRicerca(fatti=[], sintesi="Sintesi vuota"))
+    content_id = db_social.crea_content(conn, "Idea legata a un bando reale")
+    risultato = agents.research(conn, content_id, provider=provider)
+    assert len(risultato.fatti) == 1
+    assert risultato.fatti[0].fatto == _BANDO_ESEMPIO["sintesi"]
+    assert risultato.fatti[0].fonte_url == _BANDO_ESEMPIO["url_dettaglio"]
+    assert risultato.fatti[0].confidenza == 1.0
+    fatti_salvati = db_social.fatti_di(conn, content_id)
+    assert len(fatti_salvati) == 1
+
+
+def test_research_fatti_gia_presenti_non_vengono_sovrascritti(conn, monkeypatch):
+    """Se il modello popola davvero 'fatti' (comportamento normale), il
+    fallback non deve intervenire -- si fida del giudizio del Research
+    Agent quando c'e'."""
+    client = _ClientFinto(bandi=[_BANDO_ESEMPIO])
+    monkeypatch.setattr("social.jobinpa_client.client", lambda: client)
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.RisultatoRicerca, models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="Fatto scritto dal modello", confidenza=0.8)],
+        sintesi="Sintesi."))
+    content_id = db_social.crea_content(conn, "Idea legata a un bando reale")
+    risultato = agents.research(conn, content_id, provider=provider)
+    assert len(risultato.fatti) == 1
+    assert risultato.fatti[0].fatto == "Fatto scritto dal modello"
 
 
 def test_supervisor_pianifica_settimana_forza_solo_concorsi_nei_bandi_di_riferimento(conn, monkeypatch):

@@ -488,6 +488,24 @@ def research(conn, content_id, *, provider=None, urls_extra=None, jobinpa_client
     # in un carosello Instagram (vedi visual()), con dati sempre presi dal
     # database JobInPA invece che dall'interpretazione del modello.
     risultato.bandi_trovati = [b for b in righe_trovate if b]
+    if not risultato.fatti and risultato.bandi_trovati:
+        # Bug reale riprodotto in produzione: il modello a volte non
+        # popola 'fatti' anche quando la fonte JobInPA e' completa (bando
+        # trovato con sintesi/posti/scadenza reali) -- risultato.bandi_
+        # trovati sopra e' comunque corretto perche' popolato dal CODICE,
+        # non dal modello, quindi il badge "Verificato via API" resta
+        # vero, ma il Quality & Risk Agent vedeva zero fatti e segnalava
+        # "nessuna fonte verificata" su un contenuto che una fonte reale
+        # ce l'aveva eccome (segnalato dall'utente: confuso dal
+        # contrasto fra le due cose). Fallback deterministico dai dati
+        # REALI del bando (mai testo libero del modello), cosi' il resto
+        # della pipeline ha sempre almeno un fatto quando un bando e'
+        # stato trovato davvero.
+        risultato.fatti = [
+            models.FattoVerificato(
+                fatto=b.get("sintesi") or b.get("titolo") or "Bando pubblico",
+                fonte_url=b.get("url_jobinpa") or b.get("url_dettaglio"), confidenza=1.0)
+            for b in risultato.bandi_trovati]
     # Persistito (non solo passato in memoria a copywriting()/visual()): una
     # rigenerazione della sola immagine, piu' avanti nel tempo senza rifare
     # la ricerca (vedi rigenera_visual), deve poter ricostruire il carosello.

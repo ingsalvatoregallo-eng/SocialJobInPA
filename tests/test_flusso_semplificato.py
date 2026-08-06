@@ -212,6 +212,12 @@ def test_pagina_contenuto_non_mostra_bottone_avvia_se_appena_in_coda(conn, clien
 
     assert "Pipeline in coda" in pagina
     assert "Avvia pipeline agenti" not in pagina
+    # Segnalato dall'utente: il form Brief (con la Ricerca avanzata sempre
+    # espansa al suo interno) restava visibile anche appena in coda, perche'
+    # la sua condizione non controllava appena_in_coda/in_corso come il
+    # bottone "Avvia pipeline" sopra -- stesso identico bug, stessa guardia.
+    assert "🔍 Ricerca avanzata" not in pagina
+    assert 'name="brief"' not in pagina
 
 
 # --- 3. Contatori nel menu ----------------------------------------------------
