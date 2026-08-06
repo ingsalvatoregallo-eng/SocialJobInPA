@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import markupsafe
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -96,9 +97,16 @@ def _tojson(valore):
     speciali) in un array JS dentro <script>, senza spezzare la sintassi
     ne' aprire a injection (vedi nuovo_contenuto.html, percorso guidato a
     step: CATEGORIE/PILLARS costruiti cosi'). Escape di <, >, & per non
-    rischiare di chiudere il tag <script> con un nome tipo '</script>'."""
-    return (json.dumps(valore, ensure_ascii=False)
-            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    rischiare di chiudere il tag <script> con un nome tipo '</script>'.
+
+    Markup(...) e' indispensabile: l'autoescape di Jinja2 (attivo di
+    default sui .html) altrimenti trasforma le virgolette del JSON in
+    '&#34;' pensando che sia testo HTML da proteggere, producendo
+    JavaScript sintatticamente invalido (bug reale riprodotto: l'intero
+    script si bloccava, pagina del percorso guidato vuota)."""
+    testo = (json.dumps(valore, ensure_ascii=False)
+             .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    return markupsafe.Markup(testo)
 
 
 templates.env.filters["tojson"] = _tojson

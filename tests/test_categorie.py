@@ -616,3 +616,22 @@ def test_nuovo_contenuto_elenca_le_categorie(conn, client):
 
     pagina = client.get("/social/contenuti/nuovo").text
     assert "Categoria visibile nel form" in pagina
+
+
+def test_nuovo_contenuto_categorie_sono_javascript_valido_non_html_escaped(conn, client):
+    """Bug reale riprodotto: l'autoescape di Jinja2 (attivo di default sui
+    .html) trasformava le virgolette del JSON prodotto dal filtro tojson
+    in '&#34;', rendendo il JavaScript dello stepper (CATEGORIE/PILLARS,
+    vedi nuovo_contenuto.html) sintatticamente invalido — l'intero script
+    si bloccava e la pagina del percorso guidato restava vuota (segnalato
+    dall'utente). Deve restare vera virgoletta JS, mai l'entita' HTML."""
+    db_social.crea_utente(conn, "editor-cat3@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-cat3@test.local")
+
+    pagina = client.get("/social/contenuti/nuovo").text
+    inizio = pagina.index('var CATEGORIE = [')
+    fine = pagina.index('];', inizio)
+    blocco_categorie = pagina[inizio:fine]
+    assert '&#34;' not in blocco_categorie
+    assert '{id: "' in blocco_categorie
