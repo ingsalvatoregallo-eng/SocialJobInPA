@@ -193,11 +193,19 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Motivazione (obbligatoria per rifiuto o richiesta modifiche)</label>
       <textarea name="motivo" id="campo-motivo" rows="2"></textarea>
+      {% if dettaglio.content.classe_rischio == 'rosso' %}
+      <div class="avviso rosso" style="margin-top:10px">⚠️ Classe di rischio rosso: non sarà mai pubblicabile, nemmeno approvato (è un controllo di sicurezza non aggirabile). Correggi con "Rigenera testo"/"Rigenera immagine" qui sopra finché il rischio non migliora, oppure rifiuta.</div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="btn testo-rosso" name="azione" value="rifiuta" type="submit">✕ Rifiuta</button>
+        <button class="btn secondario" name="azione" value="modifiche" type="submit" style="margin-left:auto">✎ Richiedi modifiche</button>
+      </div>
+      {% else %}
       <div style="display:flex;gap:10px;margin-top:10px">
         <button class="btn testo-rosso" name="azione" value="rifiuta" type="submit">✕ Rifiuta</button>
         <button class="btn secondario" name="azione" value="modifiche" type="submit">✎ Richiedi modifiche</button>
         <button class="btn verde" name="azione" value="approva" type="submit" style="margin-left:auto">✓ Approva e programma</button>
       </div>
+      {% endif %}
     </form>
     {% else %}
     <p class="hint" style="margin-top:14px">Il tuo ruolo non può approvare (serve social.approve).</p>

@@ -267,3 +267,107 @@ def test_route_conferma_alert_reviewer_richiede_permesso_approve(conn, client):
 
     assert r.status_code == 403
     assert db_social.lista_regole_revisione(conn) == []
+
+
+# --- "Approva" su un rosso e' sempre rifiutato --------------------------
+# Bug reale riprodotto in produzione: un contenuto in classe rosso approvato
+# dalla coda di Revisione arrivava fino a SCHEDULED, ma publishing.
+# can_publish() lo rifiuta SEMPRE (guardrail non aggirabile) -- il bottone
+# "Pubblica ora" falliva in silenzio, senza errore, ogni volta.
+
+def _content_rosso_in_attesa(conn, titolo):
+    content_id = _content_in_attesa_approvazione(conn, titolo)
+    db_social.aggiorna_content(conn, content_id, classe_rischio="rosso",
+                               decisione_rischio="blocked", punteggi_rischio=json.dumps({
+                                   "classe_regole": "verde", "motivi_regole": [],
+                                   "classe_ai": "rosso", "motivi_ai": ["motivo grave"],
+                                   "accuratezza": 0.2, "brand": 0.3, "conformita": 0.2}))
+    return content_id
+
+
+def test_pagina_approvazioni_nasconde_approva_per_rosso(conn, client):
+    content_id = _content_rosso_in_attesa(conn, "Rosso in coda")
+    db_social.crea_utente(conn, "revisore-rosso1@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "revisore-rosso1@test.local")
+
+    pagina = client.get(f"/social/approvazioni?content_id={content_id}").text
+    assert 'value="approva"' not in pagina
+    assert "non sarà mai pubblicabile" in pagina
+    assert 'value="rifiuta"' in pagina
+
+
+def test_route_approva_su_rosso_risponde_409(conn, client):
+    content_id = _content_rosso_in_attesa(conn, "Rosso da approvare via route")
+    db_social.crea_utente(conn, "revisore-rosso2@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "revisore-rosso2@test.local")
+    approval = db_social.approval_aperta_di(conn, content_id)
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get(f"/social/approvazioni?content_id={content_id}").text).group(1)
+
+    r = client.post(f"/social/approvazioni/{approval['id']}",
+                    data={"azione": "approva", "csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 409
+    assert db_social.get_content(conn, content_id)["stato"] == "AWAITING_APPROVAL"
+
+
+# --- Correggere il testo a mano su un BLOCKED rivaluta subito il rischio ---
+# Segnalato dall'utente: "devo poterlo modificare nel testo e farlo
+# riapprovare" -- senza rivalutare, classe_rischio restava quella originale
+# per sempre e un rosso non poteva mai essere sbloccato nemmeno
+# correggendolo a mano (approvals.approva() lo avrebbe comunque rifiutato).
+
+def test_modifica_variante_su_blocked_rivaluta_il_rischio(conn, client):
+    content_id = db_social.crea_content(conn, "Da correggere a mano", canali=["instagram"])
+    for stato in ("RESEARCHING", "DRAFTING", "DRAFT_READY", "GENERATING_VISUAL",
+                  "QUALITY_CHECK", "BLOCKED"):
+        state_machine.transisci(conn, content_id, stato)
+    db_social.salva_variante(conn, content_id, "instagram", "Testo originale con un problema")
+    db_social.aggiorna_content(conn, content_id, classe_rischio="rosso", decisione_rischio="blocked")
+    approvals.richiedi_approvazione(conn, content_id)
+    db_social.crea_utente(conn, "revisore-modifica1@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "revisore-modifica1@test.local")
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get(f"/social/contenuti/{content_id}").text).group(1)
+
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "Testo corretto a mano, senza problemi", "csrf": csrf},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    content = db_social.get_content(conn, content_id)
+    # Questo contenuto non e' mai passato da research() (nessun fatto
+    # salvato): risk.classifica_regole forza sempre almeno "giallo" senza
+    # fonti verificate, a prescindere dal giudizio AI (MockLLMProvider
+    # risponde "verde" di default) -- il punto del test e' che la
+    # rivalutazione ha davvero girato e fatto avanzare lo stato dal
+    # rosso/BLOCKED originale, non che sia arrivata a verde.
+    assert content["stato"] == "AWAITING_APPROVAL"
+    assert content["classe_rischio"] == "giallo"
+
+
+def test_modifica_variante_su_awaiting_approval_non_rivaluta(conn, client):
+    """Un giallo (AWAITING_APPROVAL) non ha bisogno di rivalutazione: la
+    rivalutazione serve solo a sbloccare un BLOCKED, un giallo si approva
+    gia' cosi' com'e' (segnalato dall'utente: nessun cambio di
+    comportamento voluto per il percorso gia' funzionante)."""
+    content_id = _content_in_attesa_approvazione(conn, "Giallo da correggere")
+    db_social.salva_variante(conn, content_id, "instagram", "Testo originale")
+    db_social.aggiorna_content(conn, content_id, classe_rischio="giallo",
+                               decisione_rischio="human_approval")
+    db_social.crea_utente(conn, "revisore-modifica2@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "revisore-modifica2@test.local")
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"',
+                     client.get(f"/social/contenuti/{content_id}").text).group(1)
+
+    r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
+                    data={"testo": "Testo corretto", "csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    content = db_social.get_content(conn, content_id)
+    assert content["stato"] == "AWAITING_APPROVAL"
+    assert content["classe_rischio"] == "giallo"  # invariato, nessuna rivalutazione

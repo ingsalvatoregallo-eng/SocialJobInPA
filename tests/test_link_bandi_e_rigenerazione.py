@@ -308,7 +308,14 @@ def test_route_modifica_variante_blocked_torna_al_contenuto(conn, client):
     AWAITING_APPROVAL lo e'): tornare li' mostrerebbe un elemento a caso
     della coda invece del contenuto appena modificato, un redirect
     fuorviante segnalato dall'utente per il flusso "correggi a mano" da
-    un BLOCKED."""
+    un BLOCKED.
+
+    Testo scelto apposta per far scattare ancora un pattern rosso
+    deterministico (risk._PATTERN_ROSSO): dopo questo fix la modifica a
+    mano rivaluta SUBITO il rischio (vedi agents.rivaluta_rischio_dopo_
+    modifica) e un testo genuinamente corretto avanzerebbe da solo ad
+    AWAITING_APPROVAL/APPROVED — qui si verifica invece il caso "resta
+    davvero BLOCKED", per cui il redirect a /contenuti resta quello giusto."""
     db_social.crea_utente(conn, "revisore5@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")
     content_id = db_social.crea_content(conn, "Contenuto bloccato")
@@ -317,9 +324,10 @@ def test_route_modifica_variante_blocked_torna_al_contenuto(conn, client):
     _login(client, "revisore5@test.local")
     csrf = _csrf(client)
     r = client.post(f"/social/approvazioni/{content_id}/variante/instagram",
-                    data={"testo": "corretto a mano", "csrf": csrf}, follow_redirects=False)
+                    data={"testo": "Vi garantiamo il successo", "csrf": csrf}, follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == f"/social/contenuti/{content_id}"
+    assert db_social.get_content(conn, content_id)["stato"] == "BLOCKED"
 
 
 def test_route_rigenera_immagine_mette_in_coda_il_job(conn, client):

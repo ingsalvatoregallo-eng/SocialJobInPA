@@ -186,7 +186,16 @@ def test_e2e_blocked_finisce_nella_coda_di_revisione(conn):
     assert riga["content_stato"] == "BLOCKED"
 
 
-def test_e2e_blocked_si_puo_approvare_dalla_coda_di_revisione(conn):
+def test_e2e_blocked_non_si_puo_approvare_dalla_coda_di_revisione(conn):
+    """Bug reale riprodotto in produzione: publishing.can_publish() rifiuta
+    SEMPRE un contenuto in classe rosso, nemmeno con un'approvazione umana
+    registrata (guardrail deliberato, non aggirabile) -- ma approva()
+    lasciava comunque transitare fino a SCHEDULED, promettendo una
+    pubblicazione che non sarebbe mai avvenuta: il bottone "Pubblica ora"
+    falliva in silenzio (nessun errore, nessuna riga in social_publications)
+    ogni volta, senza che l'utente capisse perche'. Va rifiutato subito qui
+    (vedi approvals.approva), non lasciato scoprire al momento della
+    pubblicazione."""
     provider = llm.MockLLMProvider(conn)
     provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
         classe="rosso", punteggio_accuratezza=0.2, punteggio_brand=0.5,
@@ -196,10 +205,30 @@ def test_e2e_blocked_si_puo_approvare_dalla_coda_di_revisione(conn):
                            image_provider=MockImageProvider())
     approval = next(a for a in db_social.approvals_in_attesa(conn) if a["content_id"] == content_id)
 
+    with pytest.raises(ValueError, match="rosso"):
+        approvals.approva(conn, approval["id"], utente_id=1, motivo="verificato a mano, va bene")
+
+    # Nessuna transizione di stato ne' decisione registrata: il rifiuto
+    # avviene PRIMA di toccare qualsiasi cosa.
+    assert db_social.get_content(conn, content_id)["stato"] == "BLOCKED"
+    assert db_social.approval_aperta_di(conn, content_id)["id"] == approval["id"]
+
+
+def test_e2e_giallo_si_puo_approvare_dalla_coda_di_revisione(conn):
+    """Il guardrail riguarda solo il rosso (mai pubblicabile per design,
+    vedi can_publish): un giallo con approvazione umana resta un percorso
+    valido, come sempre."""
+    provider = llm.MockLLMProvider(conn)
+    provider.imposta(models.ValutazioneRischio, models.ValutazioneRischio(
+        classe="giallo", punteggio_accuratezza=0.7, punteggio_brand=0.8,
+        punteggio_conformita=0.7, motivi=["dato da verificare"]))
+    content_id = db_social.crea_content(conn, "Contenuto da verificare")
+    agents.esegui_pipeline(conn, content_id, provider=provider,
+                           image_provider=MockImageProvider())
+    approval = next(a for a in db_social.approvals_in_attesa(conn) if a["content_id"] == content_id)
+
     approvals.approva(conn, approval["id"], utente_id=1, motivo="verificato a mano, va bene")
 
-    # approva() chiama sempre programma_pubblicazione: come per un giallo,
-    # avanza subito da APPROVED a SCHEDULED se c'e' una finestra disponibile.
     assert db_social.get_content(conn, content_id)["stato"] in {"APPROVED", "SCHEDULED"}
 
 

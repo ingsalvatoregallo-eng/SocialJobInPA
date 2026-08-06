@@ -985,23 +985,44 @@ def rigenera_copy(conn, content_id, *, provider=None, note_revisore=None):
     risultato = _ricostruisci_risultato_ricerca(conn, content_id)
     copywriting(conn, content_id, risultato, provider=provider, note_revisore=note_revisore)
     if content["stato"] == "BLOCKED":
-        from social import approvals
-        classe, decisione = quality_risk(conn, content_id, risultato, provider=provider)
-        if decisione == "human_approval":
-            state_machine.transisci(conn, content_id, "AWAITING_APPROVAL", agente="quality_risk",
-                                    motivo=f"classe {classe} dopo rigenerazione testo")
-            approvals.richiedi_approvazione(conn, content_id)
-        elif decisione == "auto_publish":
-            state_machine.transisci(conn, content_id, "APPROVED", agente="quality_risk",
-                                    motivo=f"classe {classe} dopo rigenerazione testo")
-        else:
-            # Resta BLOCKED: richiedi_approvazione riusa la richiesta gia'
-            # aperta se c'e' (vedi esegui_pipeline), o ne apre una nuova per
-            # un BLOCKED precedente a questa modifica (mai duplicata, vedi
-            # approval_aperta_di) -- cosi' resta comunque visibile nella
-            # coda di Revisione anche dopo un tentativo di correzione che
-            # non e' bastato.
-            approvals.richiedi_approvazione(conn, content_id)
+        rivaluta_rischio_dopo_modifica(conn, content_id, risultato, provider=provider,
+                                       motivo_suffisso="dopo rigenerazione testo")
+
+
+def rivaluta_rischio_dopo_modifica(conn, content_id, risultato_ricerca, *, provider=None,
+                                   motivo_suffisso="dopo modifica manuale del testo"):
+    """Rivaluta SUBITO il rischio dopo che il testo e' cambiato (rigenerato
+    dall'AI, vedi rigenera_copy sopra, o corretto a mano, vedi web.
+    modifica_variante): senza questo, la pagina continuava a mostrare il
+    vecchio giudizio/motivo anche dopo una correzione fatta apposta per
+    risolverlo, lasciando il contenuto bloccato per sempre — nessuna
+    correzione manuale poteva MAI sbloccare un rosso, perche' classe_
+    rischio/decisione_rischio restavano quelli della valutazione originale
+    (bug reale segnalato dall'utente: "devo poterlo modificare nel testo e
+    farlo riapprovare", impossibile finche' il giudizio non veniva
+    rivalutato). Se il nuovo giudizio migliora, il contenuto avanza da solo
+    (AWAITING_APPROVAL o APPROVED); se resta rosso, quality_risk() ha
+    comunque gia' aggiornato punteggi_rischio con la valutazione fresca —
+    il motivo mostrato cambia anche restando BLOCKED, e approvals.approva()
+    continua correttamente a rifiutarlo (vedi quel modulo)."""
+    from social import approvals
+    classe, decisione = quality_risk(conn, content_id, risultato_ricerca, provider=provider)
+    if decisione == "human_approval":
+        state_machine.transisci(conn, content_id, "AWAITING_APPROVAL", agente="quality_risk",
+                                motivo=f"classe {classe} {motivo_suffisso}")
+        approvals.richiedi_approvazione(conn, content_id)
+    elif decisione == "auto_publish":
+        state_machine.transisci(conn, content_id, "APPROVED", agente="quality_risk",
+                                motivo=f"classe {classe} {motivo_suffisso}")
+    else:
+        # Resta BLOCKED: richiedi_approvazione riusa la richiesta gia'
+        # aperta se c'e' (vedi esegui_pipeline), o ne apre una nuova per
+        # un BLOCKED precedente a questa modifica (mai duplicata, vedi
+        # approval_aperta_di) -- cosi' resta comunque visibile nella
+        # coda di Revisione anche dopo un tentativo di correzione che
+        # non e' bastato.
+        approvals.richiedi_approvazione(conn, content_id)
+    return classe, decisione
 
 
 # --- Quality & Risk Agent ----------------------------------------------------

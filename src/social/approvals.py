@@ -92,6 +92,23 @@ def approva(conn, approval_id, utente_id, motivo=None):
                             (approval_id,)).fetchone()
     if approval is None:
         raise ValueError("approvazione inesistente")
+    content = db_social.get_content(conn, approval["content_id"])
+    if content and content["classe_rischio"] == "rosso":
+        # can_publish() (vedi publishing.py) rifiuta SEMPRE la pubblicazione
+        # di un contenuto in classe rosso, nemmeno con un'approvazione
+        # umana registrata -- e' un guardrail deliberato, non aggirabile.
+        # "Approva" su un rosso arrivava comunque fino a SCHEDULED,
+        # promettendo una pubblicazione che non sarebbe MAI avvenuta
+        # (bug reale riprodotto: pubblicazione programmata fallita in
+        # silenzio, senza errore, segnalato dall'utente confuso dal
+        # bottone verde "Pubblica ora" che non funzionava mai). Va
+        # rifiutato qui, non lasciato scoprire al momento della
+        # pubblicazione: chi revisiona un rosso deve rigenerare
+        # testo/immagine o rifiutare, mai limitarsi ad approvare.
+        raise ValueError(
+            "Contenuto in classe di rischio rosso: non sarà mai pubblicabile, nemmeno "
+            "approvato (vedi publishing.can_publish). Usa \"Rigenera testo\"/\"Rigenera "
+            "immagine\" per correggerlo e far rivalutare il rischio, oppure \"Rifiuta\".")
     db_social.decidi_approval(conn, approval_id, "approvato", utente_id, motivo)
     state_machine.transisci(conn, approval["content_id"], "APPROVED",
                             utente_id=utente_id, motivo=motivo or "approvato dal revisore")

@@ -1180,10 +1180,20 @@ def modifica_variante(request: Request, content_id: str, piattaforma: str,
                       sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     """Modifica manuale del testo (es. per correggere o aggiungere un link,
     o per riscrivere a mano un post BLOCKED dal Quality & Risk Agent invece
-    di farlo rigenerare dall'AI): salva subito, nessuna chiamata AI, nessun
-    costo. Nessun vincolo sullo stato del contenuto -- lo stesso form serve
-    sia dalla coda di Revisione (AWAITING_APPROVAL) sia dalla pagina
-    Contenuto (BLOCKED)."""
+    di farlo rigenerare dall'AI): salva subito, nessuna chiamata AI per il
+    testo stesso. Nessun vincolo sullo stato del contenuto -- lo stesso
+    form serve sia dalla coda di Revisione (AWAITING_APPROVAL) sia dalla
+    pagina Contenuto (BLOCKED).
+
+    Per un BLOCKED rivaluta SUBITO il rischio sul testo corretto a mano
+    (agents.rivaluta_rischio_dopo_modifica, stessa chiamata usata da
+    "Rigenera testo"): senza questo, classe_rischio/decisione_rischio
+    restavano quelli della valutazione originale per sempre, e un rosso
+    non poteva MAI essere sbloccato nemmeno correggendolo a mano (bug
+    reale segnalato dall'utente: "devo poterlo modificare nel testo e
+    farlo riapprovare" — approvals.approva() continua comunque a
+    rifiutare un rosso, ma cosi' la correzione ha almeno una possibilita'
+    reale di far avanzare il giudizio, non resta congelata per sempre)."""
     _richiedi(conn, sessione, "social.approve")
     _verifica_csrf(sessione, csrf)
     content = db_social.get_content(conn, content_id)
@@ -1195,6 +1205,11 @@ def modifica_variante(request: Request, content_id: str, piattaforma: str,
     db_social.audit(conn, "variante_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="content", oggetto_id=content_id,
                     dettagli={"piattaforma": piattaforma})
+    if content["stato"] == "BLOCKED":
+        risultato = agents._ricostruisci_risultato_ricerca(conn, content_id)
+        agents.rivaluta_rischio_dopo_modifica(conn, content_id, risultato,
+                                              motivo_suffisso="dopo modifica manuale del testo")
+        content = db_social.get_content(conn, content_id)
     # Tornare a Revisione ha senso solo se il contenuto e' davvero li'
     # (AWAITING_APPROVAL): altrimenti approvazioni() ripiegherebbe sul primo
     # elemento della coda (o su una pagina vuota), un redirect fuorviante
@@ -1285,7 +1300,11 @@ def decidi_approvazione(request: Request, approval_id: str,
         else:
             raise HTTPException(status_code=422, detail="azione sconosciuta")
     except ValueError as errore:
-        raise HTTPException(status_code=404, detail=str(errore))
+        # 404 solo se l'approvazione proprio non esiste; un rifiuto per
+        # regola di business (es. approvals.approva su classe rosso, vedi
+        # can_publish) e' un 409, non una risorsa mancante.
+        codice = 404 if "inesistente" in str(errore) else 409
+        raise HTTPException(status_code=codice, detail=str(errore))
     if azione == "modifiche":
         return RedirectResponse(f"/social/contenuti/{approval['content_id']}?avviata=1",
                                 status_code=303)
