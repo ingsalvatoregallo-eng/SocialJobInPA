@@ -804,6 +804,33 @@ def test_anteprima_base_fissa_serve_il_file(conn, client, tmp_path):
     percorso.unlink(missing_ok=True)
 
 
+def test_pagina_categorie_permette_di_ingrandire_la_base_fissa(conn, client, tmp_path):
+    """Segnalato dall'utente: dopo aver generato/rigenerato la base, deve
+    poterla vedere ingrandita con lo stesso lightbox gia' usato per le
+    immagini di un post (vedi contenuto.html), non solo la miniatura da
+    140px."""
+    db_social.crea_utente(conn, "admin-cat19@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat19@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Con base ingrandibile", "x")
+    from social import config
+    cartella = config.asset_storage_path() / "basi_fisse"
+    cartella.mkdir(parents=True, exist_ok=True)
+    percorso = cartella / "base_lightbox_test.png"
+    percorso.write_bytes(_PNG_1X1)
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(percorso))
+
+    pagina = client.get("/social/categorie").text
+
+    assert 'id="lightbox-overlay"' in pagina
+    assert 'apriLightbox' in pagina
+    inizio_src = pagina.index(f'/social/categorie/{categoria_id}/base-fissa')
+    inizio_tag = pagina.rindex('<img', 0, inizio_src)
+    fine_tag = pagina.index('>', inizio_src)
+    assert 'asset-ingrandibile' in pagina[inizio_tag:fine_tag]
+    percorso.unlink(missing_ok=True)
+
+
 def test_elimina_categoria_via_web(conn, client):
     db_social.crea_utente(conn, "admin-cat3@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")

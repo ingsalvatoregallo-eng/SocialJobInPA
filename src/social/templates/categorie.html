@@ -46,7 +46,8 @@
           </p>
           {% if c.base_fissa_path %}
           <img src="/social/categorie/{{ c.id }}/base-fissa" alt="base fissa {{ c.nome }}"
-               style="width:140px;border-radius:8px;border:1px solid var(--colore-bordo);display:block;margin-bottom:8px">
+               class="asset-ingrandibile"
+               style="width:140px;border-radius:8px;border:1px solid var(--colore-bordo);display:block;margin-bottom:8px;cursor:zoom-in">
           {% endif %}
           {% if generazione_base_in_corso.get(c.id) %}
           <p class="hint">⏳ Generazione in corso…</p>
@@ -163,5 +164,26 @@ function nascondiModificaCategoria(id) {
   document.getElementById('modifica-' + id).style.display = 'none';
   document.getElementById('vista-' + id).style.display = 'block';
 }
+</script>
+
+<div id="lightbox-overlay" onclick="chiudiLightbox()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center;cursor:zoom-out">
+  <img id="lightbox-img" src="" alt="Immagine ingrandita" style="max-width:92vw;max-height:92vh;border-radius:4px">
+</div>
+<script>
+function apriLightbox(src) {
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox-overlay').style.display = 'flex';
+}
+function chiudiLightbox() {
+  document.getElementById('lightbox-overlay').style.display = 'none';
+  document.getElementById('lightbox-img').src = '';
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { chiudiLightbox(); }
+});
+document.querySelectorAll('.asset-ingrandibile').forEach(function (img) {
+  img.addEventListener('click', function () { apriLightbox(img.src); });
+});
 </script>
 {% endblock %}
