@@ -24,11 +24,11 @@
     <div class="step" data-step="modalita">
       <p style="font-weight:600;font-size:14px;margin:0 0 10px">Come vuoi comunicarlo?</p>
       <label class="carta-scelta">
-        <input type="radio" name="modalita_ricerca" value="specifico" style="width:auto" onchange="alPassoSuccessivo()">
+        <input type="radio" name="modalita_ricerca" value="specifico" style="width:auto" onchange="aggiornaCategoria(); alPassoSuccessivo()">
         <span><strong>Un concorso specifico</strong><span class="hint" style="margin:2px 0 0">Hai già il bando in mente, incolli il link o l'id</span></span>
       </label>
       <label class="carta-scelta">
-        <input type="radio" name="modalita_ricerca" value="ricerca" style="width:auto" checked onchange="alPassoSuccessivo()">
+        <input type="radio" name="modalita_ricerca" value="ricerca" style="width:auto" checked onchange="aggiornaCategoria(); alPassoSuccessivo()">
         <span><strong>Più concorsi (ricerca)</strong><span class="hint" style="margin:2px 0 0">L'AI cerca su JobInPA in base a un tema/brief</span></span>
       </label>
     </div>
@@ -154,27 +154,21 @@
       <div class="avviso giallo" style="margin-top:14px" id="avviso-annullamento">
         ⚠️ Se la categoria cerca bandi reali e nessuno corrisponde ai filtri estratti dal brief, il contenuto verrà annullato automaticamente invece di essere pubblicato senza fonti.
       </div>
-      <div style="display:flex;justify-content:flex-end;margin-top:14px">
-        <button type="button" class="btn" onclick="alPassoSuccessivo()">Continua</button>
-      </div>
     </div>
 
     <div class="step" data-step="canali">
       <p style="font-weight:600;font-size:14px;margin:0 0 10px">Dove pubblicare?</p>
-      <div style="display:flex;gap:16px">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+      <div style="display:flex;align-items:center;gap:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;line-height:1">
           <input type="checkbox" name="canali" value="instagram" style="width:auto"
                  {{ 'checked' if 'instagram' in canali_abilitati }}>📷 Instagram
         </label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;line-height:1">
           <input type="checkbox" name="canali" value="linkedin" style="width:auto"
                  {{ 'checked' if 'linkedin' in canali_abilitati }}>💼 LinkedIn
         </label>
       </div>
       <p class="hint">Un canale il cui account non è ancora abilitato in <a href="/social/impostazioni">Impostazioni</a> parte deselezionato: niente testo/immagine generati (e nessun costo AI) per un canale su cui non si può comunque pubblicare. Puoi comunque selezionarlo a mano se vuoi preparare un contenuto in anticipo.</p>
-      <div style="display:flex;justify-content:flex-end;margin-top:14px">
-        <button type="button" class="btn" onclick="alPassoSuccessivo()">Continua</button>
-      </div>
     </div>
 
     <div class="step" data-step="riepilogo">
@@ -185,6 +179,7 @@
     <div style="display:flex;gap:10px;margin-top:18px">
       <button type="button" class="btn secondario" id="btn-indietro" onclick="alPassoPrecedente()" style="visibility:hidden">← Indietro</button>
       <a class="btn secondario" href="/social/contenuti" style="margin-left:auto">Annulla</a>
+      <button type="button" class="btn" id="btn-avanti" onclick="alPassoSuccessivo()">Continua →</button>
       <button type="submit" class="btn" id="btn-crea" style="display:none">✨ Crea e avvia l'AI</button>
     </div>
   </form>
@@ -358,11 +353,21 @@ function mostraPasso() {
   });
   renderStepper();
   document.getElementById('btn-indietro').style.visibility = passoCorrente > 0 ? 'visible' : 'hidden';
-  document.getElementById('btn-crea').style.display = passi[passoCorrente] === 'riepilogo' ? 'inline-flex' : 'none';
-  if (passi[passoCorrente] === 'riepilogo') { renderRiepilogo(); }
+  var ultimo = passi[passoCorrente] === 'riepilogo';
+  document.getElementById('btn-crea').style.display = ultimo ? 'inline-flex' : 'none';
+  document.getElementById('btn-avanti').style.display = ultimo ? 'none' : 'inline-flex';
+  if (ultimo) { renderRiepilogo(); }
 }
 function alPassoSuccessivo() {
   var passi = passiAttivi();
+  var attuale = passi[passoCorrente];
+  // Senza una scelta valida non si avanza: la "carta" al passo categoria/
+  // intento serve proprio a scegliere quel valore, "Continua" da solo non
+  // basta a saltarla (segnalato dall'utente: serve comunque poter tornare
+  // indietro e proseguire di nuovo senza dover ricambiare scelta, ma non
+  // deve poter saltare uno step senza aver mai risposto).
+  if (attuale === 'categoria' && !document.getElementById('campo-categoria').value) { return; }
+  if (attuale === 'intento' && !document.getElementById('campo-pillar').value) { return; }
   passoCorrente = Math.min(passi.length - 1, passoCorrente + 1);
   mostraPasso();
 }

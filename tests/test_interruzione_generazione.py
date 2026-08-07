@@ -239,3 +239,23 @@ def test_pagina_contenuto_non_mostra_interrompi_ora_senza_generazione_in_corso(c
     _login(client, "editor-stop5@test.local")
     pagina = client.get(f"/social/contenuti/{content_id}").text
     assert f'action="/social/contenuti/{content_id}/interrompi"' not in pagina
+
+
+def test_pagina_contenuto_mostra_banner_distinto_dopo_interruzione_richiesta(conn, client):
+    """Segnalato dall'utente: dopo aver cliccato "Interrompi ora" il banner
+    restava identico a "Pipeline in corso" (stesso testo, stesso bottone),
+    senza dare conferma che il click fosse stato registrato -- non si
+    capiva se stesse davvero lavorando all'interruzione. Ora il banner
+    cambia (giallo, testo diverso, niente bottone duplicato) finche' il
+    flag e' attivo."""
+    content_id = db_social.crea_content(conn, "Tre concorsi")
+    db_social.aggiorna_content(conn, content_id, stato="GENERATING_VISUAL")
+    db_social.richiedi_interruzione(conn, content_id)
+    db_social.crea_utente(conn, "editor-stop6@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-stop6@test.local")
+
+    pagina = client.get(f"/social/contenuti/{content_id}").text
+
+    assert "Interruzione richiesta" in pagina
+    assert f'action="/social/contenuti/{content_id}/interrompi"' not in pagina

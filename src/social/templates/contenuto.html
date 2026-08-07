@@ -29,6 +29,17 @@
 // bug reale riprodotto: refresh automatico che non partiva mai (segnalato
 // dall'utente, richiedeva sempre un refresh manuale).
 function riavviaConScrollSalvato() {
+  // Se l'utente ha aperto il lightbox (immagine ingrandita, vedi sotto) un
+  // location.reload() silenzioso lo richiudeva da solo dopo pochi secondi
+  // senza che l'utente avesse chiesto nulla (bug segnalato dall'utente):
+  // mentre e' aperto si rimanda il refresh invece di interromperlo, non lo
+  // si salta del tutto (l'avanzamento della pipeline non e' urgente quanto
+  // finire di guardare l'immagine).
+  var lightbox = document.getElementById('lightbox-overlay');
+  if (lightbox && lightbox.style.display === 'flex') {
+    setTimeout(riavviaConScrollSalvato, 2000);
+    return;
+  }
   document.querySelectorAll('[id^="slider-"]').forEach(function (el) {
     sessionStorage.setItem('scroll-' + el.id, el.scrollLeft);
   });
@@ -36,6 +47,11 @@ function riavviaConScrollSalvato() {
 }
 </script>
 {% if in_corso %}
+{% if c.interruzione_richiesta %}
+<div class="avviso giallo" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+  <span>⏹ <strong>Interruzione richiesta</strong> — verrà applicata al prossimo checkpoint della pipeline (di solito entro un minuto: una chiamata AI già avviata finisce comunque, ma quelle successive vengono risparmiate). Questa pagina si aggiorna automaticamente ogni 4 secondi, resta qui finché non si ferma davvero.</span>
+</div>
+{% else %}
 <div class="avviso info" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
   <span>⏳ <strong>Pipeline in corso</strong> — fase attuale: {{ c.stato|fase }}. Questa pagina si aggiorna automaticamente ogni 4 secondi.</span>
   {% if 'social.edit' in permessi %}
@@ -46,6 +62,7 @@ function riavviaConScrollSalvato() {
   </form>
   {% endif %}
 </div>
+{% endif %}
 <script>setTimeout(riavviaConScrollSalvato, 4000);</script>
 {% elif rigenerazione_in_corso %}
 <div class="avviso info">⏳ <strong>Rigenerazione immagine in corso</strong> — il testo resta invariato. Questa pagina si aggiorna automaticamente.</div>

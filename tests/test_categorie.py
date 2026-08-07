@@ -635,3 +635,33 @@ def test_nuovo_contenuto_categorie_sono_javascript_valido_non_html_escaped(conn,
     blocco_categorie = pagina[inizio:fine]
     assert '&#34;' not in blocco_categorie
     assert '{id: "' in blocco_categorie
+
+
+def test_nuovo_contenuto_scelta_modalita_aggiorna_i_campi_visibili(conn, client):
+    """Bug reale segnalato dall'utente: Concorsi -> Un concorso specifico ->
+    Intento arrivava a "Dettagli" senza il campo "Bando specifico" (mostrava
+    invece Titolo/Brief, come per la ricerca) -- il radio "modalita_ricerca"
+    faceva avanzare lo step ma non richiamava aggiornaCategoria(), che
+    decide quali campi mostrare in base alla modalita' scelta. Deve
+    richiamarla ogni volta che cambia."""
+    db_social.crea_utente(conn, "editor-cat4@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-cat4@test.local")
+
+    pagina = client.get("/social/contenuti/nuovo").text
+    assert 'value="specifico" style="width:auto" onchange="aggiornaCategoria(); alPassoSuccessivo()"' in pagina
+    assert 'value="ricerca" style="width:auto" checked onchange="aggiornaCategoria(); alPassoSuccessivo()"' in pagina
+
+
+def test_nuovo_contenuto_ha_un_tasto_avanti_persistente(conn, client):
+    """Segnalato dall'utente: tornando indietro con "Indietro" non c'era
+    modo di riprocedere senza cambiare la scelta gia' fatta (le carte
+    avanzano solo al cambio di selezione). Un tasto "Continua" sempre
+    presente risolve, a prescindere dallo step."""
+    db_social.crea_utente(conn, "editor-cat5@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    _login(client, "editor-cat5@test.local")
+
+    pagina = client.get("/social/contenuti/nuovo").text
+    assert 'id="btn-avanti"' in pagina
+    assert 'onclick="alPassoSuccessivo()"' in pagina
