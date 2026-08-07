@@ -162,6 +162,22 @@ PROMPTS = {
             "riprodotta esattamente, testo_corretto deve essere false."
         ),
     },
+    "verifica_base_fissa": {
+        "versione": "1.0.0",
+        "system": (
+            "Guardi un'illustrazione decorativa di sfondo (esperimento 'base "
+            "fissa') pensata per restare completamente priva di testo: badge, "
+            "titolo, dati e bottone verranno aggiunti sopra in un secondo "
+            "momento con un processo separato, deterministico. Il prompt di "
+            "generazione vietava esplicitamente qualunque testo, ma i modelli "
+            "di generazione immagini a volte lo ignorano e disegnano comunque "
+            "un titolo o un logo. Guarda con attenzione OGNI angolo "
+            "dell'immagine, comprese le zone dietro le icone e vicino ai "
+            "bordi: c'e' scritto qualcosa da qualche parte, anche un singolo "
+            "logo o wordmark? Se anche un solo elemento di testo e' presente, "
+            "priva_di_testo deve essere false."
+        ),
+    },
     "community_reply": {
         "versione": "1.0.0",
         "system": (

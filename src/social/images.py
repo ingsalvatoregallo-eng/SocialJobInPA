@@ -661,41 +661,48 @@ def _prompt_grafica_intera(request):
 def _prompt_base_fissa(soggetto=None):
     """Prompt per l'esperimento 'base fissa' (vedi TemplateImageProvider.
     genera_sync_su_base): a differenza di _prompt_grafica_intera, qui
-    l'AI NON compone badge/titolo/card/CTA — quegli elementi li disegna
-    sempre Pillow sopra, deterministico, esattamente come nel layout
-    genera_sync di sempre (mai testo generato dall'AI). L'unico compito
-    dell'AI e' l'illustrazione decorativa di sfondo, nello stesso stile
-    ricco gia' approvato dall'utente per _prompt_grafica_intera (icone
-    3D, sfumatura navy/viola) — con le zone dove Pillow disegnera' sopra
-    lasciate libere, per non finire con due badge o due bottoni
-    sovrapposti. Generata una tantum per categoria (azione esplicita in
-    Configurazioni), non a ogni post — a differenza di _genera_grafica_
-    intera che rigenera tutto da zero per ogni contenuto."""
-    soggetto = soggetto or "elements relevant to Italian public administration job search"
+    l'AI NON deve MAI disegnare badge/titolo/card/CTA/loghi — quegli
+    elementi li disegna sempre Pillow sopra, deterministico (mai testo
+    generato dall'AI). L'unico compito dell'AI e' un'illustrazione
+    decorativa di sfondo.
+
+    Prima versione di questo prompt (bug reale, segnalato dall'utente con
+    uno screenshot): nominava "JobInPA" e descriveva l'immagine come "un
+    post Instagram promozionale rifinito" — il modello ignorava le
+    istruzioni "niente testo" e disegnava comunque un proprio titolo
+    ("Concorsi in evidenza") e un proprio logo/wordmark "JobInPA" in alto
+    a destra, sovrapposti a quelli veri incollati da Pillow, illeggibili.
+    Nominare un brand in un prompt immagine spinge il modello a provare a
+    renderne il nome come logo; descrivere l'immagine come "post/grafica
+    promozionale rifinita" spinge il modello ad aggiungerci un titolo per
+    coerenza con quel tipo di composizione. Fix: mai il nome del brand,
+    mai la parola "post"/"marketing"/"promozionale" — solo "sfondo
+    decorativo astratto, come uno sfondo del telefono", con l'istruzione
+    "niente testo" ripetuta piu' volte in modi diversi."""
+    soggetto = soggetto or "icons and shapes relevant to job search in the public sector"
     return (
-        "Design a polished modern SaaS marketing graphic background/illustration for "
-        "JobInPA (an AI-powered job search assistant for Italian public administration "
-        "jobs) — a rich, professional illustration of the same visual quality as a "
-        "finished Instagram promotional post, NOT a plain flat background. This image "
-        "will be reused as a fixed base for many different posts: a separate rendering "
-        "step will overlay a badge, headline, data card and CTA button as flat 2D shapes "
-        "on top of it afterward, so this base must NOT include any of those UI elements "
-        "itself, and must NOT include any text, letters, numbers or words anywhere.\n\n"
-        "Layout zones to respect (leave each one visually calm and uncluttered, no busy "
-        "detail crossing into it, since flat shapes will be drawn there afterward):\n"
-        "- Top-left corner: leave clear, a badge will be placed there.\n"
-        "- Top-right corner: leave completely empty and clear, the brand logo will be "
-        "placed there.\n"
-        "- Left half, upper-middle area: leave plain and uncluttered, a multi-line "
-        "headline will be placed there.\n"
-        "- Bottom area (roughly the lower third): leave plain and uncluttered, a white "
-        "rounded data card and a CTA button will be placed there.\n\n"
-        f"Everywhere else — mainly the right side and background — {soggetto}: a polished "
-        "gradient background (navy blue #0B3D91 to purple #7C3AED), with elegant 3D-style "
-        "rounded icons relevant to Italian public-sector job search (e.g. a bell with a "
-        "notification badge, a magnifying glass, a calendar) as decorative elements, soft "
-        "shadows, generous negative space. No text, no letters, no numbers, no words "
-        "anywhere in the image.\n"
+        "Create an ABSTRACT DECORATIVE BACKGROUND ILLUSTRATION only — like a phone "
+        "wallpaper or an app background image. This is NOT a finished social media "
+        "post, NOT an advertisement, NOT a poster, NOT a marketing graphic. Do not "
+        "depict any app screen, any card, any button, any pill-shaped badge, any "
+        "logo, any wordmark, any title, any heading, any brand name.\n\n"
+        "CRITICAL — re-read this before generating: the image must contain ZERO text "
+        "of any kind, anywhere. No letters, no words, no numbers, no invented brand "
+        "name, no logo, no wordmark, no captions, no labels near the icons, no "
+        "signage in the background. If you are about to draw anything that looks "
+        "like a letter, a word, or a logo, do not draw it — leave that spot blank "
+        "instead. An image with any text or logo anywhere is a failed result.\n\n"
+        "Composition: a smooth gradient going from navy blue (#0B3D91) to purple "
+        f"(#7C3AED), softly lit, with generous empty/calm negative space. Include {soggetto}, "
+        "rendered as a few elegant glossy 3D-style icon objects (for example a bell, "
+        "a magnifying glass, a calendar) floating in the scene as purely decorative "
+        "shapes, with nothing written on them or near them and no frame or panel "
+        "around them.\n\n"
+        "Keep these areas visually calm and completely empty of any icon, shape or "
+        "detail, because a separate process will place other elements there "
+        "afterward and anything drawn there now would clash: the top-left corner, "
+        "the top-right corner, the upper area of the left half, and the lower third "
+        "of the image.\n"
     )
 
 

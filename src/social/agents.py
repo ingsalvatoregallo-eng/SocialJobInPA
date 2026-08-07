@@ -735,6 +735,27 @@ def _verifica_testo_immagine(conn, image_bytes, richiesta, *, provider=None):
     return valutazione.testo_corretto, valutazione.problemi
 
 
+_TENTATIVI_VERIFICA_BASE_FISSA = 3  # generazione iniziale + fino a 2 ritentativi
+
+
+def _verifica_base_fissa_senza_testo(conn, image_bytes, *, provider=None):
+    """Come _verifica_testo_immagine, ma per la 'base fissa' (vedi images.
+    _prompt_base_fissa) la domanda e' l'opposto: qui l'AI non deve
+    scrivere ALCUN testo (badge/titolo/card/CTA li disegna sempre Pillow
+    sopra). Bug reale osservato (segnalato dall'utente con uno
+    screenshot): un prompt con "niente testo" esplicito non e' bastato,
+    il modello ha comunque disegnato un proprio titolo e un proprio logo
+    — serve la stessa mitigazione gia' in uso per _genera_grafica_intera,
+    un giudizio indipendente sull'immagine finita."""
+    valutazione = _run_llm(
+        conn, "visual", "verifica_base_fissa", models.VerificaBaseSenzaTesto,
+        "Questa immagine deve essere un'illustrazione decorativa di sfondo "
+        "completamente priva di testo: nessuna lettera, numero, logo o scritta "
+        "in nessun punto.",
+        immagine_bytes=image_bytes, provider=provider)
+    return valutazione.priva_di_testo, valutazione.elementi_trovati
+
+
 def _genera_con_verifica_testo(image_provider, richiesta, conn, *, llm_provider=None):
     """Genera un'immagine (images.ImageProvider.generate) e, solo per i
     template a "grafica intera" generati davvero da OpenAI (vedi images.
@@ -984,7 +1005,7 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
     return nuovo
 
 
-def genera_base_fissa_categoria(conn, categoria_id):
+def genera_base_fissa_categoria(conn, categoria_id, *, provider=None):
     """Genera (o rigenera) l'illustrazione di sfondo dell'esperimento
     'base fissa' per una categoria (vedi images.OpenAIImageProvider.
     genera_base_fissa / db_social.social_content_categories.base_fissa_
@@ -996,14 +1017,45 @@ def genera_base_fissa_categoria(conn, categoria_id):
     un placeholder salvato senza avviso. Sostituisce sempre la precedente
     (l'esperimento e' pensato per UNA base sola per categoria, non un
     elenco che cresce), cancellando il file vecchio dopo aver salvato il
-    nuovo."""
+    nuovo.
+
+    Verifica con un secondo modello (vision) che la base sia davvero
+    priva di testo, ritentando fino a _TENTATIVI_VERIFICA_BASE_FISSA
+    volte (bug reale osservato: il prompt da solo, anche con "niente
+    testo" esplicito, non basta a impedire che l'AI disegni un proprio
+    titolo/logo — vedi _verifica_base_fissa_senza_testo). Chiamata rara
+    (azione admin, non per ogni post), il costo extra di 1-2 generazioni
+    e verifiche in piu' e' accettabile per non pubblicare una base
+    palesemente rotta. Se anche l'ultimo tentativo non e' perfetto, si usa
+    comunque: meglio di niente, e resta sempre disattivabile/rigenerabile
+    a mano dall'amministratore."""
     categoria = db_social.get_categoria(conn, categoria_id)
     if categoria is None:
         raise ValueError(f"categoria inesistente: {categoria_id}")
-    provider = images.OpenAIImageProvider(conn)
-    nuovo = asyncio.run(provider.genera_base_fissa(
-        prompt_ai=categoria["prompt_ai"] or None, stile_ai=categoria["stile_immagine"],
-        immagini_riferimento=categoria["immagini_riferimento"]))
+    image_provider = images.OpenAIImageProvider(conn)
+
+    def _genera():
+        return asyncio.run(image_provider.genera_base_fissa(
+            prompt_ai=categoria["prompt_ai"] or None, stile_ai=categoria["stile_immagine"],
+            immagini_riferimento=categoria["immagini_riferimento"]))
+
+    nuovo = _genera()
+    tentativo = 1
+    while tentativo < _TENTATIVI_VERIFICA_BASE_FISSA:
+        try:
+            image_bytes = Path(nuovo.percorso).read_bytes()
+            ok, elementi = _verifica_base_fissa_senza_testo(conn, image_bytes, provider=provider)
+        except Exception as errore:
+            log.warning("verifica base fissa fallita, uso comunque il risultato: %s", errore)
+            break
+        if ok:
+            break
+        log.info("testo/logo trovato nella base fissa, ritento (%s): %s",
+                 tentativo, "; ".join(elementi))
+        Path(nuovo.percorso).unlink(missing_ok=True)
+        nuovo = _genera()
+        tentativo += 1
+
     vecchio_percorso = categoria["base_fissa_path"]
     db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(nuovo.percorso))
     if vecchio_percorso:

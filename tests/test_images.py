@@ -453,9 +453,32 @@ def test_prompt_base_fissa_non_richiede_testo():
     scrivere testo: badge/titolo/card/CTA restano sempre disegnati da
     Pillow sopra (vedi _disegna_contenuto/_disegna_cta)."""
     prompt = images._prompt_base_fissa()
-    assert "no text" in prompt.lower()
+    assert "zero text" in prompt.lower()
+    assert "no logo" in prompt.lower() or "any logo" in prompt.lower()
     assert "badge" in prompt.lower()
-    assert "cta" in prompt.lower() or "call" in prompt.lower() or "button" in prompt.lower()
+    assert "button" in prompt.lower()
+
+
+def test_prompt_base_fissa_non_nomina_il_brand():
+    """Bug reale (segnalato dall'utente con uno screenshot): nominare il
+    brand nel prompt spingeva il modello a provare a renderne il nome
+    come logo/wordmark nell'immagine, nonostante l'istruzione esplicita
+    di non scrivere alcun testo."""
+    prompt = images._prompt_base_fissa()
+    assert "jobinpa" not in prompt.lower()
+
+
+def test_prompt_base_fissa_non_si_descrive_come_post_promozionale():
+    """Bug reale: descrivere l'immagine come 'grafica/post promozionale
+    rifinito' (framing POSITIVO, non una negazione) spingeva il modello
+    ad aggiungerci un titolo per coerenza con quel tipo di composizione,
+    anche col resto del prompt che vietava esplicitamente qualunque
+    testo. La menzione e' accettabile solo dentro una negazione esplicita
+    ("NOT a marketing graphic"), mai come descrizione positiva."""
+    prompt = images._prompt_base_fissa()
+    assert "instagram" not in prompt.lower()
+    assert "NOT a marketing graphic" in prompt
+    assert "NOT a finished social media post" in prompt
 
 
 def test_prompt_base_fissa_con_soggetto_personalizzato():

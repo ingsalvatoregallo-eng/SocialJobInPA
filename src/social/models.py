@@ -102,6 +102,27 @@ class VerificaTestoImmagine(BaseModel):
                     "testo_corretto=True.")
 
 
+class VerificaBaseSenzaTesto(BaseModel):
+    """Giudizio di un secondo modello (con visione) su una 'base fissa'
+    (vedi images._prompt_base_fissa/OpenAIImageProvider.genera_base_
+    fissa): qui, a differenza di VerificaTestoImmagine, l'AI non deve
+    disegnare ALCUN testo (badge/titolo/card/CTA li disegna sempre Pillow
+    sopra) — un'istruzione "niente testo" nel prompt non basta a
+    garantirlo (bug reale osservato: l'AI ha disegnato un proprio titolo
+    e un proprio logo nonostante il prompt lo vietasse esplicitamente),
+    serve una verifica indipendente sull'immagine finita."""
+    priva_di_testo: bool = Field(
+        description="True SOLO se l'immagine non contiene alcun testo, lettera, "
+                    "numero, logo, wordmark o scritta di qualunque tipo, in "
+                    "nessun punto dell'immagine.")
+    elementi_trovati: list[str] = Field(
+        default_factory=list,
+        description="Elenco breve e concreto di eventuali testi/loghi/scritte "
+                    "trovati (es. 'titolo \"Concorsi in evidenza\" in alto a "
+                    "sinistra', 'logo/wordmark \"JobInPA\" in alto a destra'), "
+                    "vuoto se priva_di_testo=True.")
+
+
 class VarianteCopy(BaseModel):
     testo: str
     hashtags: list[str] = Field(default_factory=list)

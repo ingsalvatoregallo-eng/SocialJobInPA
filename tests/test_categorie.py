@@ -257,6 +257,70 @@ def test_genera_base_fissa_categoria_inesistente_solleva_errore(conn):
         agents.genera_base_fissa_categoria(conn, "non-esiste")
 
 
+class _LLMCheTrovaTestoLaPrimaVolta(llm.MockLLMProvider):
+    """Simula un modello con visione che la prima volta trova del testo
+    nella base generata (bug reale: il prompt da solo non basta) e la
+    seconda volta la giudica pulita."""
+
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.tentativi_verifica = 0
+
+    async def generate_structured(self, system_prompt, user_prompt, schema, **options):
+        if schema is models.VerificaBaseSenzaTesto:
+            self.tentativi_verifica += 1
+            if self.tentativi_verifica == 1:
+                return models.VerificaBaseSenzaTesto(
+                    priva_di_testo=False, elementi_trovati=["titolo finto in alto a sinistra"])
+            return models.VerificaBaseSenzaTesto(priva_di_testo=True, elementi_trovati=[])
+        return await super().generate_structured(system_prompt, user_prompt, schema, **options)
+
+
+def test_genera_base_fissa_categoria_ritenta_se_trova_testo(conn, monkeypatch):
+    """Bug reale (segnalato dall'utente con uno screenshot): l'AI ha
+    disegnato un proprio titolo/logo nonostante il prompt lo vietasse
+    esplicitamente — un secondo modello con visione verifica l'immagine
+    finita e fa ritentare se trova del testo."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFintaBaseFissa())
+    categoria_id = db_social.crea_categoria(conn, "Da verificare", "un soggetto")
+    llm_provider = _LLMCheTrovaTestoLaPrimaVolta(conn)
+
+    nuovo = agents.genera_base_fissa_categoria(conn, categoria_id, provider=llm_provider)
+
+    assert llm_provider.tentativi_verifica == 2
+    assert nuovo.percorso.exists()
+    assert db_social.get_categoria(conn, categoria_id)["base_fissa_path"] == str(nuovo.percorso)
+
+
+def test_genera_base_fissa_categoria_non_ritenta_oltre_il_massimo(conn, monkeypatch):
+    """Se la verifica trova testo a ogni tentativo, non deve ritentare
+    all'infinito: dopo _TENTATIVI_VERIFICA_BASE_FISSA usa comunque
+    l'ultimo risultato (meglio di niente, resta rigenerabile a mano)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFintaBaseFissa())
+    categoria_id = db_social.crea_categoria(conn, "Sempre con testo", "un soggetto")
+
+    class _LLMSempreConTesto(llm.MockLLMProvider):
+        def __init__(self, conn):
+            super().__init__(conn)
+            self.tentativi_verifica = 0
+
+        async def generate_structured(self, system_prompt, user_prompt, schema, **options):
+            if schema is models.VerificaBaseSenzaTesto:
+                self.tentativi_verifica += 1
+                return models.VerificaBaseSenzaTesto(
+                    priva_di_testo=False, elementi_trovati=["testo finto"])
+            return await super().generate_structured(system_prompt, user_prompt, schema, **options)
+
+    llm_provider = _LLMSempreConTesto(conn)
+
+    nuovo = agents.genera_base_fissa_categoria(conn, categoria_id, provider=llm_provider)
+
+    assert llm_provider.tentativi_verifica == agents._TENTATIVI_VERIFICA_BASE_FISSA - 1
+    assert nuovo.percorso.exists()
+
+
 # --- agents.visual: integrazione categoria -------------------------------
 
 def _content_con_richiesta_catturata(conn, **kwargs):
