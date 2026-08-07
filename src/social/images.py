@@ -678,7 +678,21 @@ def _prompt_base_fissa(soggetto=None):
     coerenza con quel tipo di composizione. Fix: mai il nome del brand,
     mai la parola "post"/"marketing"/"promozionale" — solo "sfondo
     decorativo astratto, come uno sfondo del telefono", con l'istruzione
-    "niente testo" ripetuta piu' volte in modi diversi."""
+    "niente testo" ripetuta piu' volte in modi diversi.
+
+    `soggetto` arriva da categoria.prompt_ai (vedi OpenAIImageProvider.
+    genera_base_fissa/agents.genera_base_fissa_categoria) — lo stesso
+    campo "Prompt immagine" usato anche da _prompt_grafica_intera, dove
+    pero' descrive una composizione INTERA con testo/aree testuali. Se
+    una categoria ha ancora un prompt scritto per quel vecchio uso (es.
+    "nella parte sinistra inserire l'area testuale del post con testo
+    ben distanziato" — bug reale, segnalato dall'utente: causava ancora
+    testo/icone addensate nella zona riservata al sottotitolo), il
+    conflitto con "niente testo mai" va disinnescato qui, non lasciato
+    all'utente da riscrivere a mano: il paragrafo finale istruisce
+    esplicitamente il modello a ignorare qualunque menzione di testo/
+    area testuale/mockup dentro `soggetto` e prendere da li' solo
+    soggetto/palette/mood."""
     soggetto = soggetto or "icons and shapes relevant to job search in the public sector"
     return (
         "Create an ABSTRACT DECORATIVE BACKGROUND ILLUSTRATION only — like a phone "
@@ -698,6 +712,12 @@ def _prompt_base_fissa(soggetto=None):
         "a magnifying glass, a calendar) floating in the scene as purely decorative "
         "shapes, with nothing written on them or near them and no frame or panel "
         "around them.\n\n"
+        "The description above may have been written for a different purpose (a "
+        "finished post with its own title, mockup, or text area) and may mention "
+        "text, captions, headlines, or a 'text area' — IGNORE any such mention "
+        "entirely: take only the visual subject, palette, and mood from it, and "
+        "still render ZERO literal text or letters anywhere, no matter what that "
+        "description says.\n\n"
         "Keep these areas visually calm and completely empty of any icon, shape or "
         "detail, because a separate process will place other elements there "
         "afterward and anything drawn there now would clash: the top-left corner, "

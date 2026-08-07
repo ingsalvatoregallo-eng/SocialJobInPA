@@ -481,6 +481,25 @@ def test_prompt_base_fissa_non_si_descrive_come_post_promozionale():
     assert "NOT a finished social media post" in prompt
 
 
+def test_prompt_base_fissa_disinnesca_un_soggetto_che_chiede_testo():
+    """Bug reale, segnalato dall'utente con uno screenshot: una categoria
+    con un "Prompt immagine" scritto per il vecchio flusso a grafica
+    intera (_prompt_grafica_intera, che descrive aree di testo per un
+    post completo) continuava a produrre una base con testo/icone
+    addensate nella zona riservata al sottotitolo, perche' quel testo
+    veniva iniettato cosi' com'e' come soggetto. Il prompt deve
+    disinnescare esplicitamente qualunque richiesta di testo dentro il
+    soggetto passato dalla categoria, non lasciare all'utente il compito
+    di riscriverlo a mano."""
+    soggetto_vecchio_stile = (
+        "Crea un mockup social che pubblicizza i concorsi in evidenza. "
+        "Nella parte sinistra inserire l'area testuale del post con testo ben distanziato.")
+    prompt = images._prompt_base_fissa(soggetto_vecchio_stile)
+    assert soggetto_vecchio_stile in prompt
+    assert "ignore any such mention" in prompt.lower()
+    assert "zero text" in prompt.lower()
+
+
 def test_prompt_base_fissa_con_soggetto_personalizzato():
     prompt = images._prompt_base_fissa("un'illustrazione di una bilancia della giustizia")
     assert "un'illustrazione di una bilancia della giustizia" in prompt
