@@ -13,6 +13,7 @@ import re
 
 import auth
 import pytest
+from PIL import Image
 
 from social import agents, db_social, llm, models
 from social.images import MockImageProvider
@@ -137,6 +138,123 @@ def test_aggiorna_categoria_stile_immagine_stringa_vuota_lo_cancella(conn):
         conn, "Con stile 3", "prompt", stile_immagine="Stile originale")
     db_social.aggiorna_categoria(conn, categoria_id, stile_immagine="")
     assert db_social.get_categoria(conn, categoria_id)["stile_immagine"] is None
+
+
+# --- "base fissa" (esperimento): illustrazione unica per categoria, riusata
+# per ogni post invece di richiamare l'AI a ogni volta (vedi images.
+# TemplateImageProvider.genera_sync_su_base/BaseFissaImageProvider) --------
+
+def test_crea_categoria_base_fissa_disattivata_di_default(conn):
+    """Comportamento invariato per ogni categoria esistente/nuova finche'
+    non la si attiva esplicitamente."""
+    categoria_id = db_social.crea_categoria(conn, "Senza base fissa", "prompt")
+    categoria = db_social.get_categoria(conn, categoria_id)
+    assert categoria["usa_base_fissa"] is False
+    assert categoria["base_fissa_path"] is None
+
+
+def test_aggiorna_categoria_base_fissa(conn):
+    categoria_id = db_social.crea_categoria(conn, "Con base fissa", "prompt")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path="/tmp/base.png",
+                                 usa_base_fissa=True)
+    categoria = db_social.get_categoria(conn, categoria_id)
+    assert categoria["base_fissa_path"] == "/tmp/base.png"
+    assert categoria["usa_base_fissa"] is True
+
+
+def test_aggiorna_categoria_usa_base_fissa_none_non_lo_tocca(conn):
+    categoria_id = db_social.crea_categoria(conn, "Toggle base fissa", "prompt")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path="/tmp/base.png",
+                                 usa_base_fissa=True)
+    db_social.aggiorna_categoria(conn, categoria_id, prompt_ai="nuovo prompt")
+    assert db_social.get_categoria(conn, categoria_id)["usa_base_fissa"] is True
+
+
+def test_visual_usa_base_fissa_quando_categoria_abilitata(conn, tmp_path):
+    """Con usa_base_fissa attivo e un'immagine di base gia' pronta,
+    visual() non deve passare dal provider AI/template normale: l'asset
+    generato porta la firma del provider dedicato (vedi images.
+    BaseFissaImageProvider), zero chiamate AI per questo post."""
+    base_path = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base_path, "PNG")
+    categoria_id = db_social.crea_categoria(conn, "Concorsi base fissa", strategia_fatti="bandi_jobinpa")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(base_path), usa_base_fissa=True)
+    content_id = db_social.crea_content(
+        conn, "Bando aperto", canali=["instagram"], categoria_id=categoria_id)
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+
+    agents.visual(conn, content_id, risultato, provider=provider)
+
+    asset = db_social.asset_di(conn, content_id)[0]
+    assert asset["provider"] == "template_base_fissa"
+
+
+def test_visual_ignora_base_fissa_se_image_provider_esplicito(conn, tmp_path):
+    """Un image_provider passato esplicitamente (es. i test, o una
+    rigenerazione con provider specifico) non viene mai sostituito
+    silenziosamente da quello di base fissa."""
+    base_path = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base_path, "PNG")
+    categoria_id = db_social.crea_categoria(conn, "Concorsi base fissa 2", strategia_fatti="bandi_jobinpa")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(base_path), usa_base_fissa=True)
+    content_id = db_social.crea_content(
+        conn, "Bando aperto", canali=["instagram"], categoria_id=categoria_id)
+    provider = llm.MockLLMProvider(conn)
+    risultato = models.RisultatoRicerca(
+        fatti=[models.FattoVerificato(fatto="fatto di prova", confidenza=0.9)], sintesi="Sintesi.")
+
+    agents.visual(conn, content_id, risultato, provider=provider, image_provider=MockImageProvider())
+
+    asset = db_social.asset_di(conn, content_id)[0]
+    assert asset["provider"] == "mock"
+
+
+class _RispostaFintaBaseFissa:
+    status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        import base64
+        return {"data": [{"b64_json": base64.b64encode(_PNG_1X1).decode()}]}
+
+
+def test_genera_base_fissa_categoria_salva_il_percorso(conn, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFintaBaseFissa())
+    categoria_id = db_social.crea_categoria(conn, "Da generare", "un soggetto qualsiasi")
+
+    agents.genera_base_fissa_categoria(conn, categoria_id)
+
+    categoria = db_social.get_categoria(conn, categoria_id)
+    assert categoria["base_fissa_path"]
+    from pathlib import Path
+    assert Path(categoria["base_fissa_path"]).exists()
+
+
+def test_genera_base_fissa_categoria_rigenerando_cancella_il_file_vecchio(conn, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFintaBaseFissa())
+    categoria_id = db_social.crea_categoria(conn, "Da rigenerare", "un soggetto")
+    agents.genera_base_fissa_categoria(conn, categoria_id)
+    from pathlib import Path
+    vecchio_percorso = Path(db_social.get_categoria(conn, categoria_id)["base_fissa_path"])
+    assert vecchio_percorso.exists()
+
+    agents.genera_base_fissa_categoria(conn, categoria_id)
+
+    assert not vecchio_percorso.exists()
+    nuovo_percorso = Path(db_social.get_categoria(conn, categoria_id)["base_fissa_path"])
+    assert nuovo_percorso.exists()
+    assert nuovo_percorso != vecchio_percorso
+
+
+def test_genera_base_fissa_categoria_inesistente_solleva_errore(conn):
+    with pytest.raises(ValueError):
+        agents.genera_base_fissa_categoria(conn, "non-esiste")
 
 
 # --- agents.visual: integrazione categoria -------------------------------
@@ -582,6 +700,108 @@ def test_crea_categoria_nome_duplicato_via_web_400(conn, client):
                     data={"nome": "Doppione", "prompt_ai": "y",
                           "strategia_fatti": "libera", "csrf": csrf})
     assert r.status_code == 400
+
+
+# --- web: "base fissa" ------------------------------------------------------
+
+def test_aggiorna_categoria_via_web_attiva_usa_base_fissa(conn, client):
+    db_social.crea_utente(conn, "admin-cat13@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat13@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Con toggle base fissa", "x")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path="/tmp/base.png")
+
+    r = client.post(f"/social/categorie/{categoria_id}", data={
+        "prompt_ai": "x", "strategia_fatti": "libera", "usa_base_fissa": "on", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_categoria(conn, categoria_id)["usa_base_fissa"] is True
+
+
+def test_aggiorna_categoria_via_web_senza_checkbox_disattiva_usa_base_fissa(conn, client):
+    """Una checkbox HTML non spunta non viene inviata affatto (non un
+    valore "false"): l'assenza del campo deve comunque disattivare
+    l'opzione, non lasciarla invariata."""
+    db_social.crea_utente(conn, "admin-cat14@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat14@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Con toggle da spegnere", "x")
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path="/tmp/base.png",
+                                 usa_base_fissa=True)
+
+    r = client.post(f"/social/categorie/{categoria_id}", data={
+        "prompt_ai": "x", "strategia_fatti": "libera", "csrf": csrf,
+    }, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.get_categoria(conn, categoria_id)["usa_base_fissa"] is False
+
+
+def test_genera_base_categoria_mette_in_coda_un_job(conn, client):
+    db_social.crea_utente(conn, "admin-cat15@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat15@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Da generare", "x")
+
+    r = client.post(f"/social/categorie/{categoria_id}/genera-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+
+def test_genera_base_categoria_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "admin-cat16@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat16@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/categorie/non-esiste/genera-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_genera_base_categoria_richiede_admin(conn, client):
+    db_social.crea_utente(conn, "editor-cat4@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    categoria_id = db_social.crea_categoria(conn, "Protetta 2", "x")
+    _login(client, "editor-cat4@test.local")
+    csrf = _csrf(client, "/social/contenuti/nuovo")
+
+    r = client.post(f"/social/categorie/{categoria_id}/genera-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_anteprima_base_fissa_senza_immagine_404(conn, client):
+    db_social.crea_utente(conn, "admin-cat17@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat17@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Senza base ancora", "x")
+
+    r = client.get(f"/social/categorie/{categoria_id}/base-fissa")
+    assert r.status_code == 404
+
+
+def test_anteprima_base_fissa_serve_il_file(conn, client, tmp_path):
+    db_social.crea_utente(conn, "admin-cat18@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat18@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Con base pronta", "x")
+    from social import config
+    cartella = config.asset_storage_path() / "basi_fisse"
+    cartella.mkdir(parents=True, exist_ok=True)
+    percorso = cartella / "base_test.png"
+    percorso.write_bytes(_PNG_1X1)
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(percorso))
+
+    r = client.get(f"/social/categorie/{categoria_id}/base-fissa")
+    assert r.status_code == 200
+    percorso.unlink(missing_ok=True)
 
 
 def test_elimina_categoria_via_web(conn, client):

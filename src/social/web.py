@@ -1532,9 +1532,12 @@ def _cartella_categorie():
 @router.get("/categorie", response_class=HTMLResponse)
 def categorie(request: Request, sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
+    lista = db_social.lista_categorie(conn)
+    generazione_base_in_corso = {
+        c["id"]: db_social.job_in_corso(conn, "genera_base_fissa", c["id"]) for c in lista}
     return templates.TemplateResponse(request, "categorie.html", _ctx(
         request, sessione, conn, pagina_attiva="categorie",
-        categorie=db_social.lista_categorie(conn)))
+        categorie=lista, generazione_base_in_corso=generazione_base_in_corso))
 
 
 async def _salva_immagine_categoria(file: UploadFile) -> str:
@@ -1573,6 +1576,7 @@ async def aggiorna_categoria(request: Request, categoria_id: str,
                              struttura_post: str = Form(""), stile_immagine: str = Form(""),
                              immagini_nuove: Optional[list[UploadFile]] = File(None),
                              rimuovi_immagini: Optional[list[str]] = Form(None),
+                             usa_base_fissa: Optional[str] = Form(None),
                              csrf: str = Form(None),
                              sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
     _richiedi(conn, sessione, "social.admin")
@@ -1593,10 +1597,42 @@ async def aggiorna_categoria(request: Request, categoria_id: str,
     db_social.aggiorna_categoria(conn, categoria_id, prompt_ai=prompt_ai,
                                  immagini_riferimento=percorsi, strategia_fatti=strategia_fatti,
                                  struttura_post=struttura_post or "",
-                                 stile_immagine=stile_immagine or "")
+                                 stile_immagine=stile_immagine or "",
+                                 usa_base_fissa=usa_base_fissa is not None)
     db_social.audit(conn, "categoria_modificata", utente_id=sessione["utente"]["id"],
                     oggetto_tipo="categoria", oggetto_id=categoria_id)
     return RedirectResponse("/social/categorie", status_code=303)
+
+
+@router.post("/categorie/{categoria_id}/genera-base")
+def genera_base_categoria(request: Request, categoria_id: str, csrf: str = Form(None),
+                          sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Avvia (in coda, come le altre generazioni immagine) la creazione
+    dell'illustrazione di sfondo per l'esperimento "base fissa" (vedi
+    agents.genera_base_fissa_categoria): un'unica immagine riusata per
+    ogni post di questa categoria quando usa_base_fissa e' attivo, invece
+    di generarne una nuova a ogni post."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    if db_social.get_categoria(conn, categoria_id) is None:
+        raise HTTPException(status_code=404)
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
+@router.get("/categorie/{categoria_id}/base-fissa")
+def anteprima_base_fissa(categoria_id: str, sessione=Depends(utente_web),
+                         conn=Depends(ottieni_conn)):
+    riga = db_social.get_categoria(conn, categoria_id)
+    if riga is None or not riga["base_fissa_path"]:
+        raise HTTPException(status_code=404)
+    percorso = Path(riga["base_fissa_path"]).resolve()
+    radice = config.asset_storage_path().resolve()
+    if radice not in percorso.parents and percorso != radice:
+        raise HTTPException(status_code=403, detail="percorso fuori dallo storage asset")
+    if not percorso.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(percorso)
 
 
 @router.post("/categorie/{categoria_id}/elimina")

@@ -43,6 +43,8 @@ def esegui_job(conn, job):
     if tipo == "rigenera_copy":
         return agents.rigenera_copy(conn, payload["content_id"],
                                     note_revisore=payload.get("note_revisore"))
+    if tipo == "genera_base_fissa":
+        return agents.genera_base_fissa_categoria(conn, payload["categoria_id"])
     if tipo == "generate_week_plan":
         return agents.supervisor_pianifica_settimana(conn, payload["settimana"])
     if tipo == "collect_metrics":

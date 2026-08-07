@@ -290,6 +290,8 @@ CREATE TABLE IF NOT EXISTS social_content_categories (
     immagini_riferimento    TEXT,  -- JSON lista di percorsi locali, [] o NULL se nessuna
     strategia_fatti         TEXT NOT NULL DEFAULT 'libera',
     struttura_post          TEXT,  -- guida di struttura per il Copywriter Agent, facoltativa
+    base_fissa_path         TEXT,  -- percorso locale dell'immagine base generata una tantum (esperimento "base fissa")
+    usa_base_fissa          INTEGER NOT NULL DEFAULT 0,  -- se attivo e base_fissa_path presente, niente chiamata AI per ogni post
     creato_at               TEXT NOT NULL,
     aggiornato_at           TEXT
 );
@@ -736,6 +738,18 @@ def _migra(conn):
     if "stile_immagine" not in colonne_categorie:
         conn.execute("ALTER TABLE social_content_categories ADD COLUMN stile_immagine TEXT")
         conn.commit()
+    if "base_fissa_path" not in colonne_categorie:
+        # Esperimento "base fissa" (richiesto dall'utente): un'unica
+        # immagine base generata una tantum per categoria, sulla quale i
+        # post successivi sovrappongono i testi con Pillow invece di
+        # generare una nuova illustrazione AI a ogni post. Disattivo di
+        # default (usa_base_fissa=0): non cambia nulla per le categorie
+        # esistenti finche' non lo si abilita esplicitamente.
+        conn.execute("ALTER TABLE social_content_categories ADD COLUMN base_fissa_path TEXT")
+        conn.execute(
+            "ALTER TABLE social_content_categories ADD COLUMN usa_base_fissa "
+            "INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
     for dominio, nome in SOURCE_DOMAINS_SEED:
         conn.execute(
             "INSERT OR IGNORE INTO social_source_domains (id, dominio, nome, attivo, creato_at) "
@@ -1053,11 +1067,13 @@ def elimina_content(conn, content_id, *, utente_id=None):
 def _parse_categoria(riga):
     d = dict(riga)
     d["immagini_riferimento"] = json.loads(d["immagini_riferimento"]) if d.get("immagini_riferimento") else []
+    d["usa_base_fissa"] = bool(d["usa_base_fissa"])
     return d
 
 
 def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
-                   strategia_fatti="libera", struttura_post=None, stile_immagine=None):
+                   strategia_fatti="libera", struttura_post=None, stile_immagine=None,
+                   base_fissa_path=None, usa_base_fissa=False):
     """Solleva sqlite3.IntegrityError se il nome e' gia' in uso (UNIQUE),
     ValueError se strategia_fatti non e' valida.
     prompt_ai: facoltativo, vuoto = l'AI sceglie liberamente il soggetto
@@ -1080,6 +1096,8 @@ def crea_categoria(conn, nome, prompt_ai="", *, immagini_riferimento=None,
         "strategia_fatti": strategia_fatti,
         "struttura_post": struttura_post.strip() if struttura_post else None,
         "stile_immagine": stile_immagine.strip() if stile_immagine else None,
+        "base_fissa_path": base_fissa_path,
+        "usa_base_fissa": 1 if usa_base_fissa else 0,
         "creato_at": _adesso()})
     conn.commit()
     return categoria_id
@@ -1097,11 +1115,14 @@ def get_categoria(conn, categoria_id):
 
 
 def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimento=None,
-                       strategia_fatti=None, struttura_post=None, stile_immagine=None):
+                       strategia_fatti=None, struttura_post=None, stile_immagine=None,
+                       base_fissa_path=None, usa_base_fissa=None):
     """Ogni parametro non passato (None) lascia il valore esistente
     invariato. Per svuotare davvero un campo facoltativo si passa una
-    stringa vuota "" (struttura_post, stile_immagine) o una lista vuota []
-    (immagini_riferimento) — non None, che significa "non toccare"."""
+    stringa vuota "" (struttura_post, stile_immagine, base_fissa_path) o
+    una lista vuota [] (immagini_riferimento) — non None, che significa
+    "non toccare". usa_base_fissa e' un booleano: solo True/False lo
+    modifica, None lo lascia com'era."""
     if strategia_fatti is not None and strategia_fatti not in STRATEGIE_FATTI:
         raise ValueError(f"strategia_fatti non valida: {strategia_fatti}")
     campi = {}
@@ -1115,6 +1136,10 @@ def aggiorna_categoria(conn, categoria_id, *, prompt_ai=None, immagini_riferimen
         campi["struttura_post"] = struttura_post.strip() or None
     if stile_immagine is not None:
         campi["stile_immagine"] = stile_immagine.strip() or None
+    if base_fissa_path is not None:
+        campi["base_fissa_path"] = base_fissa_path.strip() or None
+    if usa_base_fissa is not None:
+        campi["usa_base_fissa"] = 1 if usa_base_fissa else 0
     if not campi:
         return
     campi["aggiornato_at"] = _adesso()

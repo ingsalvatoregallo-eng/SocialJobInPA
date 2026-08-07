@@ -39,6 +39,25 @@
         {% if c.struttura_post %}<p style="font-size:13px;margin:0 0 6px"><strong>Struttura post:</strong> {{ c.struttura_post }}</p>{% endif %}
         <p style="white-space:pre-wrap;font-size:13px;color:var(--colore-testo);margin:0">{{ c.prompt_ai or '(nessun prompt immagine — soggetto scelto liberamente dall\'AI)' }}</p>
         <p style="font-size:12px;color:var(--colore-testo-secondario);margin:6px 0 0">{{ 'Stile immagine personalizzato ✓' if c.stile_immagine else 'Stile immagine: fisso (default)' }}</p>
+
+        <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--colore-bordo)">
+          <p style="font-size:12px;color:var(--colore-testo-secondario);margin:0 0 8px">
+            <strong>Base fissa</strong> (esperimento) — {{ 'attiva ✓' if c.usa_base_fissa else 'disattivata' }}
+          </p>
+          {% if c.base_fissa_path %}
+          <img src="/social/categorie/{{ c.id }}/base-fissa" alt="base fissa {{ c.nome }}"
+               style="width:140px;border-radius:8px;border:1px solid var(--colore-bordo);display:block;margin-bottom:8px">
+          {% endif %}
+          {% if generazione_base_in_corso.get(c.id) %}
+          <p class="hint">⏳ Generazione in corso…</p>
+          {% else %}
+          <form method="post" action="/social/categorie/{{ c.id }}/genera-base" class="inline"
+                onsubmit="return confirm('Generare una nuova illustrazione di base per {{ c.nome }}? Costa come una generazione immagine AI normale, ma va fatta una volta sola.');">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn piccolo secondario" type="submit">{{ '🔄 Rigenera base' if c.base_fissa_path else '✨ Genera base' }}</button>
+          </form>
+          {% endif %}
+        </div>
       </div>
 
       <div id="modifica-{{ c.id }}" style="display:none;margin-top:10px">
@@ -79,6 +98,14 @@
 
           <label>Aggiungi nuove immagini di riferimento (opzionale)</label>
           <input type="file" name="immagini_nuove" accept="image/png,image/jpeg" multiple>
+
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:10px">
+            <input type="checkbox" name="usa_base_fissa" style="width:auto"
+                   {{ 'checked' if c.usa_base_fissa }} {{ 'disabled' if not c.base_fissa_path }}>
+            Usa la base fissa per i post di questa categoria (esperimento)
+          </label>
+          <p class="hint">Un'unica illustrazione, generata una volta sola (vedi sopra) e riusata per ogni post: badge/titolo/dati/CTA restano sempre disegnati in modo deterministico, ma niente nuova chiamata AI per ogni post.{% if not c.base_fissa_path %} Genera prima un'immagine di base per poter attivare questa opzione.{% endif %}</p>
+
           <div style="display:flex;gap:10px;margin-top:10px">
             <button type="button" class="btn piccolo secondario" onclick="nascondiModificaCategoria('{{ c.id }}')">Annulla</button>
             <button class="btn piccolo" type="submit" style="margin-left:auto">💾 Salva</button>

@@ -287,28 +287,90 @@ class TemplateImageProvider:
     async def generate(self, request: ImageGenerationRequest) -> GeneratedAsset:
         return self.genera_sync(request)
 
-    def genera_sync(self, request: ImageGenerationRequest) -> GeneratedAsset:
+    def _valida(self, request: ImageGenerationRequest):
         if request.template not in TEMPLATE_VALIDI:
             raise ValueError(f"template sconosciuto: {request.template}")
         if request.formato not in FORMATI:
             raise ValueError(f"formato sconosciuto: {request.formato}")
+
+    def _parametri(self, request: ImageGenerationRequest):
         larghezza, altezza = FORMATI[request.formato]
         palette = {**PALETTE_DEFAULT, **(request.palette or {})}
         margine = int(larghezza * MARGINE_SICURO)
         interno = larghezza - 2 * margine
         scala = larghezza / 1080  # i font scalano col formato
+        return larghezza, altezza, palette, margine, interno, scala
+
+    def _salva(self, immagine, request: ImageGenerationRequest, prefisso: str) -> GeneratedAsset:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        percorso = self.output_dir / f"{prefisso}_{request.formato}_{uuid.uuid4().hex[:10]}.png"
+        # PNG sRGB: Pillow salva RGB senza profilo, che i social interpretano sRGB.
+        immagine.convert("RGB").save(percorso, "PNG")
+        return GeneratedAsset(percorso=percorso, provider=self.nome,
+                              template=request.template, formato=request.formato)
+
+    def genera_sync(self, request: ImageGenerationRequest) -> GeneratedAsset:
+        self._valida(request)
+        larghezza, altezza, palette, margine, interno, scala = self._parametri(request)
 
         # Sfondo sfumato + blob decorativi, stile card di prodotto (badge
         # pillola, card bianca con ombra) invece della vecchia barra piena
         # a tinta unita in alto/in basso.
         immagine = _sfondo_con_blob(larghezza, altezza, palette, scala)
-        draw = ImageDraw.Draw(immagine)
 
         # Riservato PRIMA di disegnare: senza un limite noto, con testi
         # lunghi finivano dietro il footer invece di fermarsi prima — bug
         # reale osservato in produzione. Senza piu' una barra footer piena,
         # basta un margine di sicurezza sul fondo.
         y_limite = altezza - int(56 * scala)
+
+        immagine = self._disegna_contenuto(request, immagine, larghezza, altezza, palette,
+                                           margine, interno, scala, y_limite)
+        return self._salva(immagine, request, prefisso=request.template)
+
+    def genera_sync_su_base(self, request: ImageGenerationRequest, percorso_base) -> GeneratedAsset:
+        """Come genera_sync, ma parte da un'immagine base gia' pronta
+        (categoria.base_fissa_path, generata una tantum — vedi
+        OpenAIImageProvider.genera_base_fissa) invece di disegnarne una
+        nuova a ogni chiamata: nessun costo/rischio di illustrazione AI
+        per singolo post. Badge/titolo/sottotitolo/card dati restano
+        identici a genera_sync (stesso _disegna_contenuto, mai testo
+        generato dall'AI); in piu' un bottone CTA in fondo, assente nel
+        layout standard perche' li' non c'e' un'illustrazione AI di sfondo
+        da completare con un invito all'azione."""
+        self._valida(request)
+        larghezza, altezza, palette, margine, interno, scala = self._parametri(request)
+
+        base = Image.open(percorso_base).convert("RGB")
+        immagine = _ridimensiona_a_copertura(base, larghezza, altezza).convert("RGBA")
+
+        altezza_cta = int(96 * scala)
+        margine_sotto_cta = int(56 * scala)
+        spazio_prima_cta = int(24 * scala)
+        y_limite = altezza - margine_sotto_cta - altezza_cta - spazio_prima_cta
+
+        immagine = self._disegna_contenuto(request, immagine, larghezza, altezza, palette,
+                                           margine, interno, scala, y_limite)
+        immagine = self._disegna_cta(request, immagine, larghezza, altezza, palette,
+                                     margine, scala, altezza_cta, margine_sotto_cta)
+        return self._salva(immagine, request, prefisso=f"base_{request.template}")
+
+    def _disegna_cta(self, request, immagine, larghezza, altezza, palette, margine, scala,
+                     altezza_cta, margine_sotto_cta):
+        testo_cta = _CTA_GRAFICA_INTERA.get(request.template, "Scopri di più su JobInPA")
+        larghezza_cta = larghezza - 2 * margine
+        pulsante = _pillola_sfumata(larghezza_cta, altezza_cta, palette["viola"], palette["primario"])
+        y_cta = altezza - margine_sotto_cta - altezza_cta
+        immagine.paste(pulsante, (margine, y_cta), pulsante)
+        draw = ImageDraw.Draw(immagine)
+        font_cta = _font(int(34 * scala), bold=True)
+        draw.text((larghezza // 2, y_cta + altezza_cta // 2), testo_cta,
+                  font=font_cta, fill=palette["testo_su_primario"], anchor="mm")
+        return immagine
+
+    def _disegna_contenuto(self, request, immagine, larghezza, altezza, palette, margine,
+                           interno, scala, y_limite):
+        draw = ImageDraw.Draw(immagine)
 
         # Badge pillola col nome del template ("NUOVO CONCORSO", ecc.), in
         # alto a sinistra.
@@ -436,12 +498,7 @@ class TemplateImageProvider:
                                  fill=palette["bordo_card"], width=max(1, int(1.5 * scala)))
                     y_item += altezza_item
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        percorso = self.output_dir / f"{request.template}_{request.formato}_{uuid.uuid4().hex[:10]}.png"
-        # PNG sRGB: Pillow salva RGB senza profilo, che i social interpretano sRGB.
-        immagine.convert("RGB").save(percorso, "PNG")
-        return GeneratedAsset(percorso=percorso, provider=self.nome,
-                              template=request.template, formato=request.formato)
+        return immagine
 
 
 def _logo_completo(altezza_max):
@@ -478,6 +535,29 @@ class MockImageProvider:
         Image.new("RGB", (1, 1), "#FFFFFF").save(percorso, "PNG")
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
+
+
+class BaseFissaImageProvider:
+    """Wrapper con la stessa interfaccia ImageProvider degli altri
+    provider (vedi agents.visual/_genera_con_verifica_testo, che chiamano
+    sempre .generate() in modo uniforme) attorno a TemplateImageProvider.
+    genera_sync_su_base: usato al posto del provider AI normale quando la
+    categoria del contenuto ha usa_base_fissa attivo (esperimento "base
+    fissa" — vedi db_social.social_content_categories). Zero chiamate
+    all'API immagini per ogni post: l'unica illustrazione AI e' quella
+    generata una tantum in Configurazioni (vedi OpenAIImageProvider.
+    genera_base_fissa)."""
+
+    nome = "template_base_fissa"
+
+    def __init__(self, percorso_base, output_dir=None):
+        self._template = TemplateImageProvider(output_dir)
+        self.percorso_base = percorso_base
+
+    async def generate(self, request: ImageGenerationRequest) -> GeneratedAsset:
+        asset = self._template.genera_sync_su_base(request, self.percorso_base)
+        return GeneratedAsset(percorso=asset.percorso, provider=self.nome,
+                              template=asset.template, formato=asset.formato)
 
 
 # Stile applicato SEMPRE, indipendentemente da cosa scrive l'agente in
@@ -576,6 +656,47 @@ def _prompt_grafica_intera(request):
             "accented letters (à, è, é, ì, ò, ù) exactly as quoted above.\n"
         )
     return prompt
+
+
+def _prompt_base_fissa(soggetto=None):
+    """Prompt per l'esperimento 'base fissa' (vedi TemplateImageProvider.
+    genera_sync_su_base): a differenza di _prompt_grafica_intera, qui
+    l'AI NON compone badge/titolo/card/CTA — quegli elementi li disegna
+    sempre Pillow sopra, deterministico, esattamente come nel layout
+    genera_sync di sempre (mai testo generato dall'AI). L'unico compito
+    dell'AI e' l'illustrazione decorativa di sfondo, nello stesso stile
+    ricco gia' approvato dall'utente per _prompt_grafica_intera (icone
+    3D, sfumatura navy/viola) — con le zone dove Pillow disegnera' sopra
+    lasciate libere, per non finire con due badge o due bottoni
+    sovrapposti. Generata una tantum per categoria (azione esplicita in
+    Configurazioni), non a ogni post — a differenza di _genera_grafica_
+    intera che rigenera tutto da zero per ogni contenuto."""
+    soggetto = soggetto or "elements relevant to Italian public administration job search"
+    return (
+        "Design a polished modern SaaS marketing graphic background/illustration for "
+        "JobInPA (an AI-powered job search assistant for Italian public administration "
+        "jobs) — a rich, professional illustration of the same visual quality as a "
+        "finished Instagram promotional post, NOT a plain flat background. This image "
+        "will be reused as a fixed base for many different posts: a separate rendering "
+        "step will overlay a badge, headline, data card and CTA button as flat 2D shapes "
+        "on top of it afterward, so this base must NOT include any of those UI elements "
+        "itself, and must NOT include any text, letters, numbers or words anywhere.\n\n"
+        "Layout zones to respect (leave each one visually calm and uncluttered, no busy "
+        "detail crossing into it, since flat shapes will be drawn there afterward):\n"
+        "- Top-left corner: leave clear, a badge will be placed there.\n"
+        "- Top-right corner: leave completely empty and clear, the brand logo will be "
+        "placed there.\n"
+        "- Left half, upper-middle area: leave plain and uncluttered, a multi-line "
+        "headline will be placed there.\n"
+        "- Bottom area (roughly the lower third): leave plain and uncluttered, a white "
+        "rounded data card and a CTA button will be placed there.\n\n"
+        f"Everywhere else — mainly the right side and background — {soggetto}: a polished "
+        "gradient background (navy blue #0B3D91 to purple #7C3AED), with elegant 3D-style "
+        "rounded icons relevant to Italian public-sector job search (e.g. a bell with a "
+        "notification badge, a magnifying glass, a calendar) as decorative elements, soft "
+        "shadows, generous negative space. No text, no letters, no numbers, no words "
+        "anywhere in the image.\n"
+    )
 
 
 # Formati OpenAI Images supportati da gpt-image-1/dall-e-3 (no formati
@@ -736,6 +857,40 @@ class OpenAIImageProvider:
         immagine.save(percorso, "PNG")
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
+
+    async def genera_base_fissa(self, *, prompt_ai=None, stile_ai=None,
+                                immagini_riferimento=None) -> GeneratedAsset:
+        """Esperimento 'base fissa' (vedi TemplateImageProvider.
+        genera_sync_su_base e _prompt_base_fissa): genera l'illustrazione
+        di sfondo UNA VOLTA SOLA per una categoria, da riusare per ogni
+        post successivo invece di richiamare l'AI a ogni volta. Chiamata
+        solo su azione esplicita dell'amministratore in Configurazioni,
+        mai automaticamente dalla pipeline. Non e' legata a un template
+        specifico (badge/CTA restano testo disegnato da Pillow sopra,
+        vedi _disegna_contenuto/_disegna_cta): la stessa base serve per
+        qualunque template scelga poi la pipeline per un post. Salvata in
+        una sottocartella separata dagli asset per-contenuto (basi_fisse/)
+        perche' persiste finche' non viene rigenerata, non e' legata a un
+        content_id."""
+        import asyncio
+        prezzo = self._verifica_budget()
+        # Taglia verticale come "master": e' il formato piu' esigente in
+        # altezza fra quelli in FORMATI (instagram_story), un resize "a
+        # copertura" (vedi genera_sync_su_base) puo' sempre ritagliare i
+        # lati per ottenere formati piu' larghi, mai il contrario.
+        immagine_bytes = await asyncio.to_thread(
+            self._chiama_api, _prompt_base_fissa(prompt_ai),
+            _TAGLIE_OPENAI["verticale"], immagini_riferimento, stile_ai)
+        db_social.registra_costo(self.conn, "openai_images", prezzo,
+                                 modello=config.openai_image_model())
+        import io
+        immagine = Image.open(io.BytesIO(immagine_bytes)).convert("RGB")
+        cartella = self.output_dir / "basi_fisse"
+        cartella.mkdir(parents=True, exist_ok=True)
+        percorso = cartella / f"base_fissa_{uuid.uuid4().hex[:10]}.png"
+        immagine.save(percorso, "PNG")
+        return GeneratedAsset(percorso=percorso, provider=self.nome,
+                              template="base_fissa", formato="verticale")
 
     def _chiama_api(self, prompt, taglia, immagini_riferimento=None, stile_ai=None):
         import base64

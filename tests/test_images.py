@@ -384,3 +384,92 @@ def test_chiama_api_stile_categoria_sostituisce_del_tutto_lo_stile_fisso(conn, m
     provider._chiama_api("Un pacchetto regalo", "1024x1024", stile_ai=stile_personalizzato)
     assert catturato["prompt"] == stile_personalizzato + "Un pacchetto regalo"
     assert "Flat vector" not in catturato["prompt"]
+
+
+# --- "base fissa" (esperimento): base pre-generata + testo composto sempre
+# da Pillow (vedi TemplateImageProvider.genera_sync_su_base/BaseFissaImage
+# Provider/OpenAIImageProvider.genera_base_fissa) -----------------------------
+
+def test_genera_sync_su_base_produce_unimmagine_valida(tmp_path):
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#123456").save(base, "PNG")
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    asset = provider.genera_sync_su_base(images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed", titolo="Concorso di prova",
+        sottotitolo="Ente di prova", dati_chiave=["10 posti", "Scadenza 31/12/2026"]), base)
+    assert asset.percorso.exists()
+    with Image.open(asset.percorso) as img:
+        assert img.size == (1080, 1350)
+        assert img.format == "PNG"
+
+
+def test_genera_sync_su_base_disegna_un_bottone_cta_in_fondo(tmp_path):
+    """A differenza di genera_sync, qui in fondo c'e' sempre un bottone
+    CTA (assente nel layout standard, che non ha un'illustrazione AI di
+    sfondo da completare con un invito all'azione): la zona riservata al
+    bottone non deve restare del colore piatto della base."""
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    asset = provider.genera_sync_su_base(images.ImageGenerationRequest(
+        template="scadenza", formato="instagram_feed", titolo="Titolo breve",
+        dati_chiave=["Un dato"]), base)
+    with Image.open(asset.percorso) as img:
+        larghezza, altezza = img.size
+        scala = larghezza / 1080
+        y_cta = altezza - int(56 * scala) - int(96 * scala) // 2
+        colore_al_centro_del_bottone = img.getpixel((larghezza // 2, y_cta))
+        assert colore_al_centro_del_bottone != (11, 61, 145)
+
+
+def test_genera_sync_su_base_ridimensiona_a_copertura_senza_deformare(tmp_path):
+    """La base puo' avere un rapporto d'aspetto diverso dal formato
+    richiesto (es. master verticale 1024x1536 per un post quadrato): deve
+    coprire il canvas senza stiramenti, stesso resize "a copertura" gia'
+    usato per gli sfondi AI ordinari."""
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    asset = provider.genera_sync_su_base(images.ImageGenerationRequest(
+        template="promozione", formato="instagram_square", titolo="Titolo",
+        dati_chiave=[]), base)
+    with Image.open(asset.percorso) as img:
+        assert img.size == (1080, 1080)
+
+
+def test_base_fissa_image_provider_delega_al_compositor(tmp_path):
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")
+    provider = images.BaseFissaImageProvider(str(base), output_dir=tmp_path)
+    asset = asyncio.run(provider.generate(images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_square", titolo="Titolo",
+        dati_chiave=["Dato"])))
+    assert asset.provider == "template_base_fissa"
+    assert asset.percorso.exists()
+
+
+def test_prompt_base_fissa_non_richiede_testo():
+    """A differenza di _prompt_grafica_intera, qui l'AI non deve MAI
+    scrivere testo: badge/titolo/card/CTA restano sempre disegnati da
+    Pillow sopra (vedi _disegna_contenuto/_disegna_cta)."""
+    prompt = images._prompt_base_fissa()
+    assert "no text" in prompt.lower()
+    assert "badge" in prompt.lower()
+    assert "cta" in prompt.lower() or "call" in prompt.lower() or "button" in prompt.lower()
+
+
+def test_prompt_base_fissa_con_soggetto_personalizzato():
+    prompt = images._prompt_base_fissa("un'illustrazione di una bilancia della giustizia")
+    assert "un'illustrazione di una bilancia della giustizia" in prompt
+
+
+def test_genera_base_fissa_salva_in_una_sottocartella_dedicata(conn, monkeypatch, tmp_path):
+    """Non nella cartella asset per-contenuto: la base persiste finche'
+    non viene rigenerata, non e' legata a un content_id ne' soggetta alla
+    stessa gestione degli asset di un post."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    monkeypatch.setattr("requests.post", lambda url, **kwargs: _RispostaFinta())
+    provider = images.OpenAIImageProvider(conn, output_dir=tmp_path)
+    asset = asyncio.run(provider.genera_base_fissa())
+    assert asset.percorso.parent.name == "basi_fisse"
+    assert asset.percorso.exists()

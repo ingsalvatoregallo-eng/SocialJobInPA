@@ -834,7 +834,18 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
         # (endpoint /v1/images/edits, vedi images.py) indipendentemente
         # dal prompt_ai testuale.
         immagini_riferimento = categoria["immagini_riferimento"]
-    image_provider = image_provider or images.provider_immagini(conn)
+    if image_provider is None:
+        # Esperimento "base fissa" (vedi db_social.social_content_
+        # categories.usa_base_fissa): quando attivo, niente chiamata AI
+        # per questo post, si riusa l'unica illustrazione gia' generata
+        # in Configurazioni. Solo sul percorso automatico — un
+        # image_provider passato esplicitamente dal chiamante (es.
+        # "Rigenera immagine" con un provider specifico, o i test) resta
+        # sempre quello richiesto, mai sostituito silenziosamente.
+        if categoria and categoria["usa_base_fissa"] and categoria["base_fissa_path"]:
+            image_provider = images.BaseFissaImageProvider(categoria["base_fissa_path"])
+        else:
+            image_provider = images.provider_immagini(conn)
     canali = json.loads(content["canali"] or "[]")
     bandi_carosello = risultato_ricerca.bandi_trovati[:images.MASSIMO_IMMAGINI_CAROSELLO]
     for piattaforma in canali:
@@ -950,7 +961,17 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
         immagini_riferimento=(json.loads(asset["immagini_riferimento"])
                               if asset["immagini_riferimento"] else []),
         stile_ai=asset["stile_ai"], nota_correzione=nota)
-    image_provider = image_provider or images.provider_immagini(conn)
+    if image_provider is None:
+        # Stessa logica di visual(): con "base fissa" attiva sulla
+        # categoria, anche una rigenerazione singola riusa l'illustrazione
+        # gia' generata invece di richiamare l'AI (che qui non aiuterebbe
+        # comunque: badge/titolo/card li disegna sempre Pillow).
+        content = db_social.get_content(conn, content_id)
+        categoria = _categoria_per_content(conn, content)
+        if categoria and categoria["usa_base_fissa"] and categoria["base_fissa_path"]:
+            image_provider = images.BaseFissaImageProvider(categoria["base_fissa_path"])
+        else:
+            image_provider = images.provider_immagini(conn)
     nuovo = _genera_con_verifica_testo(image_provider, richiesta, conn, llm_provider=provider)
     vecchio_percorso = Path(asset["percorso"])
     db_social.aggiorna_asset(conn, asset_id, percorso=nuovo.percorso, template=nuovo.template,
@@ -960,6 +981,36 @@ def rigenera_immagine_singola(conn, content_id, asset_id, *, image_provider=None
         vecchio_percorso.unlink(missing_ok=True)
     except OSError:
         pass
+    return nuovo
+
+
+def genera_base_fissa_categoria(conn, categoria_id):
+    """Genera (o rigenera) l'illustrazione di sfondo dell'esperimento
+    'base fissa' per una categoria (vedi images.OpenAIImageProvider.
+    genera_base_fissa / db_social.social_content_categories.base_fissa_
+    path), chiamata solo su azione esplicita dell'amministratore in
+    Configurazioni. Sempre tramite l'API OpenAI Images vera — mai il
+    fallback silenzioso Template/Mock di images.provider_immagini, che
+    avrebbe senso a runtime per un singolo post ma non qui: chi clicca
+    "Genera base" si aspetta l'illustrazione vera o un errore chiaro, non
+    un placeholder salvato senza avviso. Sostituisce sempre la precedente
+    (l'esperimento e' pensato per UNA base sola per categoria, non un
+    elenco che cresce), cancellando il file vecchio dopo aver salvato il
+    nuovo."""
+    categoria = db_social.get_categoria(conn, categoria_id)
+    if categoria is None:
+        raise ValueError(f"categoria inesistente: {categoria_id}")
+    provider = images.OpenAIImageProvider(conn)
+    nuovo = asyncio.run(provider.genera_base_fissa(
+        prompt_ai=categoria["prompt_ai"] or None, stile_ai=categoria["stile_immagine"],
+        immagini_riferimento=categoria["immagini_riferimento"]))
+    vecchio_percorso = categoria["base_fissa_path"]
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(nuovo.percorso))
+    if vecchio_percorso:
+        try:
+            Path(vecchio_percorso).unlink(missing_ok=True)
+        except OSError:
+            pass
     return nuovo
 
 
