@@ -68,6 +68,47 @@ def test_richiesta_immagine_da_bando_non_mostra_la_lista_python_grezza():
     assert not any("[" in dato for dato in richiesta.dati_chiave)
 
 
+def test_richiesta_immagine_da_bando_mostra_solo_ente_posti_scadenza():
+    """Segnalato dall'utente: voleva solo titolo/sottotitolo/Ente/Posti/
+    Scadenza nella card dati, niente altro (es. Titolo di studio) anche
+    quando il bando lo riporta."""
+    bando = {
+        "id": "CONC-1", "titolo": "Concorso pubblico", "enti": ["Ente"],
+        "num_posti": 5, "scadenza": "2026-07-25T21:59:00Z", "sintesi": "Sintesi.",
+        "titolo_studio_richiesto": "Laurea magistrale",
+    }
+    richiesta = agents._richiesta_immagine_da_bando(bando, "instagram_feed", "content-1")
+    assert len(richiesta.dati_chiave) == 3
+    assert not any("studio" in dato.lower() for dato in richiesta.dati_chiave)
+
+
+@pytest.mark.parametrize("testo,atteso", [
+    (None, None),
+    ("", None),
+    ("Una sola frase senza punto finale", "Una sola frase senza punto finale"),
+    ("Prima frase. Seconda frase molto piu' lunga che non dovrebbe comparire.",
+     "Prima frase."),
+    ("Frase con punto esclamativo! E poi altro testo.", "Frase con punto esclamativo!"),
+    ("Frase con punto interrogativo? E poi altro testo.", "Frase con punto interrogativo?"),
+])
+def test_sottotitolo_sintetico_prima_frase(testo, atteso):
+    assert agents._sottotitolo_sintetico(testo) == atteso
+
+
+def test_sottotitolo_sintetico_tronca_se_nessun_punto_entro_il_limite():
+    testo = "Testo lunghissimo senza punteggiatura " + "parola " * 30
+    risultato = agents._sottotitolo_sintetico(testo, lunghezza_massima=50)
+    assert risultato.endswith("…")
+    assert len(risultato) <= 51
+
+
+def test_richiesta_immagine_da_bando_sottotitolo_e_la_prima_frase_della_sintesi():
+    bando = {"id": "CONC-1", "titolo": "Concorso",
+             "sintesi": "Riservata al personale interno. Requisiti aggiuntivi molto dettagliati qui."}
+    richiesta = agents._richiesta_immagine_da_bando(bando, "instagram_feed", "content-1")
+    assert richiesta.sottotitolo == "Riservata al personale interno."
+
+
 def test_richiesta_immagine_da_bando_applica_il_prompt_della_categoria_per_bando():
     """Regressione: una categoria "Concorsi" personalizzata (prompt/
     immagini/stile) restava completamente ignorata nel carosello, che
@@ -154,6 +195,33 @@ def test_visual_con_un_solo_bando_resta_immagine_singola(conn):
         per_piattaforma.setdefault(a["piattaforma"], []).append(a)
     assert len(per_piattaforma["instagram"]) == 1
     assert len(per_piattaforma["linkedin"]) == 1
+
+
+def test_visual_con_un_solo_bando_usa_i_dati_reali_non_la_scelta_del_visual_agent(conn):
+    """Segnalato dall'utente: con un solo bando (niente carosello, es.
+    LinkedIn o un bando specifico su Instagram) l'immagine mostrava dati
+    scelti liberamente dal Visual Agent (es. 'Ripartizione', 'Riferimento
+    CCNL') invece dei soli Ente/Posti/Scadenza reali del bando — stesso
+    principio gia' applicato al carosello, qui esteso all'immagine
+    singola quando un bando vero e' disponibile."""
+    content_id = db_social.crea_content(conn, "Un solo concorso",
+                                        canali=["instagram", "linkedin"])
+    provider = llm.MockLLMProvider(conn)
+    agents.visual(conn, content_id, _risultato_con_bandi(1),
+                  provider=provider, image_provider=MockImageProvider())
+    asset = db_social.asset_di(conn, content_id)
+    bando = _BANDI_ESEMPIO[0]
+    for a in asset:
+        assert a["titolo"] == bando["titolo"]
+        dati = a["dati_chiave"]
+        assert dati is not None
+        import json
+        dati = json.loads(dati) if isinstance(dati, str) else dati
+        assert f"Ente: {bando['enti'][0]}" in dati
+        assert f"Posti: {bando['num_posti']}" in dati
+        assert len(dati) == 3
+        # Non il placeholder demo del Visual Agent (vedi llm._risposta_demo).
+        assert a["titolo"] != "[DEMO] Nuovo concorso"
 
 
 def test_visual_carosello_rispetta_il_limite_di_dieci(conn):

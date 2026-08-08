@@ -644,14 +644,35 @@ def _formatta_scadenza(scadenza):
         return str(scadenza)
 
 
+def _sottotitolo_sintetico(testo, lunghezza_massima=140):
+    """Prima frase di `testo` (o un troncamento a `lunghezza_massima`
+    caratteri se non trova un punto/esclamativo/interrogativo entro
+    quella lunghezza) — mai un riassunto reinventato dall'LLM, solo un
+    prefisso del testo reale (bando['sintesi']): resta "sintetico" senza
+    perdere accuratezza (segnalato dall'utente: sottotitoli troppo
+    lunghi affollavano l'immagine)."""
+    if not testo:
+        return None
+    testo = testo.strip()
+    for separatore in (". ", "! ", "? "):
+        indice = testo.find(separatore)
+        if 0 < indice <= lunghezza_massima:
+            return testo[:indice + 1]
+    if len(testo) <= lunghezza_massima:
+        return testo
+    troncato = testo[:lunghezza_massima].rsplit(" ", 1)[0]
+    return troncato + "…"
+
+
 def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
                                  immagini_riferimento=None, stile_immagine=None,
                                  nota_correzione=None, template="nuovo_concorso"):
-    """Immagine per un singolo bando di un carosello, con dati SEMPRE presi
-    dal record JobInPA (mai dal modello) — stesso principio dei dati_chiave
-    del VisualBrief, qui applicato quando i bandi sono piu' di uno e ognuno
-    ha diritto alla propria immagine invece che il modello ne scelga solo
-    uno.
+    """Immagine per un singolo bando (di un carosello, o dell'unica
+    immagine di un contenuto con un solo bando — vedi visual()), con dati
+    SEMPRE presi dal record JobInPA (mai dal modello): stesso principio
+    dei dati_chiave del VisualBrief, qui applicato quando c'e' un bando
+    reale a cui attingere invece di lasciare al modello la scelta libera
+    di cosa mostrare.
     prompt_ai/immagini_riferimento/stile_immagine della categoria vanno
     applicati anche qui (bug segnalato dall'utente: una categoria "Concorsi"
     personalizzata con prompt/immagini/stile restava completamente
@@ -659,6 +680,12 @@ def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
     di default) — {TITOLO}/{SCADENZA} nel prompt_ai vengono sostituiti coi
     dati del SINGOLO bando, non del content, perche' ogni slide del
     carosello ha il proprio bando.
+
+    Solo Ente/Posti/Scadenza in dati_chiave (niente piu' "Titolo di
+    studio": segnalato dall'utente, voleva solo questi 3 dati oltre a
+    titolo/sottotitolo) e sottotitolo ridotto alla prima frase della
+    sintesi del bando (vedi _sottotitolo_sintetico), per restare
+    leggibile senza affollare l'immagine.
 
     `template` (default "nuovo_concorso"): scelto dal chiamante in base
     all'Intento del contenuto (vedi visual()) — "scadenza" per il badge
@@ -670,8 +697,6 @@ def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
     scadenza_leggibile = _formatta_scadenza(bando.get("scadenza"))
     if scadenza_leggibile:
         dati_chiave.append(f"Scadenza: {scadenza_leggibile}")
-    if bando.get("titolo_studio_richiesto"):
-        dati_chiave.append(f"Titolo di studio: {bando['titolo_studio_richiesto']}")
     titolo_bando = bando.get("titolo") or "Concorso pubblico"
     prompt_ai = None
     if categoria and categoria["prompt_ai"]:
@@ -679,8 +704,8 @@ def _richiesta_immagine_da_bando(bando, formato, content_id, *, categoria=None,
             "{SCADENZA}", scadenza_leggibile or "")
     return images.ImageGenerationRequest(
         template=template, formato=formato, titolo=titolo_bando,
-        sottotitolo=bando.get("sintesi"), dati_chiave=dati_chiave, content_id=content_id,
-        prompt_ai=prompt_ai, immagini_riferimento=immagini_riferimento or [],
+        sottotitolo=_sottotitolo_sintetico(bando.get("sintesi")), dati_chiave=dati_chiave,
+        content_id=content_id, prompt_ai=prompt_ai, immagini_riferimento=immagini_riferimento or [],
         stile_ai=stile_immagine, nota_correzione=nota_correzione)
 
 
@@ -901,11 +926,24 @@ def visual(conn, content_id, risultato_ricerca, *, provider=None, image_provider
             continue
         if db_social.interruzione_richiesta(conn, content_id):
             raise GenerazioneInterrotta("Generazione interrotta dall'utente prima delle immagini")
-        richiesta = images.ImageGenerationRequest(
-            template=brief.template, formato=formato, titolo=brief.titolo,
-            sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
-            prompt_ai=brief.prompt_ai, content_id=content_id,
-            immagini_riferimento=immagini_riferimento, stile_ai=stile_immagine)
+        if bandi_carosello:
+            # Anche con un solo bando (niente carosello, es. LinkedIn o un
+            # bando specifico su Instagram): i dati mostrati vengono
+            # SEMPRE dal record reale, mai dalla scelta libera del Visual
+            # Agent — stesso principio gia' applicato al carosello,
+            # segnalato dall'utente: voleva solo Ente/Posti/Scadenza,
+            # niente altri dati scelti dall'LLM (vedi _richiesta_
+            # immagine_da_bando).
+            richiesta = _richiesta_immagine_da_bando(
+                bandi_carosello[0], formato, content_id, categoria=categoria,
+                immagini_riferimento=immagini_riferimento, stile_immagine=stile_immagine,
+                template=brief.template)
+        else:
+            richiesta = images.ImageGenerationRequest(
+                template=brief.template, formato=formato, titolo=brief.titolo,
+                sottotitolo=brief.sottotitolo, dati_chiave=brief.dati_chiave,
+                prompt_ai=brief.prompt_ai, content_id=content_id,
+                immagini_riferimento=immagini_riferimento, stile_ai=stile_immagine)
         asset = _genera_con_verifica_testo(
             image_provider, richiesta, conn, llm_provider=provider)
         db_social.salva_asset(conn, content_id, asset.percorso,
