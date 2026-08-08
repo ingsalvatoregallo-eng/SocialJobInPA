@@ -841,6 +841,128 @@ def test_genera_base_categoria_richiede_admin(conn, client):
     assert r.status_code == 403
 
 
+def test_carica_base_categoria_salva_il_file(conn, client):
+    """Alternativa a "Genera base" (AI): caricare direttamente
+    un'immagine gia' pronta, senza dipendere dalla generazione AI."""
+    db_social.crea_utente(conn, "admin-cat20@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat20@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Base caricata a mano", "x")
+
+    r = client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+                    files={"file": ("base.png", _PNG_1X1, "image/png")}, follow_redirects=False)
+
+    assert r.status_code == 303
+    categoria = db_social.get_categoria(conn, categoria_id)
+    from pathlib import Path
+    assert categoria["base_fissa_path"]
+    assert Path(categoria["base_fissa_path"]).exists()
+    assert Path(categoria["base_fissa_path"]).read_bytes() == _PNG_1X1
+
+
+def test_carica_base_categoria_sostituisce_e_cancella_il_file_vecchio(conn, client):
+    db_social.crea_utente(conn, "admin-cat21@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat21@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Base da sostituire", "x")
+    client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+               files={"file": ("prima.png", _PNG_1X1, "image/png")})
+    from pathlib import Path
+    vecchio_percorso = Path(db_social.get_categoria(conn, categoria_id)["base_fissa_path"])
+    assert vecchio_percorso.exists()
+
+    r = client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+                    files={"file": ("seconda.png", _PNG_1X1 + b"\x00extra", "image/png")},
+                    follow_redirects=False)
+
+    assert r.status_code == 303
+    assert not vecchio_percorso.exists()
+    nuovo_percorso = Path(db_social.get_categoria(conn, categoria_id)["base_fissa_path"])
+    assert nuovo_percorso.exists()
+    assert nuovo_percorso != vecchio_percorso
+
+
+def test_carica_base_categoria_annulla_una_generazione_ai_in_corso(conn, client):
+    """Evita la corsa: se un job AI e' ancora in coda quando si carica
+    una base a mano, non deve poterla sovrascrivere quando finisce."""
+    db_social.crea_utente(conn, "admin-cat22@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat22@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Con AI in corso", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+    assert db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+    client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+               files={"file": ("base.png", _PNG_1X1, "image/png")})
+
+    assert not db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+
+def test_carica_base_categoria_rifiuta_formato_non_supportato(conn, client):
+    db_social.crea_utente(conn, "admin-cat23@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat23@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Formato sbagliato", "x")
+
+    r = client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+                    files={"file": ("base.gif", b"non importa", "image/gif")})
+
+    assert r.status_code == 400
+    assert db_social.get_categoria(conn, categoria_id)["base_fissa_path"] is None
+
+
+def test_carica_base_categoria_rifiuta_file_non_immagine(conn, client):
+    db_social.crea_utente(conn, "admin-cat24@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat24@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "File corrotto", "x")
+
+    r = client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+                    files={"file": ("base.png", b"non e' un png valido", "image/png")})
+
+    assert r.status_code == 400
+    assert db_social.get_categoria(conn, categoria_id)["base_fissa_path"] is None
+
+
+def test_carica_base_categoria_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "admin-cat25@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat25@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/categorie/non-esiste/carica-base", data={"csrf": csrf},
+                    files={"file": ("base.png", _PNG_1X1, "image/png")})
+    assert r.status_code == 404
+
+
+def test_carica_base_categoria_richiede_admin(conn, client):
+    db_social.crea_utente(conn, "editor-cat6@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    categoria_id = db_social.crea_categoria(conn, "Protetta 4", "x")
+    _login(client, "editor-cat6@test.local")
+    csrf = _csrf(client, "/social/contenuti/nuovo")
+
+    r = client.post(f"/social/categorie/{categoria_id}/carica-base", data={"csrf": csrf},
+                    files={"file": ("base.png", _PNG_1X1, "image/png")})
+    assert r.status_code == 403
+
+
+def test_pagina_categorie_mostra_form_carica_base_quando_non_in_corso(conn, client):
+    db_social.crea_utente(conn, "admin-cat26@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat26@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Da mostrare", "x")
+
+    pagina = client.get("/social/categorie").text
+
+    assert f'/social/categorie/{categoria_id}/carica-base' in pagina
+
+
 def test_annulla_job_in_corso_segna_pending_e_running_come_dead(conn):
     categoria_id = db_social.crea_categoria(conn, "Con job da annullare", "x")
     db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})

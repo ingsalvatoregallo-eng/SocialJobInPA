@@ -1620,6 +1620,66 @@ def genera_base_categoria(request: Request, categoria_id: str, csrf: str = Form(
     return RedirectResponse("/social/categorie", status_code=303)
 
 
+def _cartella_basi_fisse():
+    cartella = config.asset_storage_path() / "basi_fisse"
+    cartella.mkdir(parents=True, exist_ok=True)
+    return cartella
+
+
+@router.post("/categorie/{categoria_id}/carica-base")
+async def carica_base_categoria(request: Request, categoria_id: str, file: UploadFile = File(...),
+                                csrf: str = Form(None),
+                                sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Alternativa a "Genera base" (AI): carica un'immagine di base gia'
+    pronta (es. disegnata a mano), invece di dipendere dalla generazione
+    AI — segnalato dall'utente dopo diversi tentativi in cui il modello
+    continuava a disegnare un proprio testo/logo nonostante le
+    istruzioni esplicite (vedi images._prompt_base_fissa). Il compositor
+    (TemplateImageProvider.genera_sync_su_base) disegna badge/titolo/
+    card/CTA sempre alle stesse coordinate fisse indipendentemente da
+    come e' stata prodotta la base: funziona identico che arrivi
+    dall'AI o sia caricata a mano, purche' lasci libere le stesse 4 zone
+    (alto a sinistra: badge; alto a destra: logo; meta' superiore
+    sinistra: titolo; terzo inferiore: card dati + CTA)."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    categoria = db_social.get_categoria(conn, categoria_id)
+    if categoria is None:
+        raise HTTPException(status_code=404)
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="Nessun file caricato")
+    estensione = Path(file.filename).suffix.lower()
+    if estensione not in (".png", ".jpg", ".jpeg"):
+        raise HTTPException(status_code=400, detail="Formato non supportato: usa PNG o JPEG")
+    contenuto = await file.read()
+    import io
+    from PIL import Image
+    try:
+        # .load() (non .verify(), troppo severo: rifiuta anche PNG minime
+        # ma valide con un CRC di chunk non canonico) forza la decodifica
+        # dei pixel, sufficiente per scartare un file che non e' davvero
+        # un'immagine.
+        with Image.open(io.BytesIO(contenuto)) as immagine:
+            immagine.load()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Il file non è un'immagine valida")
+    percorso = _cartella_basi_fisse() / f"base_fissa_{uuid.uuid4().hex}{estensione}"
+    percorso.write_bytes(contenuto)
+    vecchio_percorso = categoria["base_fissa_path"]
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(percorso))
+    # Un job AI ancora in corso potrebbe sovrascrivere la base appena
+    # caricata quando finisce: annullarlo evita la corsa.
+    db_social.annulla_job_in_corso(conn, "genera_base_fissa", categoria_id)
+    if vecchio_percorso:
+        try:
+            Path(vecchio_percorso).unlink(missing_ok=True)
+        except OSError:
+            pass
+    db_social.audit(conn, "base_fissa_caricata", utente_id=sessione["utente"]["id"],
+                    oggetto_tipo="categoria", oggetto_id=categoria_id)
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
 @router.post("/categorie/{categoria_id}/annulla-generazione-base")
 def annulla_generazione_base(request: Request, categoria_id: str, csrf: str = Form(None),
                              sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
