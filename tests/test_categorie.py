@@ -1119,6 +1119,49 @@ def test_pagina_categorie_permette_di_ingrandire_la_base_fissa(conn, client, tmp
     percorso.unlink(missing_ok=True)
 
 
+def test_pagina_categorie_anteprima_base_fissa_ha_parametro_anti_cache(conn, client, tmp_path):
+    """Bug reale, segnalato dall'utente: dopo aver caricato/rigenerato la
+    base l'anteprima continuava a mostrare quella vecchia, perche' l'URL
+    dell'immagine (/base-fissa) resta identico anche quando il file
+    dietro cambia — il browser la serve dalla cache invece di
+    richiederla di nuovo. Un parametro che cambia a ogni aggiornamento
+    (basato su aggiornato_at, stesso trucco gia' usato per gli asset dei
+    post in contenuto.html) forza un URL diverso, quindi una richiesta
+    di rete vera."""
+    db_social.crea_utente(conn, "admin-cat27@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat27@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Con anti-cache", "x")
+    from social import config
+    cartella = config.asset_storage_path() / "basi_fisse"
+    cartella.mkdir(parents=True, exist_ok=True)
+    percorso = cartella / "base_anticache_test.png"
+    percorso.write_bytes(_PNG_1X1)
+    db_social.aggiorna_categoria(conn, categoria_id, base_fissa_path=str(percorso))
+    aggiornato_at = db_social.get_categoria(conn, categoria_id)["aggiornato_at"]
+
+    pagina = client.get("/social/categorie").text
+
+    assert f'/social/categorie/{categoria_id}/base-fissa?v={aggiornato_at}' in pagina
+    percorso.unlink(missing_ok=True)
+
+
+def test_pagina_categorie_mostra_un_pulsante_per_scegliere_il_file_base(conn, client):
+    """Segnalato dall'utente: l'input file nativo del browser era poco
+    curato rispetto al resto della UI — un'etichetta stile bottone lo
+    sostituisce visivamente (l'input resta nel DOM, solo nascosto)."""
+    db_social.crea_utente(conn, "admin-cat28@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat28@test.local")
+    categoria_id = db_social.crea_categoria(conn, "Con pulsante scegli file", "x")
+
+    pagina = client.get("/social/categorie").text
+
+    assert 'nome-file-scelto' in pagina
+    assert 'aggiornaNomeFileScelto' in pagina
+    assert f'action="/social/categorie/{categoria_id}/carica-base"' in pagina
+
+
 def test_elimina_categoria_via_web(conn, client):
     db_social.crea_utente(conn, "admin-cat3@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")

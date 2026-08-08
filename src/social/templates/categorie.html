@@ -45,7 +45,7 @@
             <strong>Base fissa</strong> (esperimento) — {{ 'attiva ✓' if c.usa_base_fissa else 'disattivata' }}
           </p>
           {% if c.base_fissa_path %}
-          <img src="/social/categorie/{{ c.id }}/base-fissa" alt="base fissa {{ c.nome }}"
+          <img src="/social/categorie/{{ c.id }}/base-fissa?v={{ c.aggiornato_at or c.creato_at }}" alt="base fissa {{ c.nome }}"
                class="asset-ingrandibile"
                style="width:140px;border-radius:8px;border:1px solid var(--colore-bordo);display:block;margin-bottom:8px;cursor:zoom-in">
           {% endif %}
@@ -64,10 +64,14 @@
               <button class="btn piccolo secondario" type="submit">{{ '🔄 Rigenera base' if c.base_fissa_path else '✨ Genera base' }}</button>
             </form>
             <form method="post" action="/social/categorie/{{ c.id }}/carica-base" enctype="multipart/form-data"
-                  class="inline" style="display:flex;gap:6px;align-items:center"
+                  class="inline" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"
                   onsubmit="return confirm('Sostituire la base con il file caricato? Sostituisce quella attuale, se presente.');">
               <input type="hidden" name="csrf" value="{{ csrf }}">
-              <input type="file" name="file" accept="image/png,image/jpeg" required style="width:150px;font-size:11px">
+              <label class="btn piccolo secondario" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:6px">
+                📎 <span class="nome-file-scelto">Scegli file…</span>
+                <input type="file" name="file" accept="image/png,image/jpeg" required style="display:none"
+                       onchange="aggiornaNomeFileScelto(this)">
+              </label>
               <button class="btn piccolo secondario" type="submit">📤 Carica base</button>
             </form>
           </div>
@@ -171,6 +175,10 @@
 </div>
 
 <script>
+function aggiornaNomeFileScelto(input) {
+  var etichetta = input.closest('label').querySelector('.nome-file-scelto');
+  etichetta.textContent = input.files[0] ? input.files[0].name : 'Scegli file…';
+}
 function mostraModificaCategoria(id) {
   document.getElementById('vista-' + id).style.display = 'none';
   document.getElementById('modifica-' + id).style.display = 'block';
