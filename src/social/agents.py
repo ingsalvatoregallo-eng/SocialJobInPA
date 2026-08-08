@@ -1035,8 +1035,13 @@ def genera_base_fissa_categoria(conn, categoria_id, *, provider=None):
     image_provider = images.OpenAIImageProvider(conn)
 
     def _genera():
+        # Nota: lo stile_immagine della categoria NON viene passato qui
+        # apposta (vedi images.OpenAIImageProvider.genera_base_fissa) —
+        # e' scritto per il vecchio flusso a grafica intera e in pratica
+        # chiede esplicitamente logo/CTA/testo, in diretto conflitto con
+        # la base fissa.
         return asyncio.run(image_provider.genera_base_fissa(
-            prompt_ai=categoria["prompt_ai"] or None, stile_ai=categoria["stile_immagine"],
+            prompt_ai=categoria["prompt_ai"] or None,
             immagini_riferimento=categoria["immagini_riferimento"]))
 
     nuovo = _genera()

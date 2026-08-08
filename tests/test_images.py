@@ -386,6 +386,26 @@ def test_chiama_api_stile_categoria_sostituisce_del_tutto_lo_stile_fisso(conn, m
     assert "Flat vector" not in catturato["prompt"]
 
 
+def test_chiama_api_stile_ai_stringa_vuota_non_aggiunge_alcun_prefisso(conn, monkeypatch):
+    """stile_ai="" (usato da genera_base_fissa, vedi sotto) e' diverso da
+    None: None vuol dire "usa lo stile fisso di sempre" (comportamento
+    storico invariato per ogni altro chiamante), "" vuol dire
+    esplicitamente "nessun prefisso di stile" — nessun chiamante
+    esistente puo' produrre "" involontariamente (crea_categoria/
+    aggiorna_categoria normalizzano sempre una stringa vuota a None)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    provider = images.OpenAIImageProvider(conn)
+    catturato = {}
+
+    def _post_finto(url, **kwargs):
+        catturato["prompt"] = kwargs["json"]["prompt"]
+        return _RispostaFinta()
+
+    monkeypatch.setattr("requests.post", _post_finto)
+    provider._chiama_api("Un soggetto qualsiasi", "1024x1024", stile_ai="")
+    assert catturato["prompt"] == "Un soggetto qualsiasi"
+
+
 # --- "base fissa" (esperimento): base pre-generata + testo composto sempre
 # da Pillow (vedi TemplateImageProvider.genera_sync_su_base/BaseFissaImage
 # Provider/OpenAIImageProvider.genera_base_fissa) -----------------------------
@@ -496,8 +516,30 @@ def test_prompt_base_fissa_disinnesca_un_soggetto_che_chiede_testo():
         "Nella parte sinistra inserire l'area testuale del post con testo ben distanziato.")
     prompt = images._prompt_base_fissa(soggetto_vecchio_stile)
     assert soggetto_vecchio_stile in prompt
-    assert "ignore any such mention" in prompt.lower()
+    assert "ignore completely any part" in prompt.lower()
     assert "zero text" in prompt.lower()
+
+
+def test_prompt_base_fissa_racchiude_il_soggetto_in_un_blocco_delimitato():
+    """Bug reale, segnalato dall'utente due volte con screenshot: un
+    primo avviso "ignora quanto detto sopra" messo subito dopo il
+    soggetto iniettato a meta' di una frase non bastava con un prompt
+    reale (dell'utente) molto lungo e dettagliato, scritto per
+    _prompt_grafica_intera (schede concorso con dati, "logo JobInPA in
+    alto a destra", "pulsante CTA largo e visibile"). Racchiudere il
+    soggetto in un blocco delimitato, etichettato esplicitamente come
+    "note di riferimento" da filtrare, rende piu' chiaro al modello dove
+    inizia/finisce il testo da NON seguire alla lettera."""
+    prompt_utente_reale = (
+        'Crea un mockup social per JobInPA che pubblicizza i concorsi in evidenza.\n'
+        'lascia in alto a destra spazio per il logo JobInPA;\n'
+        'pulsante CTA largo e visibile;\n'
+        'scheda concorso in primo piano in stile UI card moderno con info su ente, '
+        'nr posti e scadenza.')
+    prompt = images._prompt_base_fissa(prompt_utente_reale)
+    assert f'"""\n{prompt_utente_reale}\n"""' in prompt
+    assert "reference notes" in prompt.lower()
+    assert "overrides everything else" in prompt.lower()
 
 
 def test_prompt_base_fissa_con_soggetto_personalizzato():
@@ -515,3 +557,25 @@ def test_genera_base_fissa_salva_in_una_sottocartella_dedicata(conn, monkeypatch
     asset = asyncio.run(provider.genera_base_fissa())
     assert asset.percorso.parent.name == "basi_fisse"
     assert asset.percorso.exists()
+
+
+def test_genera_base_fissa_non_usa_mai_nessuno_stile_fisso(conn, monkeypatch, tmp_path):
+    """Bug reale, segnalato dall'utente con uno screenshot: lo stile
+    fisso di sempre (_STILE_OPENAI_IMAGES, "Flat vector... minimalist")
+    e' pensato per un semplice sfondo, non per lo stile ricco (icone 3D,
+    sfumatura navy/viola) che _prompt_base_fissa gia' descrive da solo —
+    prependerlo (o prependere lo stile_immagine della categoria, scritto
+    per _prompt_grafica_intera) confondeva il risultato. genera_base_
+    fissa non deve mai aggiungere alcun prefisso di stile."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-finta")
+    catturato = {}
+
+    def _post_finto(url, **kwargs):
+        catturato["prompt"] = kwargs["json"]["prompt"]
+        return _RispostaFinta()
+
+    monkeypatch.setattr("requests.post", _post_finto)
+    provider = images.OpenAIImageProvider(conn, output_dir=tmp_path)
+    asyncio.run(provider.genera_base_fissa())
+    assert "Flat vector" not in catturato["prompt"]
+    assert catturato["prompt"] == images._prompt_base_fissa()

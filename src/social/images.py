@@ -683,16 +683,21 @@ def _prompt_base_fissa(soggetto=None):
     `soggetto` arriva da categoria.prompt_ai (vedi OpenAIImageProvider.
     genera_base_fissa/agents.genera_base_fissa_categoria) — lo stesso
     campo "Prompt immagine" usato anche da _prompt_grafica_intera, dove
-    pero' descrive una composizione INTERA con testo/aree testuali. Se
-    una categoria ha ancora un prompt scritto per quel vecchio uso (es.
-    "nella parte sinistra inserire l'area testuale del post con testo
-    ben distanziato" — bug reale, segnalato dall'utente: causava ancora
-    testo/icone addensate nella zona riservata al sottotitolo), il
-    conflitto con "niente testo mai" va disinnescato qui, non lasciato
-    all'utente da riscrivere a mano: il paragrafo finale istruisce
-    esplicitamente il modello a ignorare qualunque menzione di testo/
-    area testuale/mockup dentro `soggetto` e prendere da li' solo
-    soggetto/palette/mood."""
+    pero' descrive una composizione INTERA con testo/aree testuali/logo/
+    CTA/card. Bug reale, segnalato dall'utente due volte con screenshot:
+    un primo tentativo di "ignora quanto detto sopra" messo subito dopo
+    `soggetto` iniettato a meta' di una frase non bastava — un prompt
+    reale dell'utente, scritto in dettaglio per _prompt_grafica_intera
+    (schede concorso con dati, "logo JobInPA in alto a destra", "pulsante
+    CTA largo e visibile", ecc.), continuava a farsi seguire in parte.
+    Ora `soggetto` e' racchiuso in un blocco delimitato (\"\"\"...\"\"\"),
+    esplicitamente etichettato come "note di riferimento" da cui prendere
+    SOLO soggetto/palette/mood, con l'istruzione di ignorare qualunque
+    menzione di testo/logo/CTA/card ripetuta subito prima e subito dopo
+    il blocco — la delimitazione netta rende piu' chiaro al modello dove
+    inizia/finisce il testo "da filtrare" rispetto alle istruzioni vere.
+    Vedi anche images.OpenAIImageProvider.genera_base_fissa: per lo
+    stesso motivo, qui non si usa MAI stile_immagine della categoria."""
     soggetto = soggetto or "icons and shapes relevant to job search in the public sector"
     return (
         "Create an ABSTRACT DECORATIVE BACKGROUND ILLUSTRATION only — like a phone "
@@ -707,17 +712,23 @@ def _prompt_base_fissa(soggetto=None):
         "like a letter, a word, or a logo, do not draw it — leave that spot blank "
         "instead. An image with any text or logo anywhere is a failed result.\n\n"
         "Composition: a smooth gradient going from navy blue (#0B3D91) to purple "
-        f"(#7C3AED), softly lit, with generous empty/calm negative space. Include {soggetto}, "
-        "rendered as a few elegant glossy 3D-style icon objects (for example a bell, "
-        "a magnifying glass, a calendar) floating in the scene as purely decorative "
-        "shapes, with nothing written on them or near them and no frame or panel "
-        "around them.\n\n"
-        "The description above may have been written for a different purpose (a "
-        "finished post with its own title, mockup, or text area) and may mention "
-        "text, captions, headlines, or a 'text area' — IGNORE any such mention "
-        "entirely: take only the visual subject, palette, and mood from it, and "
-        "still render ZERO literal text or letters anywhere, no matter what that "
-        "description says.\n\n"
+        "(#7C3AED), softly lit, with generous empty/calm negative space, with a few "
+        "elegant glossy 3D-style icon objects (for example a bell, a magnifying "
+        "glass, a calendar) floating in the scene as purely decorative shapes, with "
+        "nothing written on them or near them and no frame or panel around them.\n\n"
+        "Below are reference notes for which icons/objects and mood to lean into. "
+        "They may have been written for a different purpose (a finished social "
+        "post with its own title, logo, buttons, or information cards) — read them "
+        "ONLY for the visual subject, color palette, and mood; IGNORE completely "
+        "any part of them that describes text, a title, a subtitle, a logo, a CTA "
+        "button, an information card, a 'text area', a mockup, or any layout for a "
+        "finished post. None of that applies here — the notes are for inspiration "
+        "of shapes and colors only, never for words or UI elements:\n"
+        f'"""\n{soggetto}\n"""\n\n'
+        "Whatever the notes above say, this generation must still end up with ZERO "
+        "literal text, letters, numbers, logos, wordmarks, cards, or buttons "
+        "anywhere in the final image — that requirement overrides everything else "
+        "in this prompt, including the notes.\n\n"
         "Keep these areas visually calm and completely empty of any icon, shape or "
         "detail, because a separate process will place other elements there "
         "afterward and anything drawn there now would clash: the top-left corner, "
@@ -885,7 +896,7 @@ class OpenAIImageProvider:
         return GeneratedAsset(percorso=percorso, provider=self.nome,
                               template=request.template, formato=request.formato)
 
-    async def genera_base_fissa(self, *, prompt_ai=None, stile_ai=None,
+    async def genera_base_fissa(self, *, prompt_ai=None,
                                 immagini_riferimento=None) -> GeneratedAsset:
         """Esperimento 'base fissa' (vedi TemplateImageProvider.
         genera_sync_su_base e _prompt_base_fissa): genera l'illustrazione
@@ -898,7 +909,21 @@ class OpenAIImageProvider:
         qualunque template scelga poi la pipeline per un post. Salvata in
         una sottocartella separata dagli asset per-contenuto (basi_fisse/)
         perche' persiste finche' non viene rigenerata, non e' legata a un
-        content_id."""
+        content_id.
+
+        A differenza di ogni altra generazione OpenAI Images di questo
+        modulo, qui NON si usa mai lo stile della categoria (categoria.
+        stile_immagine): bug reale, segnalato dall'utente con uno
+        screenshot — quel campo e' scritto per il vecchio flusso a
+        grafica intera (_prompt_grafica_intera, un post finito con
+        titolo/logo/CTA/card) ed e' spesso ANCORA PIU' esplicito del
+        "Prompt immagine" nel chiedere quegli elementi (es. "logo JobInPA
+        in alto a destra", "pulsante CTA largo e visibile"). Essendo
+        anteposto all'intero prompt di _prompt_base_fissa (vedi
+        _chiama_api), nessun avviso "ignora quanto detto sopra" dentro
+        _prompt_base_fissa può davvero annullarlo — meglio non usarlo
+        affatto: _prompt_base_fissa descrive gia' da sola una palette/
+        mood completa (navy/viola, glossy 3D)."""
         import asyncio
         prezzo = self._verifica_budget()
         # Taglia verticale come "master": e' il formato piu' esigente in
@@ -907,7 +932,7 @@ class OpenAIImageProvider:
         # lati per ottenere formati piu' larghi, mai il contrario.
         immagine_bytes = await asyncio.to_thread(
             self._chiama_api, _prompt_base_fissa(prompt_ai),
-            _TAGLIE_OPENAI["verticale"], immagini_riferimento, stile_ai)
+            _TAGLIE_OPENAI["verticale"], immagini_riferimento, "")
         db_social.registra_costo(self.conn, "openai_images", prezzo,
                                  modello=config.openai_image_model())
         import io
@@ -926,7 +951,14 @@ class OpenAIImageProvider:
         # quest'ultimo salvato senza spazi finali da crea_categoria/
         # aggiorna_categoria, vedi db_social.py) non deve mai attaccarsi al
         # soggetto per mancanza di uno spazio di separazione.
-        prompt_completo = (stile_ai or _STILE_OPENAI_IMAGES).rstrip() + " " + prompt
+        # "is not None" (non un semplice "or"): stile_ai="" e' un valore
+        # esplicito voluto da genera_base_fissa per dire "nessun prefisso
+        # di stile", diverso da None ("usa il prefisso fisso di sempre").
+        # Nessun chiamante esistente puo' passare "" involontariamente:
+        # crea_categoria/aggiorna_categoria normalizzano sempre una
+        # stringa vuota a None prima di salvarla.
+        stile_prefisso = stile_ai if stile_ai is not None else _STILE_OPENAI_IMAGES
+        prompt_completo = stile_prefisso.rstrip() + " " + prompt if stile_prefisso else prompt
         percorsi_validi = [p for p in (immagini_riferimento or []) if p and Path(p).is_file()]
         if percorsi_validi:
             # /v1/images/edits: le immagini di riferimento (categoria
