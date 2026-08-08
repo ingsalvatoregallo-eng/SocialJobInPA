@@ -1987,6 +1987,30 @@ def job_in_corso(conn, tipo, payload_contiene=None):
     return conn.execute(query, parametri).fetchone() is not None
 
 
+def annulla_job_in_corso(conn, tipo, payload_contiene):
+    """Segna come 'dead' ogni job pending/running di questo tipo il cui
+    payload contiene la sottostringa indicata (es. un categoria_id) —
+    sblocca dalla UI un job rimasto bloccato in 'running' con il lock di
+    un worker morto (es. container ucciso da un riavvio Docker: senza
+    nessun processo vivo a rilasciarlo, prendi_job aspetta il timeout di
+    sicurezza — 15 minuti di default — prima di considerarlo abbandonato
+    e riprovare), segnalato dall'utente dopo un riavvio dei container
+    durante una generazione "base fissa". A differenza di chiudi_job, va
+    sempre a 'dead' indipendentemente dai tentativi residui: e' un
+    annullamento esplicito dell'utente, non un fallimento da ritentare
+    con backoff. Ritorna il numero di job annullati."""
+    righe = conn.execute(
+        "SELECT id FROM social_scheduled_jobs WHERE tipo = ? AND stato IN ('pending', 'running') "
+        "AND payload LIKE ?", (tipo, f"%{payload_contiene}%")).fetchall()
+    for riga in righe:
+        conn.execute(
+            "UPDATE social_scheduled_jobs SET stato = 'dead', lock_owner = NULL, "
+            "ultimo_errore = ?, aggiornato_at = ? WHERE id = ?",
+            ("Annullato dall'amministratore", _adesso(), riga["id"]))
+    conn.commit()
+    return len(righe)
+
+
 def lista_jobs(conn, stati=None, limit=200):
     sql = "SELECT * FROM social_scheduled_jobs "
     parametri = []

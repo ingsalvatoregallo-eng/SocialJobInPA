@@ -841,6 +841,108 @@ def test_genera_base_categoria_richiede_admin(conn, client):
     assert r.status_code == 403
 
 
+def test_annulla_job_in_corso_segna_pending_e_running_come_dead(conn):
+    categoria_id = db_social.crea_categoria(conn, "Con job da annullare", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+    job_id_pending = conn.execute(
+        "SELECT id FROM social_scheduled_jobs WHERE tipo = 'genera_base_fissa'").fetchone()["id"]
+    conn.execute("UPDATE social_scheduled_jobs SET stato = 'running', lock_owner = 'worker-morto:1' "
+                "WHERE id = ?", (job_id_pending,))
+    conn.commit()
+
+    annullati = db_social.annulla_job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+    assert annullati == 1
+    riga = conn.execute(
+        "SELECT stato, lock_owner FROM social_scheduled_jobs WHERE id = ?", (job_id_pending,)).fetchone()
+    assert riga["stato"] == "dead"
+    assert riga["lock_owner"] is None
+    assert not db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+
+def test_annulla_job_in_corso_non_tocca_job_gia_conclusi(conn):
+    categoria_id = db_social.crea_categoria(conn, "Con job gia' concluso", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+    job_id = conn.execute(
+        "SELECT id FROM social_scheduled_jobs WHERE tipo = 'genera_base_fissa'").fetchone()["id"]
+    db_social.chiudi_job(conn, job_id, "ok")
+
+    annullati = db_social.annulla_job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+    assert annullati == 0
+    stato = conn.execute(
+        "SELECT stato FROM social_scheduled_jobs WHERE id = ?", (job_id,)).fetchone()["stato"]
+    assert stato == "done"
+
+
+def test_annulla_job_in_corso_filtra_per_payload(conn):
+    altra_categoria_id = db_social.crea_categoria(conn, "Altra categoria", "x")
+    categoria_id = db_social.crea_categoria(conn, "Categoria giusta", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": altra_categoria_id})
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+
+    db_social.annulla_job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+    assert db_social.job_in_corso(conn, "genera_base_fissa", altra_categoria_id)
+    assert not db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+
+def test_annulla_generazione_base_via_web(conn, client):
+    """Segnalato dall'utente dopo un riavvio dei container: un job
+    rimasto in 'running' col lock di un worker morto restava "in corso"
+    per sempre (fino al timeout di sicurezza di 15 minuti). Deve poter
+    essere sbloccato dalla UI."""
+    db_social.crea_utente(conn, "admin-cat19b@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat19b@test.local")
+    csrf = _csrf(client)
+    categoria_id = db_social.crea_categoria(conn, "Da sbloccare", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+    assert db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+    r = client.post(f"/social/categorie/{categoria_id}/annulla-generazione-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert not db_social.job_in_corso(conn, "genera_base_fissa", categoria_id)
+
+
+def test_annulla_generazione_base_inesistente_404(conn, client):
+    db_social.crea_utente(conn, "admin-cat19c@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat19c@test.local")
+    csrf = _csrf(client)
+
+    r = client.post("/social/categorie/non-esiste/annulla-generazione-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_annulla_generazione_base_richiede_admin(conn, client):
+    db_social.crea_utente(conn, "editor-cat5b@test.local",
+                          auth.hash_password("Password123!"), ruolo="editor")
+    categoria_id = db_social.crea_categoria(conn, "Protetta 3", "x")
+    _login(client, "editor-cat5b@test.local")
+    csrf = _csrf(client, "/social/contenuti/nuovo")
+
+    r = client.post(f"/social/categorie/{categoria_id}/annulla-generazione-base",
+                    data={"csrf": csrf}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_pagina_categorie_mostra_annulla_generazione_quando_in_corso(conn, client):
+    db_social.crea_utente(conn, "admin-cat19d@test.local",
+                          auth.hash_password("Password123!"), ruolo="admin")
+    _login(client, "admin-cat19d@test.local")
+    categoria_id = db_social.crea_categoria(conn, "In generazione", "x")
+    db_social.crea_job(conn, "genera_base_fissa", {"categoria_id": categoria_id})
+
+    pagina = client.get("/social/categorie").text
+
+    assert f'/social/categorie/{categoria_id}/annulla-generazione-base' in pagina
+    assert f'/social/categorie/{categoria_id}/genera-base' not in pagina
+
+
 def test_anteprima_base_fissa_senza_immagine_404(conn, client):
     db_social.crea_utente(conn, "admin-cat17@test.local",
                           auth.hash_password("Password123!"), ruolo="admin")

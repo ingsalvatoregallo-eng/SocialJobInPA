@@ -1620,6 +1620,23 @@ def genera_base_categoria(request: Request, categoria_id: str, csrf: str = Form(
     return RedirectResponse("/social/categorie", status_code=303)
 
 
+@router.post("/categorie/{categoria_id}/annulla-generazione-base")
+def annulla_generazione_base(request: Request, categoria_id: str, csrf: str = Form(None),
+                             sessione=Depends(utente_web), conn=Depends(ottieni_conn)):
+    """Sblocca dalla UI un job "genera_base_fissa" rimasto bloccato in
+    'running' con il lock di un worker morto (es. container ucciso da un
+    riavvio Docker, segnalato dall'utente): senza questo, restava
+    "Generazione in corso..." fino al timeout di sicurezza di 15 minuti,
+    senza che l'utente potesse far nulla se non aspettare. La base gia'
+    generata (categoria.base_fissa_path) non viene toccata."""
+    _richiedi(conn, sessione, "social.admin")
+    _verifica_csrf(sessione, csrf)
+    if db_social.get_categoria(conn, categoria_id) is None:
+        raise HTTPException(status_code=404)
+    db_social.annulla_job_in_corso(conn, "genera_base_fissa", categoria_id)
+    return RedirectResponse("/social/categorie", status_code=303)
+
+
 @router.get("/categorie/{categoria_id}/base-fissa")
 def anteprima_base_fissa(categoria_id: str, sessione=Depends(utente_web),
                          conn=Depends(ottieni_conn)):
