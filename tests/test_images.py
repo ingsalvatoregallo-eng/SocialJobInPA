@@ -457,6 +457,80 @@ def test_genera_sync_su_base_ridimensiona_a_copertura_senza_deformare(tmp_path):
         assert img.size == (1080, 1080)
 
 
+def test_genera_sync_su_base_restringe_titolo_e_sottotitolo_alla_meta_sinistra(tmp_path, monkeypatch):
+    """Segnalato dall'utente con uno screenshot: titolo/sottotitolo a
+    piena larghezza (comportamento di genera_sync, corretto quando lo
+    sfondo e' generico) finivano sopra l'illustrazione della base, che
+    tipicamente occupa la meta' destra/centrale (vedi _prompt_base_
+    fissa). Su una base fissa vanno ristretti alla meta' sinistra."""
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    larghezze_catturate = []
+    originale = images._adatta_testo_multilinea
+
+    def _spia(draw, testo, **kwargs):
+        larghezze_catturate.append(kwargs["larghezza_max"])
+        return originale(draw, testo, **kwargs)
+
+    monkeypatch.setattr(images, "_adatta_testo_multilinea", _spia)
+    provider.genera_sync_su_base(images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed", titolo="Titolo",
+        sottotitolo="Sottotitolo", dati_chiave=["Un dato"]), base)
+
+    margine = int(1080 * images.MARGINE_SICURO)
+    interno_standard = 1080 - 2 * margine
+    # prime due chiamate: titolo e sottotitolo (nessun dato va a capo su
+    # piu' righe qui, quindi non ne servono altre prima della card)
+    assert larghezze_catturate[0] == int(interno_standard * 0.55)
+    assert larghezze_catturate[1] == int(interno_standard * 0.55)
+    assert larghezze_catturate[0] < interno_standard
+
+
+def test_genera_sync_non_restringe_titolo_e_sottotitolo(tmp_path, monkeypatch):
+    """Comportamento invariato per il layout standard (nessuna base
+    fissa): titolo/sottotitolo restano a piena larghezza come sempre."""
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    larghezze_catturate = []
+    originale = images._adatta_testo_multilinea
+
+    def _spia(draw, testo, **kwargs):
+        larghezze_catturate.append(kwargs["larghezza_max"])
+        return originale(draw, testo, **kwargs)
+
+    monkeypatch.setattr(images, "_adatta_testo_multilinea", _spia)
+    provider.genera_sync(images.ImageGenerationRequest(
+        template="faq", formato="instagram_feed", titolo="Titolo",
+        sottotitolo="Sottotitolo", dati_chiave=["Un dato"]))
+
+    margine = int(1080 * images.MARGINE_SICURO)
+    interno_standard = 1080 - 2 * margine
+    assert larghezze_catturate[0] == interno_standard
+
+
+def test_genera_sync_su_base_spinge_la_card_dati_piu_in_basso(tmp_path, monkeypatch):
+    """Segnalato dall'utente: la card dati partiva subito dopo il
+    sottotitolo, troppo in alto, sovrapponendosi alle icone della base —
+    va spinta piu' in basso anche se il testo sopra e' breve."""
+    base = tmp_path / "base.png"
+    Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")
+    provider = images.TemplateImageProvider(output_dir=tmp_path)
+    box_catturato = {}
+    originale = images._disegna_ombra
+
+    def _spia(immagine, box, radius, scala):
+        box_catturato["box"] = box
+        return originale(immagine, box, radius, scala)
+
+    monkeypatch.setattr(images, "_disegna_ombra", _spia)
+    provider.genera_sync_su_base(images.ImageGenerationRequest(
+        template="nuovo_concorso", formato="instagram_feed", titolo="Breve",
+        dati_chiave=["Un dato"]), base)
+
+    altezza = images.FORMATI["instagram_feed"][1]
+    assert box_catturato["box"][1] >= int(altezza * 0.56)
+
+
 def test_base_fissa_image_provider_delega_al_compositor(tmp_path):
     base = tmp_path / "base.png"
     Image.new("RGB", (1024, 1536), "#0B3D91").save(base, "PNG")

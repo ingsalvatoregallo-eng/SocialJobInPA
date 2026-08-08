@@ -349,8 +349,17 @@ class TemplateImageProvider:
         spazio_prima_cta = int(24 * scala)
         y_limite = altezza - margine_sotto_cta - altezza_cta - spazio_prima_cta
 
-        immagine = self._disegna_contenuto(request, immagine, larghezza, altezza, palette,
-                                           margine, interno, scala, y_limite)
+        # Su una base fissa l'illustrazione occupa tipicamente la meta'
+        # destra/centrale dell'immagine (vedi _prompt_base_fissa): titolo/
+        # sottotitolo a piena larghezza (comportamento di genera_sync) ci
+        # finivano sopra, e la card dati partiva troppo in alto
+        # sovrapponendosi alle icone della base (segnalato dall'utente
+        # con uno screenshot). Restringere il testo alla meta' sinistra e
+        # spingere la card piu' in basso lascia libero il centro/destra
+        # per l'illustrazione.
+        immagine = self._disegna_contenuto(
+            request, immagine, larghezza, altezza, palette, margine, interno, scala, y_limite,
+            larghezza_testo=int(interno * 0.55), y_minimo_dati=int(altezza * 0.56))
         immagine = self._disegna_cta(request, immagine, larghezza, altezza, palette,
                                      margine, scala, altezza_cta, margine_sotto_cta)
         return self._salva(immagine, request, prefisso=f"base_{request.template}")
@@ -369,8 +378,19 @@ class TemplateImageProvider:
         return immagine
 
     def _disegna_contenuto(self, request, immagine, larghezza, altezza, palette, margine,
-                           interno, scala, y_limite):
+                           interno, scala, y_limite, *, larghezza_testo=None, y_minimo_dati=None):
+        """larghezza_testo (default None = interno, comportamento invariato
+        per genera_sync): larghezza massima di titolo/sottotitolo — su una
+        base fissa spesso l'illustrazione occupa la meta' destra
+        dell'immagine (vedi _prompt_base_fissa), un titolo/sottotitolo a
+        piena larghezza ci finiva sopra (segnalato dall'utente con uno
+        screenshot). y_minimo_dati (default None = nessun minimo): se il
+        testo sopra la card finisce prima di questa quota, la card viene
+        comunque spinta piu' in basso invece di partire subito dopo —
+        stesso motivo, la card partiva troppo in alto e si sovrapponeva
+        alle icone della base."""
         draw = ImageDraw.Draw(immagine)
+        larghezza_testo = larghezza_testo or interno
 
         # Badge pillola col nome del template ("NUOVO CONCORSO", ecc.), in
         # alto a sinistra.
@@ -424,7 +444,7 @@ class TemplateImageProvider:
         # perche' indivisibili per _a_capo.
         font_titolo, righe_titolo, altezza_riga_titolo = _adatta_testo_multilinea(
             draw, request.titolo, dimensione_max=int(68 * scala), dimensione_min=int(38 * scala),
-            bold=True, larghezza_max=interno,
+            bold=True, larghezza_max=larghezza_testo,
             altezza_disponibile=min(int(82 * scala) * 4, y_limite - y))
         for riga in righe_titolo[:_numero_di_elementi_che_entrano(y, altezza_riga_titolo, y_limite)]:
             draw.text((margine, y), riga, font=font_titolo, fill=palette["testo"])
@@ -434,12 +454,15 @@ class TemplateImageProvider:
         if request.sottotitolo:
             font_sotto, righe_sotto, altezza_riga_sotto = _adatta_testo_multilinea(
                 draw, request.sottotitolo, dimensione_max=int(40 * scala), dimensione_min=int(26 * scala),
-                bold=False, larghezza_max=interno,
+                bold=False, larghezza_max=larghezza_testo,
                 altezza_disponibile=min(int(52 * scala) * 3, y_limite - y))
             for riga in righe_sotto[:_numero_di_elementi_che_entrano(y, altezza_riga_sotto, y_limite)]:
                 draw.text((margine, y), riga, font=font_sotto, fill=palette["testo_muto"])
                 y += altezza_riga_sotto
             y += int(28 * scala)
+
+        if y_minimo_dati is not None:
+            y = max(y, y_minimo_dati)
 
         # Dati chiave: un'unica card bianca con ombra morbida, righe con
         # pallino colorato — al posto dei riquadri singoli con bordo. Ogni
